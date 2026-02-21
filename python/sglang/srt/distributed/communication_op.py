@@ -6,14 +6,13 @@ import torch
 import torch.distributed
 
 from .parallel_state import get_tp_group
-from .sparse_tp_comm import (
-    ResShard,
-    all_gather_and_resolve_res_shard,
-    all_gather_res_shard,
-    is_sparse_tp_comm_enabled,
-    resolve_full_res,
-)
 
+from .sparse_tp_comm import (
+      ResShard,
+      all_gather_and_resolve_res_shard,
+      all_gather_res_shard,
+      is_sparse_tp_comm_enabled,
+  )
 
 def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
     """All-reduce the input tensor across model parallel group."""
@@ -42,17 +41,22 @@ def broadcast_tensor_dict(
     return get_tp_group().broadcast_tensor_dict(tensor_dict, src)
 
 
-def tensor_model_parallel_all_gather_res_shard(local_shard: ResShard):
-    return all_gather_res_shard(local_shard, tp_group=get_tp_group())
+def tensor_model_parallel_all_gather_res_shard(
+      local_shard: ResShard,
+      tp_group: Optional[GroupCoordinator] = None,
+  ):
+      return all_gather_res_shard(local_shard, tp_group=tp_group or get_tp_group())
 
 
-def tensor_model_parallel_resolve_full_res(shards, S: int, F: int):
-    return resolve_full_res(shards, S=S, F=F)
-
-
-def tensor_model_parallel_sparse_resolve_res(local_shard: ResShard, S: int, F: int):
-    return all_gather_and_resolve_res_shard(local_shard, S=S, F=F, tp_group=get_tp_group())
-
+def tensor_model_parallel_sparse_resolve_res(
+      local_shard: ResShard,
+      S: int,
+      F: int,
+      tp_group: Optional[GroupCoordinator] = None,
+  ):
+      return all_gather_and_resolve_res_shard(
+          local_shard, S=S, F=F, tp_group=tp_group or get_tp_group()
+      )
 
 def should_use_sparse_tp_comm() -> bool:
     return is_sparse_tp_comm_enabled()
