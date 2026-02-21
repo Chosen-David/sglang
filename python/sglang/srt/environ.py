@@ -391,6 +391,7 @@ class Envs:
     SGLANG_IS_FIRST_RANK_ON_NODE = EnvBool(True)
     SGLANG_SUPPORT_CUTLASS_BLOCK_FP8 = EnvBool(False)
     SGLANG_SYNC_TOKEN_IDS_ACROSS_TP = EnvBool(False)
+    SGLANG_ENABLE_SPARSE_TP_COMM = EnvBool(False)
     SGLANG_ENABLE_COLOCATED_BATCH_GEN = EnvBool(False)
 
     # Deterministic inference

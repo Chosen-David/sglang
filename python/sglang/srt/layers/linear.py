@@ -11,13 +11,16 @@ from torch import nn
 from torch.nn.parameter import Parameter, UninitializedParameter
 
 from sglang.srt.distributed import (
+    ResShard,
     divide,
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
     get_tp_group,
+    should_use_sparse_tp_comm,
     split_tensor_along_last_dim,
     tensor_model_parallel_all_gather,
     tensor_model_parallel_all_reduce,
+    tensor_model_parallel_sparse_resolve_res,
 )
 from sglang.srt.distributed.device_communicators.pynccl_allocator import (
     use_symmetric_memory,
@@ -443,15 +446,40 @@ class ColumnParallelLinear(LinearBase):
                 # Fallback for parameters that don't accept additional args
                 param.load_column_parallel_weight(loaded_weight)
 
-    def forward(self, input_):
+    def forward(self, input_, sparse_tp_meta: Optional[Dict[str, object]] = None):
         bias = self.bias if not self.skip_bias_add else None
 
         # Matrix multiply.
         assert self.quant_method is not None
         output_parallel = self.quant_method.apply(self, input_, bias)
         if self.gather_output:
-            # All-gather across the partitions.
-            output = tensor_model_parallel_all_gather(output_parallel)
+            # Optional sparse TP communication path for FFN-style partial outputs.
+            if should_use_sparse_tp_comm() and sparse_tp_meta is not None:
+                if output_parallel.dim() != 2:
+                    raise ValueError(
+                        "Sparse TP communication expects 2D output "
+                        f"[S_loc, F_loc], got shape={tuple(output_parallel.shape)}"
+                    )
+                if "S" not in sparse_tp_meta or "F" not in sparse_tp_meta:
+                    raise ValueError("sparse_tp_meta must include integer keys 'S' and 'F'")
+                if "C_k" not in sparse_tp_meta or "Z_i" not in sparse_tp_meta:
+                    raise ValueError("sparse_tp_meta must include keys 'C_k' and 'Z_i'")
+
+                res_shard = ResShard(
+                    k=int(sparse_tp_meta.get("k", 0)),
+                    i=self.tp_rank,
+                    C_k=sparse_tp_meta["C_k"],
+                    Res_vals=output_parallel,
+                    Z_i=sparse_tp_meta["Z_i"],
+                )
+                output = tensor_model_parallel_sparse_resolve_res(
+                    res_shard,
+                    S=int(sparse_tp_meta["S"]),
+                    F=int(sparse_tp_meta["F"]),
+                )
+            else:
+                # All-gather across the partitions.
+                output = tensor_model_parallel_all_gather(output_parallel)
         else:
             output = output_parallel
         output_bias = self.bias if self.skip_bias_add else None
