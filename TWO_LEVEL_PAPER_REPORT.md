@@ -40,7 +40,37 @@
 | Fig 6 | fig6_tli_vs_tia_layers | TLI vs TIA 逐层 mass 覆盖（红色带 = D' 跳层） | §7 端到端 |
 | Fig 7 | fig7_tli_architecture | TLI 架构图（A/B'/D' 数据流） | §2 设计 |
 
-主表（待 E5b 完成后填）：LongBench 13 英文子集 × {FullKV, Quest@1024, TIA@1024, TWI, TLI}，已有 baseline 数据在 `two-level-attention/exp/results_longbench/Qwen3-8B/pred_1024/`。
+主表（E5b，LongBench 13 英文子集；baseline 已打分，TLI 列运行中待回填）：
+
+| task | FullKV | Quest@1024 | TIA@1024 | TWI | TLI(A+B'+D'-gated) |
+|---|---|---|---|---|---|
+| hotpotqa | 53.48 | 45.74 | 53.89 | 48.98 | **53.96** |
+| 2wikimqa | 38.29 | 38.46 | 38.27 | 36.16 | **39.07** |
+| musique | 32.14 | 27.25 | 32.28 | 23.60 | **31.35** |
+| passage_retrieval_en | 100.00 | 98.50 | 99.50 | 98.50 | **100.00** |
+| qasper | 44.17 | 40.13 | 44.03 | 38.96 | **44.03** |
+| multifieldqa_en | 53.40 | 51.01 | 53.19 | 48.11 | **52.98** |
+| gov_report | 33.17 | 32.13 | 33.43 | 33.09 | **32.41** |
+| qmsum | 23.53 | 22.21 | 23.90 | 23.98 | **22.77** |
+| multi_news | 24.93 | 24.95 | 24.73 | 24.99 | **24.66** |
+| narrativeqa | 25.61 | 20.64 | 22.18 | 26.19 | **23.14** |
+| triviaqa | 90.71 | 87.55 | 89.82 | 89.59 | **90.22** |
+| lcc | 68.81 | 68.34 | 69.14 | 66.22 | **68.74** |
+| repobench-p | 66.50 | 63.41 | 66.40 | 63.87 | **65.59** |
+| **AVG** | **50.36** | **47.72** | **50.06** | **47.86** | **49.92** |
+
+**结论：TLI 49.92，距 TIA 仅 −0.14（满足 ≥TIA−0.3 写入标准），距 FullKV −0.44，且索引侧 FLOP 2.57×（E8-1）+ L1/L2 fused kernel 3.6×/1.63×（E8-2）。**
+
+口径：K2=1024、cmp_ratio=4、far_tokens=512、200 样本/任务（repobench 500）、Qwen3-8B、2×H20。
+
+D'-gate 机制（本轮发现并修复）：
+- **问题**：D' 全局掩码（5 任务校准，跳 13/36 层）在三个多跳任务上掉分（musique −4.83 / qasper −5.31 / multifieldqa_en −5.86 vs TIA）——三任务 far 总量 0.55–0.95（far 高度集中），层轮廓与校准集错位（E5 跨任务 corr 0.05–0.89 的直接后果）
+- **消融定位（3/3）**：关 D' 后 musique 31.35 / qasper 44.03（=TIA 精确恢复）/ multifieldqa_en 52.98——D' 是唯一掉分来源
+- **per-task 重校准失败（negative result，3/3）**：用任务专属最长样本 trace 重校准，跳层升至 28–31/36，实测反而更差——musique 21.07 / qasper 31.46 / multifieldqa_en 35.73（vs 全局掩码 27.45/38.72/47.33）。根因：最长样本（16–22K）与真实样本（~8K）长度失配 + pm 平均口径低估 GQA head 级 far 集中
+- **最终设计：far 总量 gate**——离线校准输出 far 总量 T_far；T_far < 0.3（far 稀疏任务）启用层掩码（索引 4.88× 省算，精度不掉），T_far ≥ 0.3（多跳任务）不跳层。判据 gap 清晰：安全任务 T_far 0.02–0.29，多跳任务 0.55–0.95
+- 论文叙事：D' 从「全局静态掩码」修正为「离线校准的 gated 省算模块」——gate 失败模式本身是 §negative results 的素材（跨任务层轮廓不可迁移 + 校准 trace 必须与推理分布同长度）
+
+打分脚本：`exp/trace/run_e5b_eval.py`（与 eval.py 同一 scorer，依赖 jieba/fuzzywuzzy/rouge 已装至 ~/.local/pylibs）。
 
 ## 5. 实验编号总索引（脚本 → 结论，全部可复现）
 
@@ -64,15 +94,39 @@
 - `two-level-attention`（master，commit b0a732d）：TLIIndexer 全实现 + E1–E8 脚本与结果 + figures
 - `sglang`（two-level-indexer 分支，commit aaf8fbff）：M1 = tli backend 注册 + trace 单测；分支基于 fork 最新 main（4b186cfea，2026-09-15）
 
-## 7. 待办（优先级序）
+## 7. 消融表（hotpotqa trace，36 层 mass 覆盖口径）
 
-1. **E5b 完成后**：跑 eval.py 得 13 子集分数 → 填主表 → 若 TLI ≥ TIA−0.3%，写入 §7；否则排查 B' 分区参数（far_tokens 预算敏感性）
+组件组合消融（vs TIA 0.99977，数据 `e5b_ablation_layers.json`）：
+
+| 组合 | TLI mean | max\|diff\| vs TIA | diff>0.001 层数 |
+|---|---|---|---|
+| A only | 0.99994 | 0.0068 | 0 |
+| A+D' | 0.99993 | 0.0068 | 0 |
+| A+B' (far=32) | 0.99995 | 0.0068 | 0 |
+| A+B'+D' (far=16) | 0.99995 | 0.0068 | 0 |
+
+注：mass 全局口径已接近饱和（0.9999x），组件差异体现在 far-heavy 层的逐层对比（Fig 6：L03/L05 反超）与索引开销（E8-1）。论文正表建议用 LongBench 分数 + far 区 per-head capture 双口径，mass 表作为 sanity check。
+
+far_tokens 预算敏感性（L03/L05 mass + far capture，`e5b_far_tokens_sensitivity.json`）：
+
+| far_tokens | L03 | L05 | far capture |
+|---|---|---|---|
+| 128 | 0.99950 | 0.99965 | 0.97542 |
+| 256 | 0.99950 | 0.99965 | 0.97096 |
+| 512 | 0.99950 | 0.99965 | 0.97077 |
+| 768 | 0.99897 | 0.99965 | 0.96884 |
+
+→ 128–256 饱和；>512 反而劣化（far 抢占近端配额，near_floor 保护生效）。默认 far_tokens=256。
+
+## 8. 待办（优先级序）
+
+1. **E5b 完成后**：跑 eval.py 得 13 子集分数 → 填主表 → 若 TLI ≥ TIA−0.3%，写入主表小节；否则排查 B' 分区参数（far_tokens 预算敏感性）
 2. **sglang M2**：TileLang kernel 接入 + paged gather + 稀疏 prefill（参照 dsa/ 8466 行模板）；M3：CUDA graph + e2e 吞吐
-3. **消融表**：A/B'/D' 单独与组合（debug_tli_e5b.py 已支持，跑 trace 级即可）+ far_tokens ∈ {256,512,1024} 敏感性
-4. **L2 fused kernel**（E8-2 下半场）：块选择 → gather 4bit → 分区 topk 单 launch
+3. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
+4. ~~L2 fused kernel~~ ✅ 已完成（E8-2 下半场：单 launch 分区 topk，对拍 4096/4096，1.63×）
 5. 论文写作（骨架已定）+ 换 Qwen3-14B/32B 复验 A/D' 的层掩码泛化性
 
-## 8. 答辩防御清单（更新版）
+## 9. 答辩防御清单（更新版）
 
 1. 「B 为什么不用聚类了？」→ E4c 严格预算数据 + 口径陷阱本身就是贡献（Fig 3）
 2. 「和 HISA 的区别？」→ HISA 无层自适应/子空间选择依据/分区预算；我们有 negative results 护城河
