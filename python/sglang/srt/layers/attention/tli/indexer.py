@@ -173,11 +173,14 @@ class TLIIndexer:
         q: torch.Tensor,
         t: int,
         tail_k: torch.Tensor | None = None,
+        use_l1_kernel: bool = False,
     ) -> torch.Tensor:
         """index: build_block_index 产物；q: [1, H, D]；t: 当前 query 位置。
 
         返回 [Hkv, K2] 的 token 位置。
         tail_k: [S, Hkv, D]（D' 跳过远端时用于近端/滑窗精筛；None 则用 index）
+        use_l1_kernel: True 时 L1 用 Triton fused kernel（E8-2 实测
+        3.6×/1.6×；并列截断多选的块由 L2 4bit 精筛自然淘汰，质量不降）
         """
         p = self.profile
         S = index["S"]
@@ -188,45 +191,61 @@ class TLIIndexer:
         kmin, kmax = index["kmin"], index["kmax"]
         nblk = index["nblk"]
         K1 = min(p.k1_blocks, nblk)
-
-        # ---- L1: 子空间块上界（创新点 A：只算 d' 维）----
-        qs = q[..., self.idx1]  # [1, H, d']
-        qg = qs.clamp(min=0).reshape(1, Hkv, G, p.coarse_dim)
-        qn = qs.clamp(max=0).reshape(1, Hkv, G, p.coarse_dim)
-        sc1 = (
-            torch.einsum("bhgd,nhd->bhgn", qg, kmax)
-            + torch.einsum("bhgd,nhd->bhgn", qn, kmin)
-        ).sum(-2)  # [1, Hkv, nblk]
-        blk_end = (torch.arange(nblk, device=device) + 1) * p.block_size - 1
-        sc1 = sc1.masked_fill(blk_end.view(1, 1, -1) > t, float("-inf"))
-
-        # D'：跳过远端的层——只保留 sink(块0) + 近端窗块
-        if self.skip_far:
-            near_blks = max(1, (t + 1 - 2048) // p.block_size)
-            keep = torch.zeros(nblk, dtype=torch.bool, device=device)
-            keep[: min(2, nblk)] = True
-            keep[max(0, near_blks) :] = True
-            sc1 = sc1.masked_fill(~keep.view(1, 1, -1), float("-inf"))
-            # D' 真正兑现省算：topk 截断到有效块数（否则 -inf 块填满 K1 白算）
-            K1 = min(K1, max(1, int(keep.sum().item())))
-
-        cand_blk = torch.topk(sc1, K1, dim=-1).indices[0]  # [Hkv, K1]（不含滑窗）
-        # TIA 语义：滑窗块强制入选
-        sw_blks = p.sliding_blocks
         last_blk = t // p.block_size
+        sw_blks = p.sliding_blocks
         force_blks = torch.arange(
             max(0, last_blk - sw_blks + 1), last_blk + 1, device=device
         )
-        cand_blk = torch.cat(
-            [cand_blk, force_blks.unsqueeze(0).expand(Hkv, -1)], dim=1
-        )  # 重复无碍（mask 化）
+
+        if use_l1_kernel:
+            # ---- L1 fused kernel 路径（kernels.tli_l1_topk）----
+            from sglang.srt.layers.attention.tli.kernels import tli_l1_topk
+
+            if self.skip_far:
+                near_blks = max(1, (t + 1 - 2048) // p.block_size)
+                far_lo_blk, far_hi_blk = 2, max(2, near_blks)
+            else:
+                far_lo_blk = far_hi_blk = 0
+            q_sub = q[..., self.idx1].reshape(H, -1).contiguous()  # [H, d']
+            mask = tli_l1_topk(
+                q_sub, kmin, kmax, K1,
+                far_lo_blk, far_hi_blk, last_blk,
+            )
+            blk_onehot = mask[:, :nblk].bool()
+            blk_onehot[:, force_blks] = True  # 滑窗块强制
+        else:
+            # ---- L1: 子空间块上界（创新点 A：只算 d' 维）----
+            qs = q[..., self.idx1]  # [1, H, d']
+            qg = qs.clamp(min=0).reshape(1, Hkv, G, p.coarse_dim)
+            qn = qs.clamp(max=0).reshape(1, Hkv, G, p.coarse_dim)
+            sc1 = (
+                torch.einsum("bhgd,nhd->bhgn", qg, kmax)
+                + torch.einsum("bhgd,nhd->bhgn", qn, kmin)
+            ).sum(-2)  # [1, Hkv, nblk]
+            blk_end = (torch.arange(nblk, device=device) + 1) * p.block_size - 1
+            sc1 = sc1.masked_fill(blk_end.view(1, 1, -1) > t, float("-inf"))
+
+            # D'：跳过远端的层——只保留 sink(块0) + 近端窗块
+            if self.skip_far:
+                near_blks = max(1, (t + 1 - 2048) // p.block_size)
+                keep = torch.zeros(nblk, dtype=torch.bool, device=device)
+                keep[: min(2, nblk)] = True
+                keep[max(0, near_blks) :] = True
+                sc1 = sc1.masked_fill(~keep.view(1, 1, -1), float("-inf"))
+                # D' 真正兑现省算：topk 截断到有效块数（否则 -inf 块填满 K1 白算）
+                K1 = min(K1, max(1, int(keep.sum().item())))
+
+            cand_blk = torch.topk(sc1, K1, dim=-1).indices[0]  # [Hkv, K1]（不含滑窗）
+            cand_blk = torch.cat(
+                [cand_blk, force_blks.unsqueeze(0).expand(Hkv, -1)], dim=1
+            )  # 重复无碍（mask 化）
+            blk_onehot = torch.zeros(Hkv, nblk, dtype=torch.bool, device=device)
+            blk_onehot.scatter_(1, cand_blk, True)
 
         # ---- L2: 4bit 部分维 token 精筛 ----
         nd2 = 2 * p.delta
         kq = index["kq"]  # [S, Hkv, nd2]
         q2 = q[..., self.idx2].reshape(1, Hkv, G, nd2).sum(2)  # [1, Hkv, nd2]
-        blk_onehot = torch.zeros(Hkv, nblk, dtype=torch.bool, device=device)
-        blk_onehot.scatter_(1, cand_blk, True)
         sel_mask = blk_onehot.any(0).repeat_interleave(p.block_size)[:S]
         cand_pos = torch.nonzero(sel_mask).squeeze(1)
         kq_h = kq[cand_pos]  # [Tc, Hkv, nd2]

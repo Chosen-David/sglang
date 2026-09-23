@@ -127,7 +127,10 @@ class TLISparseAttnBackend(AttentionBackend):
                 # 增量：只取新 token（O(n)，E5b gov_report 186min 根因修复）
                 k_new = k_buf[req_to_token[req, idx["S"] : seq_len]].float()
                 indexer.update_block_index(idx, k_new)
-            sel = indexer.select(self.block_indices[key], q[i : i + 1].float(), t)  # [Hkv,K2]
+            sel = indexer.select(
+                self.block_indices[key], q[i : i + 1].float(), t,
+                use_l1_kernel=self.profile.use_l1_kernel,
+            )  # [Hkv,K2]
             out[i] = self._sparse_attn(q[i].float(), sel, locs, pool, layer_id, Hkv, G)
         return out.view(1, bs, H, self.head_dim)
 

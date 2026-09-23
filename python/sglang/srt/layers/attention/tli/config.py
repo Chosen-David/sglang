@@ -55,6 +55,9 @@ class TLIProfile:
         self.far_clusters: int = _env_int("SGLANG_TLI_FAR_CLUSTERS", 256)
         # ---- 创新点 D'：层自适应跳过（离线校准掩码文件路径）----
         self.layer_skip_path: str | None = os.environ.get("SGLANG_TLI_LAYER_SKIP")
+        # ---- kernel 化（E8-2：fused L1 单 launch，跳层 3.6×/非跳层 1.6×；
+        # 并列截断多选块由 L2 精筛淘汰，trace 对拍 cov 一致）----
+        self.use_l1_kernel: bool = _env_bool("SGLANG_TLI_L1_KERNEL", False)
         # 短序列退 dense
         self.dense_threshold: int = _env_int("SGLANG_TLI_DENSE_THRESHOLD", 2048)
 
