@@ -1,8 +1,8 @@
 """TLI (Two-Level Indexer) profile parsing.
 
-继承 TIA（本组第一代）语义并叠加 proposal 三个实测 Go 的创新点：
+继承 TIA（本组第一代）语义并叠加三个实测支撑的创新点：
   A: position-stable subspace 粗筛（Qwen3 rotate_half 低频尾维, d'=32）
-  B: 远端 kmeans 聚类代表（可选, 默认走 TIA 的块 min/max 上界）
+  B': far/near 分区 L2 预算（E4c 修正：聚类代表降级为消融，far 区走 4bit 精筛）
   D': 层自适应级联跳过（离线校准的静态层掩码）
 
 配置来源：server_args 上的 tli_* 字段（prototype 阶段由环境变量
@@ -42,7 +42,15 @@ class TLIProfile:
         self.token_budget: int = _env_int("SGLANG_TLI_TOKEN_BUDGET", 1024)  # K2
         self.sliding_window: int = _env_int("SGLANG_TLI_SLIDING_WINDOW", 128)
         self.sliding_blocks: int = _env_int("SGLANG_TLI_SLIDING_BLOCKS", 3)
-        # ---- 创新点 B：远端 kmeans 聚类代表 ----
+        # ---- 创新点 B'：far/near 分区 L2 预算（E4c 修正后的语义）----
+        # E4c 严格预算实测：聚类代表（km_blk 0.09–0.39 / km_tok 0.45–0.79）
+        # 无一致优势，far 区保留 4bit token 级精筛（≈ oracle）；B' 的贡献是
+        # far 池独立预算防挤出（far-heavy 层 TLI 反超 TIA）
+        self.far_tokens: int = _env_int("SGLANG_TLI_FAR_TOKENS", 256)  # K2_far（128 即饱和）
+        self.far_select: str = os.environ.get("SGLANG_TLI_FAR_SELECT", "4bit")  # 4bit | cluster（消融）
+        self.near_len: int = _env_int("SGLANG_TLI_NEAR_LEN", 2048)
+        self.sink_blocks: int = _env_int("SGLANG_TLI_SINK_BLOCKS", 2)
+        # ---- 聚类代表（已降级为消融，仅 far_select=cluster 时构建）----
         self.far_kmeans: bool = _env_bool("SGLANG_TLI_FAR_KMEANS", False)
         self.far_clusters: int = _env_int("SGLANG_TLI_FAR_CLUSTERS", 256)
         # ---- 创新点 D'：层自适应跳过（离线校准掩码文件路径）----

@@ -165,6 +165,8 @@ class TLIIndexer:
             keep[: min(2, nblk)] = True
             keep[max(0, near_blks) :] = True
             sc1 = sc1.masked_fill(~keep.view(1, 1, -1), float("-inf"))
+            # D' 真正兑现省算：topk 截断到有效块数（否则 -inf 块填满 K1 白算）
+            K1 = min(K1, max(1, int(keep.sum().item())))
 
         cand_blk = torch.topk(sc1, K1, dim=-1).indices[0]  # [Hkv, K1]（不含滑窗）
         # TIA 语义：滑窗块强制入选
@@ -195,6 +197,23 @@ class TLIIndexer:
         # TIA 语义：最后 sliding_window token 强制入选
         forced = torch.arange(max(0, t - p.sliding_window + 1), t + 1, device=device)
         fine[:, forced] = float("inf")
+        # ---- B'：far/near 分区 top-K2（独立预算，防远端被近端高分挤出）----
+        # far 捕获 128 tok 即饱和（e5b_far_tokens_sensitivity），且近端至少
+        # 保留滑窗 + sink（far_tokens ≥ K2 时近端预算归零的边界已保护）
+        if not self.skip_far:
+            far_tok_lo = p.sink_blocks * p.block_size
+            far_tok_hi = max(far_tok_lo, t + 1 - p.near_len)
+            near_floor = p.sliding_window + far_tok_lo
+            far_cap = max(0, p.token_budget - near_floor)
+            if far_tok_hi > far_tok_lo:
+                k2_far = min(p.far_tokens, far_tok_hi - far_tok_lo, far_cap)
+                far_f = fine[:, far_tok_lo:far_tok_hi]
+                i_f = torch.topk(far_f, k2_far, dim=-1).indices + far_tok_lo
+                near_f = fine.clone()
+                near_f[:, far_tok_lo:far_tok_hi] = float("-inf")
+                k2_near = max(0, p.token_budget - k2_far)
+                i_n = torch.topk(near_f, min(k2_near, S), dim=-1).indices
+                return torch.cat([i_f, i_n], dim=-1)  # [Hkv, K2]（far + near 拼接）
         return torch.topk(fine, p.token_budget, dim=-1).indices  # [Hkv, K2]
 
     @torch.no_grad()
