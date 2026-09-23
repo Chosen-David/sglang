@@ -274,7 +274,12 @@ E5b 端到端实现中发现 E4b 的 budget 语义有 bug：整簇贪心展开�
 - 跳层场景（far 全剔除）：**3.60×** vs eager PyTorch（0.034 vs 0.123 ms）
 - 非跳层场景：**1.64×**（0.075 ms）
 - 正确性：跳层场景块 id 34/34 完全一致；非跳层分数和差 0.36%（阈值二分的并列截断，真 fused 版用 warp 级 bitonic 精确截断）
-- L2 级联（块选择→gather 4bit→分区 topk 单 launch）为 M2 kernel 的设计输入
+
+**E8-2 下半场：L2 级联 fused kernel**（`e8_2_l2_cascade.py`，同规模合成数据）：
+单 launch/head：候选 token（选中块展开 ~8384 个）的 4bit 精筛分数全驻寄存器 → far/near 两池各做阈值二分 topk → scatter 写 token mask。
+- 正确性：与 eager 分区语义对拍 **4096/4096**（仅 5 个阈值并列多选，交 L2 后不影响语义）
+- 延迟：eager 1.897 ms → triton 1.165 ms = **1.63×**
+- 完整两级 = L1 kernel + 小 compaction（2048 元素）+ L2 kernel，共 2 launches（vs eager ~15 kernels）
 
 ---
 
