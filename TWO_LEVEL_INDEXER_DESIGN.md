@@ -379,20 +379,20 @@ self.layer_far_skip: torch.BoolTensor [n_layers]   # True = 该层跳过远端�
 
 ## 5. sglang 集成设计（新分支 `two-level-indexer`，**M1 已落地 2026-09-23**）
 
-### 5.0 当前进度（M1 = 算法移植 + backend 注册 + trace 单测）
+### 5.0 当前进度（M2 前半已落地 2026-09-23 晚）
 
-已落地（sglang 分支 `two-level-indexer`）：
-- `python/sglang/srt/layers/attention/tli/config.py`——TLIProfile（环境变量 `SGLANG_TLI_*` 覆盖，默认值=实测 Go 配置：d'=32 / K1=128 / delta=16 / K2=1024 / 滑窗 128）；
-- `python/sglang/srt/layers/attention/tli/indexer.py`——TLIIndexer：`build_block_index`（块 min/max + 4bit + 可选 kmeans prefill 聚类）/ `select`（两级选择，与 `analyze_e3b.two_level_pipeline` 同口径）/ `select_far_kmeans`（创新点 B）/ `skip_far`（创新点 D'）；
-- `python/sglang/srt/layers/attention/tli/backend.py`——TLISparseAttnBackend(AttentionBackend)，注册名 **`tli`**（attention_registry.py + arg_groups/choices.py 已加）；
-- 单测 `two-level-attention/exp/trace/test_tli_indexer.py`：**needle32k 真实 trace 上 mass coverage = 1.0000**（对齐 e3b），D' 置位后 far 候选从数百降到 44 —— **算法移植正确性闭环**。
+已落地（sglang 分支 `two-level-indexer`，基于 fork 最新 main 4b186cfea）：
+- **M1**：`tli/{config,indexer,backend}.py` + 注册名 **`tli`**（attention_registry.py + choices.py）；needle32k 真实 trace mass coverage 1.0000，算法移植正确性闭环。
+- **M2 前半（2026-09-23 晚）**：
+  - `indexer.select` 同步 E4c 修正算法：**B' far/near 分区 top-K2**（far_tokens=256，near_floor 保护防 far 预算吃光近端）+ **D' topk 截断到有效块数**；
+  - `tli/kernels.py`——**Triton fused L1 kernel**（`tli_l1_topk`：单 launch 子空间区间算术 + D' 剔除 + 当前块强制 + in-kernel 阈值二分 top-K1），E8-2 原型生产化；
+  - 单测 `tli/test_tli_m2.py`（真实 trace hotpotqa L03）：B' 分区 mass **0.99952**（与 two-level-attention 侧 0.9995 一致）；fused kernel 与 eager 块选择 **127/129 一致**（并列截断差异）。
 
-prototype 边界（M2/M3 待做，已在 backend.py 头部注释声明）：
-- decode 是 gather-全量-K + torch 稀疏前向（correctness-first，性能不达标）；M2 = 接导师 TileLang 两级 kernel（`tls_attn/ops/`）替换 select + 稀疏前向；
+prototype 边界（M2 后半 / M3 待做，backend.py 头部已声明）：
+- decode 是 gather-全量-K + torch 稀疏前向（correctness-first）；M2 后半 = L2 级联 kernel（块选择→gather 4bit→分区 topk 单 launch）+ 接导师 TileLang 两级 kernel（`tls_attn/ops/`）+ paged gather（page table）；
 - prefill 退 dense；M2 = QSA 式行分块稀疏 prefill；
-- CUDA graph / MTP / speculative 未支持（参照 qwen_sparse_attn_backend.py 的 graph_metadata 逐项补）；
-- page_size=1 假设（paged gather 走 k_buffer[req:req+S]），M2 需按 page table gather；
-- 模型侧无需改动（qwen3.py 不感知 backend，全局 `--attention-backend tli` 即生效）。
+- CUDA graph / MTP / speculative 未支持（参照 qwen_sparse_attn_backend.py 补）；
+- 模型侧无需改动（全局 `--attention-backend tli` 即生效）。
 
 ### 5.1 为什么照抄 qsa/ 的结构
 
