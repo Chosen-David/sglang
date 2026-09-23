@@ -92,7 +92,7 @@ D'-gate 机制（本轮发现并修复）：
 ## 6. 代码资产与提交
 
 - `two-level-attention`（master，commit b0a732d）：TLIIndexer 全实现 + E1–E8 脚本与结果 + figures
-- `sglang`（two-level-indexer 分支，commit aaf8fbff）：M1 = tli backend 注册 + trace 单测；分支基于 fork 最新 main（4b186cfea，2026-09-15）
+- `sglang`（two-level-indexer 分支，commit e282de8）：M1 = tli backend 注册 + trace 单测；M2 前半 = B'/D' 算法同步 + Triton fused L1；**M2 后半 = paged 寻址（req_to_token 间接）+ O(n) 精确增量索引 + 稀疏 prefill（select_batched 批量两级选择）**——test_tli_m2b.py 全链路对拍：增量==全量重建逐位一致（gov_report 186min 根因的修复验证）、prefill mass cov 0.9896（行级）、decode 末位 0.99952、短序列 dense 精确一致；分支基于 fork 最新 main（4b186cfea，2026-09-15）
 
 ## 7. 消融表（hotpotqa trace，36 层 mass 覆盖口径）
 
@@ -120,8 +120,8 @@ far_tokens 预算敏感性（L03/L05 mass + far capture，`e5b_far_tokens_sensit
 
 ## 8. 待办（优先级序）
 
-1. **E5b 完成后**：跑 eval.py 得 13 子集分数 → 填主表 → 若 TLI ≥ TIA−0.3%，写入主表小节；否则排查 B' 分区参数（far_tokens 预算敏感性）
-2. **sglang M2**：TileLang kernel 接入 + paged gather + 稀疏 prefill（参照 dsa/ 8466 行模板）；M3：CUDA graph + e2e 吞吐
+1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
+2. ~~sglang M2~~ ✅ 前半（算法同步+fused L1）+ 后半（paged 寻址 + O(n) 增量索引 + 稀疏 prefill，全链路对拍）；剩余 TileLang kernel 接入；M3：CUDA graph + e2e 吞吐
 3. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
 4. ~~L2 fused kernel~~ ✅ 已完成（E8-2 下半场：单 launch 分区 topk，对拍 4096/4096，1.63×）
 5. 论文写作（骨架已定）+ 换 Qwen3-14B/32B 复验 A/D' 的层掩码泛化性
