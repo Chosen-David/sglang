@@ -152,6 +152,13 @@ def create_qsa_backend(runner):
     return QwenSparseAttnBackend(runner)
 
 
+@register_attention_backend("tli")
+def create_tli_backend(runner):
+    from sglang.srt.layers.attention.tli.backend import TLISparseAttnBackend
+
+    return TLISparseAttnBackend(runner)
+
+
 @register_attention_backend("nsa")
 def _create_nsa_compat(runner):
     warnings.warn(
