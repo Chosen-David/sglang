@@ -175,7 +175,8 @@ class TLISparseAttnBackend(AttentionBackend):
             sel = indexer.select(
                 self.block_indices[key], q[i : i + 1].float(), t,
                 use_l1_kernel=self.profile.use_l1_kernel,
-            )  # [Hkv,K2]
+                use_l2_kernel=self.profile.use_l2_kernel,
+            )  # [Hkv,K2]（l2 kernel 路径为 [Hkv,K2+pad]，pad=哨兵 S）
             self.timer.add("select", time.time() - t0)
             t0 = self.timer.tick()
             out[i] = self._sparse_attn(q[i].float(), sel, locs, pool, layer_id, Hkv, G)
@@ -275,7 +276,12 @@ class TLISparseAttnBackend(AttentionBackend):
         # 因 smoke 的 decode 全走 dense 路径（S<2048）而潜伏，稀疏 decode
         # 首次触发（M3 吞吐基线）才暴露
         k_buf, v_buf = pool.get_kv_buffer(layer_id)
-        pool_pos = locs[sel]  # [Hkv, K2] pool 槽位
+        # 哨兵 pad 处理（L2 fused kernel 路径返回 [Hkv, K2+pad]，pad=S）：
+        # 位置合法值域 [0, locs.shape[0])，== S 即 pad，softmax 前屏蔽
+        S_loc = locs.shape[0]
+        valid = sel < S_loc  # [Hkv, K2p]（eager 路径全 True，零开销约定）
+        sel_c = sel.clamp(max=S_loc - 1)
+        pool_pos = locs[sel_c]  # [Hkv, K2p] pool 槽位
         K2 = pool_pos.shape[-1]
         D = self.head_dim
         # flat 索引：槽位 s、kv head h、维 d → s*(Hkv*D) + h*D + d
@@ -288,6 +294,7 @@ class TLISparseAttnBackend(AttentionBackend):
         v_sel = v_buf.reshape(-1)[flat.view(-1)].view(Hkv, K2, D).float()
         q_g = q_i.view(Hkv, G, D)  # [Hkv, G, D]
         att = torch.einsum("hgd,hkd->hgk", q_g, k_sel) * (D**-0.5)
+        att = att.masked_fill(~valid.unsqueeze(1), float("-inf"))
         att = torch.softmax(att, dim=-1)
         o = torch.einsum("hgk,hkd->hgd", att, v_sel)  # [Hkv, G, D]
         return o.reshape(H, D)

@@ -58,6 +58,8 @@ class TLIProfile:
         # ---- kernel 化（E8-2：fused L1 单 launch，跳层 3.6×/非跳层 1.6×；
         # 并列截断多选块由 L2 精筛淘汰，trace 对拍 cov 一致）----
         self.use_l1_kernel: bool = _env_bool("SGLANG_TLI_L1_KERNEL", False)
+        # ---- L2 级联 fused（M3-b 接入：单 launch/head 分区精筛，原型 1.63×）----
+        self.use_l2_kernel: bool = _env_bool("SGLANG_TLI_L2_KERNEL", False)
         # 短序列退 dense
         self.dense_threshold: int = _env_int("SGLANG_TLI_DENSE_THRESHOLD", 2048)
 

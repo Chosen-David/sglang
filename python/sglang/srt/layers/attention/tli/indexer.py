@@ -118,43 +118,71 @@ class TLIIndexer:
         - 尾块 min/max 只与新 token 比较（min/max 的结合律）；
           跨块边界则新开块（min=max=新 token）
         E5b 实测 eager 每步全量重建是 gov_report 186min 的根因，此处修复。
+
+        M3-c：kq/kmin/kmax 用几何扩容的预分配 buffer（cat 版每步 O(S) 拷贝，
+        S=131K 时 kq 134MB × 36 层 ≈ 4.8GB/步纯 memcpy）。buffer 第 0 维
+        是容量，有效长度由 S/nblk 跟踪；[S:cap)/[nblk:cap) 是垃圾，
+        消费方必须按 S/nblk 切片或掩码访问（select/select_batched 已切）。
         """
         p = self.profile
         n_new = k_new.shape[0]
         S_old = index["S"]
         S = S_old + n_new
+
+        def _ensure(buf: torch.Tensor, need: int) -> torch.Tensor:
+            cap = buf.shape[0]
+            if cap >= need:
+                return buf
+            nb = buf.new_empty((max(need, cap * 2), *buf.shape[1:]))
+            nb[:cap] = buf
+            return nb
+
         kq_new = quant4(k_new[..., self.idx2])
-        index["kq"] = torch.cat([index["kq"], kq_new], dim=0)
+        index["kq"] = _ensure(index["kq"], S)
+        index["kq"][S_old:S] = kq_new
         ks = k_new[..., self.idx1]  # [n, Hkv, d']
         Hkv = ks.shape[1]
+        nblk_old = index["nblk"]
 
         def _append_blocks(ks_seg: torch.Tensor) -> None:
             """把 ks_seg（从全局位置 s0 起）的块界精确 append（无零 pad 污染）。"""
             n = ks_seg.shape[0]
             nb_full = n // p.block_size
+            n_add = nb_full + (1 if n % p.block_size else 0)
+            if n_add == 0:
+                return
+            index["kmin"] = _ensure(index["kmin"], nblk_old + n_add)
+            index["kmax"] = _ensure(index["kmax"], nblk_old + n_add)
+            w = nblk_old
             if nb_full:
                 kc = ks_seg[: nb_full * p.block_size].reshape(
                     nb_full, p.block_size, Hkv, p.coarse_dim
                 )
-                index["kmin"] = torch.cat([index["kmin"], kc.amin(1)])
-                index["kmax"] = torch.cat([index["kmax"], kc.amax(1)])
+                index["kmin"][w : w + nb_full] = kc.amin(1)
+                index["kmax"][w : w + nb_full] = kc.amax(1)
+                w += nb_full
             rem = n - nb_full * p.block_size
             if rem:
                 # 部分尾块：界 = rem 个 token 的精确 min/max（与 build 的
                 # 尾块精确界口径一致，保证 增量 == 全量重建 逐位成立）
                 r = ks_seg[nb_full * p.block_size :]
-                index["kmin"] = torch.cat([index["kmin"], r.amin(0)[None]])
-                index["kmax"] = torch.cat([index["kmax"], r.amax(0)[None]])
+                index["kmin"][w] = r.amin(0)
+                index["kmax"][w] = r.amax(0)
 
         if S_old % p.block_size == 0:
             # 对齐边界：新 token 直接开新块（decode n=1 时恰好一块）
             _append_blocks(ks)
         else:
-            # 尾块更新（min/max 结合律，只与新 token 比较）
+            # 尾块更新（min/max 结合律，只与新 token 比较）；
+            # 显式下标 nblk_old-1——buffer 可能有容量 padding，[-1] 会写错行
             tail = S_old % p.block_size  # 尾块已有 token 数
             take = min(n_new, p.block_size - tail)
-            index["kmin"][-1] = torch.minimum(index["kmin"][-1], ks[:take].amin(0))
-            index["kmax"][-1] = torch.maximum(index["kmax"][-1], ks[:take].amax(0))
+            index["kmin"][nblk_old - 1] = torch.minimum(
+                index["kmin"][nblk_old - 1], ks[:take].amin(0)
+            )
+            index["kmax"][nblk_old - 1] = torch.maximum(
+                index["kmax"][nblk_old - 1], ks[:take].amax(0)
+            )
             rest = n_new - take
             if rest > 0:
                 _append_blocks(ks[take:])
@@ -174,13 +202,17 @@ class TLIIndexer:
         t: int,
         tail_k: torch.Tensor | None = None,
         use_l1_kernel: bool = False,
+        use_l2_kernel: bool = False,
     ) -> torch.Tensor:
         """index: build_block_index 产物；q: [1, H, D]；t: 当前 query 位置。
 
-        返回 [Hkv, K2] 的 token 位置。
+        返回 [Hkv, K2] 的 token 位置（use_l2_kernel 时池不足的槽位填
+        哨兵 S，下游 valid = sel < S 统一处理）。
         tail_k: [S, Hkv, D]（D' 跳过远端时用于近端/滑窗精筛；None 则用 index）
         use_l1_kernel: True 时 L1 用 Triton fused kernel（E8-2 实测
         3.6×/1.6×；并列截断多选的块由 L2 4bit 精筛自然淘汰，质量不降）
+        use_l2_kernel: True 且 far 区非空时 L2 分区精筛也走 fused kernel
+        （单 launch/head，E8-2 原型 1.63×）
         """
         p = self.profile
         S = index["S"]
@@ -188,8 +220,10 @@ class TLIIndexer:
         H = q.shape[1]
         G = H // Hkv
         device = q.device
-        kmin, kmax = index["kmin"], index["kmax"]
         nblk = index["nblk"]
+        # 增量路径的 kmin/kmax 带容量 padding（update_block_index 预分配），
+        # 第 0 维 ≥ nblk 的尾部是垃圾——按 nblk 切片
+        kmin, kmax = index["kmin"][:nblk], index["kmax"][:nblk]
         K1 = min(p.k1_blocks, nblk)
         last_blk = t // p.block_size
         sw_blks = p.sliding_blocks
@@ -243,6 +277,39 @@ class TLIIndexer:
             blk_onehot.scatter_(1, cand_blk, True)
 
         # ---- L2: 4bit 部分维 token 精筛 ----
+        # fused 分区 kernel（单 launch/head：精筛分数 + far/near 分区 topk +
+        # 滑窗强制 + 直接写位置）。D' 跳层 / far 区为空时退回 eager。
+        if use_l2_kernel and not self.skip_far:
+            far_tok_lo = p.sink_blocks * p.block_size
+            far_tok_hi = max(far_tok_lo, t + 1 - p.near_len)
+            if far_tok_hi > far_tok_lo:
+                sel_mask = blk_onehot.any(0).repeat_interleave(p.block_size)[:S]
+                cand_pos = torch.nonzero(sel_mask).squeeze(1)
+                if cand_pos.numel() > 0:
+                    from sglang.srt.layers.attention.tli.kernels import (
+                        tli_l2_partition_topk,
+                    )
+
+                    nd2 = 2 * p.delta
+                    q_sub = q[..., self.idx2].reshape(H, nd2).contiguous()
+                    near_floor = p.sliding_window + far_tok_lo
+                    far_cap = max(0, p.token_budget - near_floor)
+                    k2_far = min(p.far_tokens, far_tok_hi - far_tok_lo, far_cap)
+                    k2_near = max(0, p.token_budget - k2_far)
+                    sw_lo = max(0, t - p.sliding_window + 1)
+                    return tli_l2_partition_topk(
+                        q_sub,
+                        index["kq"],
+                        cand_pos,
+                        S,
+                        k2_far,
+                        k2_near,
+                        far_tok_lo,
+                        far_tok_hi,
+                        sw_lo,
+                        t,
+                    )
+
         nd2 = 2 * p.delta
         kq = index["kq"]  # [S, Hkv, nd2]
         q2 = q[..., self.idx2].reshape(1, Hkv, G, nd2).sum(2)  # [1, Hkv, nd2]
@@ -308,6 +375,7 @@ class TLIIndexer:
         device = q.device
         kmin, kmax = index["kmin"], index["kmax"]
         nblk = index["nblk"]
+        kmin, kmax = kmin[:nblk], kmax[:nblk]  # 容量 padding 垃圾行切除
         K1 = min(p.k1_blocks, nblk)
         nd2 = 2 * p.delta
         bs = p.block_size

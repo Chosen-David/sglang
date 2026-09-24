@@ -43,9 +43,12 @@ for step_n in [64, 1, 200, 300, 337, 2170]:
 assert cur == S0, f"增量步进长度配置错误: {cur} != {S0}"
 ref = idxer.build_block_index(k_real[:S0])
 assert inc["S"] == ref["S"] == S0 and inc["nblk"] == ref["nblk"]
-assert torch.equal(inc["kq"], ref["kq"]), "kq 增量 != 全量"
-assert torch.equal(inc["kmin"], ref["kmin"]), "kmin 增量 != 全量（尾块精确界被破坏）"
-assert torch.equal(inc["kmax"], ref["kmax"]), "kmax 增量 != 全量（尾块精确界被破坏）"
+# M3-c：增量路径 kq/kmin/kmax 带几何扩容的容量 padding（第 0 维 ≥ 有效长度），
+# 对拍按有效长度切片
+assert torch.equal(inc["kq"][:S0], ref["kq"][:S0]), "kq 增量 != 全量"
+assert torch.equal(inc["kmin"][: ref["nblk"]], ref["kmin"][: ref["nblk"]]), "kmin 增量 != 全量（尾块精确界被破坏）"
+assert torch.equal(inc["kmax"][: ref["nblk"]], ref["kmax"][: ref["nblk"]]), "kmax 增量 != 全量（尾块精确界被破坏）"
+assert inc["kq"].shape[0] >= S0 and inc["kmin"].shape[0] >= ref["nblk"]
 print("[1] 增量索引: kmin/kmax/kq 全部与全量重建逐位一致")
 
 # 增量索引下的 select 质量（mass coverage 口径；t 取索引前缀内的真实 q 行）
@@ -107,7 +110,10 @@ class FakePool:
     def get_kv_buffer(self, layer_id):
         return (self.k_pool, self.v_pool)
 
-    def set_kv_buffer(self, layer, k, v, locs):
+    def set_kv_buffer(self, layer, locs, k, v):
+        # 新版 pool API 参数序：(layer, out_cache_loc, k, v)；k/v 是 2D [T, Hkv*D]
+        k = k.view(-1, self.k_pool.shape[1], self.k_pool.shape[2])
+        v = v.view(-1, self.v_pool.shape[1], self.v_pool.shape[2])
         self.k_pool[locs] = k.float()
         self.v_pool[locs] = v.float()
 
@@ -124,9 +130,13 @@ class FakeMC:
 
 
 class FakeRunner:
-    model_config = FakeMC()
-    device = dev
-    req_to_token_pool = None  # 迫使 backend 走 forward_batch 路径
+    """新版 backend 从 runner 取 pool/req_to_token（新版 sglang API）。"""
+
+    def __init__(self):
+        self.model_config = FakeMC()
+        self.device = dev
+        self.token_to_kv_pool = pool
+        self.req_to_token_pool = FakeRTP(req_to_token)
 
 
 class FakeLayer:
@@ -182,11 +192,12 @@ nq = 256
 q_ext = q_real[-nq:]  # 真实行：位置 S-nq..S-1（RoPE 相位对齐，无错位失真）
 t_start = S - nq
 fb = FakeFB()
-fb.extend_seq_lens = torch.tensor([S], device=dev)
-fb.extend_seq_lens_cumulative = torch.tensor([0, nq], device=dev)
+# 新版 API：extend_prefix_lens=前缀长度，extend_seq_lens=当前 chunk 长度
+fb.extend_prefix_lens = torch.tensor([t_start], device=dev)
+fb.extend_seq_lens = torch.tensor([nq], device=dev)
 out_ext = be.forward_extend(
-    q_ext.reshape(nq, H, D), k_real[S - nq : S].reshape(nq, Hkv, D),
-    v_real[S - nq : S].reshape(nq, Hkv, D), layer, fb, save_kv_cache=False,
+    q_ext.reshape(nq, H * D), k_real[S - nq : S].reshape(nq, Hkv * D),
+    v_real[S - nq : S].reshape(nq, Hkv * D), layer, fb, save_kv_cache=False,
 )
 ref_ext = dense_ref(q_ext, t_start, S)
 # 质量口径 = 行级 mass coverage（论文口径）。GQA head 级 far 集中
@@ -243,7 +254,8 @@ def run_decode(n_steps, rebuild):
         if rebuild:
             be2.block_indices.pop((layer.layer_id, req), None)
         o = be2.forward_decode(
-            q_i, k_inc[st].clone()[None], v_inc[st].clone()[None],
+            q_i.reshape(1, H * D), k_inc[st].clone()[None].reshape(1, Hkv * D),
+            v_inc[st].clone()[None].reshape(1, Hkv * D),
             layer, fb, save_kv_cache=True,
         )
         outs.append(o.reshape(H, D))
@@ -297,8 +309,8 @@ q_s = q_real[-1:]
 fb = FakeFB()
 fb.req_pool_indices = torch.tensor([req2], device=dev)
 fb.seq_lens = torch.tensor([S_short], device=dev)
-o_s = be.forward_decode(q_s, k_real[S_short - 1 : S_short].reshape(1, Hkv, D),
-                        v_real[S_short - 1 : S_short].reshape(1, Hkv, D), layer, fb,
+o_s = be.forward_decode(q_s.reshape(1, H * D), k_real[S_short - 1 : S_short].reshape(1, Hkv * D),
+                        v_real[S_short - 1 : S_short].reshape(1, Hkv * D), layer, fb,
                         save_kv_cache=False)
 r_s = dense_ref(q_s, S_short - 1, S_short)[0]
 diff_s = (o_s.reshape(H, D).float() - r_s).abs().max().item()
