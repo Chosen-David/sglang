@@ -275,7 +275,10 @@ class TLISparseAttnBackend(AttentionBackend):
                 out[r0:r1, h * G : (h + 1) * G] = torch.einsum(
                     "ngk,nkd->ngd", att, v_sel
                 ).to(q_b.dtype)
-        return out
+        # forward_extend 的 out 是 2D [T, H*D]，此处须展平返回
+        # （smoke 测试长 prompt 未过 dense_threshold，稀疏 prefill 路径
+        #   首次被 e2e 触发时暴露的形状 bug）
+        return out.view(nq, H * self.head_dim)
 
 
 __all__ = ["TLISparseAttnBackend"]

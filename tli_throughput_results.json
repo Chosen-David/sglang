@@ -1,0 +1,60 @@
+{
+ "triton": [
+  {
+   "chars": 8000,
+   "prompt_tokens": 2331,
+   "prefill_s": 0.29,
+   "decode_s": 1.011,
+   "decode_tps": 63.29,
+   "step_ms": 15.8,
+   "text": " The text describes a surreal and disturbing sequence of events involving a soldier named Jacob Singer who experiences a"
+  },
+  {
+   "chars": 32000,
+   "prompt_tokens": 9890,
+   "prefill_s": 1.443,
+   "decode_s": 1.02,
+   "decode_tps": 62.76,
+   "step_ms": 15.9,
+   "text": " The text is a surreal and disjointed narrative that weaves together fragmented scenes of Jacob Singer's life, including"
+  },
+  {
+   "chars": 120000,
+   "prompt_tokens": 38483,
+   "prefill_s": 11.107,
+   "decode_s": 1.256,
+   "decode_tps": 50.95,
+   "step_ms": 19.6,
+   "text": " \"Jacob Singer, a veteran haunted by his experiences in Vietnam and the mysterious occurrences in his life, seeks the tr"
+  }
+ ],
+ "tli": [
+  {
+   "chars": 8000,
+   "prompt_tokens": 2331,
+   "prefill_s": 4.648,
+   "decode_s": 5.393,
+   "decode_tps": 11.87,
+   "step_ms": 84.3,
+   "text": " TheGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLsetG"
+  },
+  {
+   "chars": 32000,
+   "prompt_tokens": 9890,
+   "prefill_s": 27.708,
+   "decode_s": 5.212,
+   "decode_tps": 12.28,
+   "step_ms": 81.4,
+   "text": " JGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQLGraphQL[\nGrap"
+  },
+  {
+   "chars": 120000,
+   "prompt_tokens": 38483,
+   "prefill_s": 146.669,
+   "decode_s": 5.777,
+   "decode_tps": 11.08,
+   "step_ms": 90.3,
+   "text": " Themodule async asyncmodulemodule async\n\nmodule\n\n\n\n\nmodulemodulemodulemodulemodulemodulemodulemodulemodulemodulemodulem"
+  }
+ ]
+}
