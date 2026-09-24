@@ -36,7 +36,8 @@ class TLISparseAttnBackend(AttentionBackend):
         # (layer_id, req_pool_idx) -> block index dict（TLIIndexer.build_block_index 产物）
         self.block_indices: dict[tuple[int, int], dict] = {}
         self.layer_skip: list[bool] | None = None
-        self.req_to_token = None  # lazy：runner 的 req_to_token_pool.req_to_token
+        self.token_to_kv_pool = None  # _init_from_runner 填充（新版挂在 model_runner 上）
+        self.req_to_token = None
         if runner is not None:
             self._init_from_runner(runner)
 
@@ -48,6 +49,9 @@ class TLISparseAttnBackend(AttentionBackend):
         if self.profile.layer_skip_path:
             self.layer_skip = self.profile.load_layer_skip(n_layers)
         self.dense_threshold = self.profile.dense_threshold
+        # 新版 sglang：pool 挂在 model_runner 上（ForwardBatch 不再携带）
+        self.token_to_kv_pool = runner.token_to_kv_pool
+        self.req_to_token = runner.req_to_token_pool.req_to_token
 
     def _get_indexer(self, layer_id: int) -> TLIIndexer:
         if layer_id not in self.indexers:
@@ -62,14 +66,6 @@ class TLISparseAttnBackend(AttentionBackend):
         return self.indexers[layer_id]
 
     _layer_offset = 0
-
-    def _get_req_to_token(self, forward_batch):
-        if self.req_to_token is None:
-            rttp = getattr(forward_batch, "req_to_token_pool", None) or getattr(
-                self.runner, "req_to_token_pool", None
-            )
-            self.req_to_token = rttp.req_to_token
-        return self.req_to_token
 
     # ---------------- AttentionBackend 必须实现 ---------------- #
 
@@ -93,14 +89,18 @@ class TLISparseAttnBackend(AttentionBackend):
         save_kv_cache: bool = True,
         **kwargs,
     ):
-        if save_kv_cache:
-            self._save_kv_cache(k, v, layer, forward_batch)
-        pool = forward_batch.token_to_kv_pool
-        req_to_token = self._get_req_to_token(forward_batch)
+        # 新版 q/k/v 是 2D [T, H*D] / [T, Hkv*D]（RoPE 后），统一 view 成 3D
         bs = q.shape[0]
-        H = q.shape[1]
+        H = q.shape[1] // self.head_dim
         Hkv = self.num_kv_heads
         G = H // Hkv
+        q = q.view(bs, H, self.head_dim)
+        k = k.view(bs, Hkv, self.head_dim)
+        v = v.view(bs, Hkv, self.head_dim)
+        if save_kv_cache:
+            self._save_kv_cache(k, v, layer, forward_batch)
+        pool = self.token_to_kv_pool
+        req_to_token = self.req_to_token
         out = torch.empty_like(q)
         layer_id = layer.layer_id
         indexer = self._get_indexer(layer_id)
@@ -132,7 +132,8 @@ class TLISparseAttnBackend(AttentionBackend):
                 use_l1_kernel=self.profile.use_l1_kernel,
             )  # [Hkv,K2]
             out[i] = self._sparse_attn(q[i].float(), sel, locs, pool, layer_id, Hkv, G)
-        return out.view(1, bs, H, self.head_dim)
+        # 返回约定：[T, H*D]（与 triton backend 的 reshape(-1, H*D) 一致）
+        return out.reshape(bs, H * self.head_dim)
 
     def forward_extend(
         self,
@@ -144,27 +145,30 @@ class TLISparseAttnBackend(AttentionBackend):
         save_kv_cache: bool = True,
         **kwargs,
     ):
-        if save_kv_cache:
-            self._save_kv_cache(k, v, layer, forward_batch)
-        pool = forward_batch.token_to_kv_pool
-        req_to_token = self._get_req_to_token(forward_batch)
-        cu = forward_batch.extend_seq_lens_cumulative
-        extend_seq_lens = forward_batch.extend_seq_lens
-        H = q.shape[1]
+        # 新版 q/k/v 是 2D [T, H*D] / [T, Hkv*D]（RoPE 后），统一 view 成 3D
+        T = q.shape[0]
+        H = q.shape[1] // self.head_dim
         Hkv = self.num_kv_heads
         G = H // Hkv
-        out = torch.empty_like(q)
+        q = q.view(T, H, self.head_dim)
+        k = k.view(T, Hkv, self.head_dim)
+        v = v.view(T, Hkv, self.head_dim)
+        if save_kv_cache:
+            self._save_kv_cache(k, v, layer, forward_batch)
+        pool = self.token_to_kv_pool
+        req_to_token = self.req_to_token
+        extend_seq_lens = forward_batch.extend_seq_lens
+        extend_prefix_lens = forward_batch.extend_prefix_lens
+        out = torch.empty(T, H * self.head_dim, dtype=q.dtype, device=q.device)
         layer_id = layer.layer_id
-        starts = (
-            (cu[:-1] if cu.shape[0] > 1 else torch.zeros(1, dtype=torch.long, device=q.device))
-            .tolist()
-        )
-        ends = cu[1:].tolist()  # starts[b]..ends[b] = 第 b 个请求的 token 范围
+        # 新版 ForwardBatch 无 extend_seq_lens_cumulative：自行 cumsum
+        ends = torch.cumsum(extend_seq_lens, dim=0).tolist()
+        starts = [0] + ends[:-1]  # starts[b]..ends[b] = 第 b 个请求的 token 范围
         for b in range(len(starts)):
             req = int(forward_batch.req_pool_indices[b])
-            S = int(extend_seq_lens[b])  # 前缀 + 当前 chunk（已写池）
             nq = ends[b] - starts[b]
-            prefix = S - nq
+            prefix = int(extend_prefix_lens[b]) if extend_prefix_lens is not None else 0
+            S = prefix + nq  # 已写池总长（前缀 + 当前 chunk）
             locs = req_to_token[req, :S]
             q_b = q[starts[b] : ends[b]].float()
             if S <= self.dense_threshold:
@@ -182,20 +186,22 @@ class TLISparseAttnBackend(AttentionBackend):
             out[starts[b] : ends[b]] = self._sparse_extend_one(
                 q_b, sel, locs, pool, layer_id, Hkv, G
             ).to(q.dtype)
+        # 返回约定：[T, H*D]（helper 已按此形状返回）
         return out
 
     # ---------------- 内部工具 ---------------- #
 
     def _save_kv_cache(self, k, v, layer, forward_batch):
-        pool = forward_batch.token_to_kv_pool
-        out_cache_loc = forward_batch.out_cache_loc
-        pool.set_kv_buffer(layer, k, v, out_cache_loc)
+        self.token_to_kv_pool.set_kv_buffer(
+            layer, forward_batch.out_cache_loc, k, v
+        )
 
     def _dense_attn(self, q_i, locs, pool, layer_id):
         """decode 短序列 dense（GQA）。locs: [S] pool 槽位。"""
         k_all, v_all = pool.get_kv_buffer(layer_id)
         k_all = k_all[locs].float()  # [S, Hkv, D]
         v_all = v_all[locs].float()
+        q_i = q_i.float()
         H = q_i.shape[0]
         Hkv = k_all.shape[1]
         G = H // Hkv

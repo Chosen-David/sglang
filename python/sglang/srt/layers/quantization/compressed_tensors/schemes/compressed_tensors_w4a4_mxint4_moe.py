@@ -35,16 +35,23 @@ if TYPE_CHECKING:
         CompressedTensorsConfig,
     )
 
-if is_flashinfer_available():
-    from flashinfer.fp4_quantization import block_scale_interleave
-    from flashinfer.fused_moe import (
-        convert_to_block_layout,
-        trtllm_mxint4_block_scale_moe,
-    )
-    from flashinfer.fused_moe.core import (
-        _maybe_get_cached_w3_w1_permute_indices,
-        get_w2_permute_indices_with_cache,
-    )
+# 兼容补丁（本地开发分支）：flashinfer 版本与 cutlass DSL 版本不匹配时
+# （如 flashinfer 0.6.18 需要 nvidia-cutlass-dsl>=4.6），导入链可能在
+# cutlass.CUDA_VERSION 处抛 AttributeError。该量化方案仅在 W4A4-MxInt4 MoE
+# 模型上使用，普通 bf16 模型不依赖——降级为惰性导入失败而非硬崩。
+try:
+    if is_flashinfer_available():
+        from flashinfer.fp4_quantization import block_scale_interleave
+        from flashinfer.fused_moe import (
+            convert_to_block_layout,
+            trtllm_mxint4_block_scale_moe,
+        )
+        from flashinfer.fused_moe.core import (
+            _maybe_get_cached_w3_w1_permute_indices,
+            get_w2_permute_indices_with_cache,
+        )
+except (ImportError, AttributeError):
+    pass
 
 
 class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):

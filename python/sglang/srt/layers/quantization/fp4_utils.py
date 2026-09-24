@@ -86,7 +86,9 @@ try:
         op_name="flashinfer_fp4_quantize",
         fake_impl=_flashinfer_fp4_quantize_fake,
     )
-except ImportError:
+except (ImportError, AttributeError):
+    # 本地兼容补丁：flashinfer 0.6.18 的 cute_dsl 导入链在旧版 cutlass DSL
+    # 上可能抛 AttributeError（缺 CUDA_VERSION 等）；FP4 量化路径不受影响
     fp4_quantize = None
 
 
