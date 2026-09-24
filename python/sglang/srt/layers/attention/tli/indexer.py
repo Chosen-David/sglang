@@ -471,6 +471,193 @@ class TLIIndexer:
         return torch.cat(out, dim=0)  # [Nq, Hkv, K2]
 
     @torch.no_grad()
+    def select_decode_batched(
+        self,
+        kq_pool: torch.Tensor,
+        kmin_pool: torch.Tensor,
+        kmax_pool: torch.Tensor,
+        rows: torch.Tensor,
+        S_list: list[int],
+        q: torch.Tensor,
+        row_chunk_bytes: int = 256 << 20,
+    ) -> torch.Tensor:
+        """M4：decode 批量两级选择（共享 index pool 行上的全 eager 批量化）。
+
+        kq_pool: [R, S_cap, Hkv, nd2]；kmin/kmax_pool: [R, NBLK_CAP, Hkv, d']；
+        rows: [n] pool 行号；S_list: 每行有效长度（Python int，避免 GPU 同步）；
+        q: [n, H, D] fp32（t = S-1，decode 单步）。
+        返回 [n, Hkv, K2'] token 逻辑位置，池不足槽位 = 哨兵 S_cap
+        （≥ 任意 S_i，下游 valid = sel < S_i 统一处理）。
+
+        与 per-request select（eager / L2-kernel 两路径）的集合语义对齐：
+        - L1 候选块 = 各 head top-K1 块 ∪ 滑窗块的**跨 head 并集**
+          （select 的 blk_onehot.any(0) 语义）；越界/非因果/D' 掩蔽块剔除
+        - L2 打分后按 L2-kernel 路径口径分区：far 池 [far_lo, far_hi)、
+          near 池 pos < sw_lo（不含滑窗），滑窗 [sw_lo, t] 显式 append，
+          近端配额扣减 F = t+1-sw_lo → 每行实选恰 token_budget
+        - per-row far 预算 k2_far = min(far_tokens, span, far_cap)；span
+          不足的行以哨兵 pad 到统一宽度（保证跨行可 stack）
+        - 池不足（候选 < 配额）→ 哨兵（L2-kernel 路径语义；eager 路径
+          此处会选出 -inf 垃圾实位置，批量版采用更安全的哨兵口径）
+        - skip_far 层退化为单池整体 topk + 滑窗 +inf（= eager 语义）
+
+        全程 launch 数与 bs 无关（~15 个：2 einsum + topk×3 + gather 若干），
+        替代 per-request select 的 O(n) 次调用——M3-c 线性放大的根因修复。
+        """
+        p = self.profile
+        device = q.device
+        n = q.shape[0]
+        Hkv = kmin_pool.shape[2]
+        H = q.shape[1]
+        G = H // Hkv
+        S_cap = kq_pool.shape[1]
+        NBLK_CAP = kmin_pool.shape[1]
+        bs = p.block_size
+        nd2 = 2 * p.delta
+        S_t = torch.tensor(S_list, device=device, dtype=torch.long)
+        t_t = S_t - 1
+        nblk_t = (S_t + bs - 1) // bs
+        nblk_max = max((S + bs - 1) // bs for S in S_list)
+        K1 = min(p.k1_blocks, nblk_max)
+
+        # ---- L1: 子空间块上界（批量 einsum；a=请求行 / m=块）----
+        kmin_b = kmin_pool[rows]  # [n, NBLK_CAP, Hkv, d']（容量行含垃圾，靠掩码）
+        kmax_b = kmax_pool[rows]
+        qs = q[..., self.idx1]  # [n, H, d']
+        qg = qs.clamp(min=0).reshape(n, Hkv, G, p.coarse_dim)
+        qn = qs.clamp(max=0).reshape(n, Hkv, G, p.coarse_dim)
+        sc1 = torch.einsum("ahgd,amhd->ahm", qg, kmax_b) + torch.einsum(
+            "ahgd,amhd->ahm", qn, kmin_b
+        )  # [n, Hkv, NBLK_CAP]
+        blk_id = torch.arange(NBLK_CAP, device=device)
+        blk_end = (blk_id + 1) * bs - 1
+        valid_blk = (blk_id.view(1, -1) < nblk_t.view(-1, 1)) & (
+            blk_end.view(1, -1) <= t_t.view(-1, 1)
+        )
+        if self.skip_far:
+            near_blks = ((t_t + 1 - p.near_len) // bs).clamp(min=0)
+            keep = blk_id.view(1, -1) >= near_blks.view(-1, 1)
+            keep[:, : min(2, NBLK_CAP)] = True
+            valid_blk = valid_blk & keep
+        sc1 = sc1.masked_fill(~valid_blk.unsqueeze(1), float("-inf"))
+        cand_blk = torch.topk(sc1, K1, dim=-1).indices  # [n, Hkv, K1]
+        onehot = torch.zeros(n, NBLK_CAP, dtype=torch.bool, device=device)
+        # 越界 / 非因果 / D' 掩蔽的垃圾块选择剔除在 scatter 源上完成——
+        # 不能对 onehot 整体 & 掩码：滑窗强制块（含非对齐 S 的非因果尾块）
+        # 必须保留（per-request 的 force_blks 无视 L1 因果 mask，块内 > t
+        # 的位置由 L2 层 causal 掩掉；per-request 靠 K1=min(K1,nblk) +
+        # -inf 排序天然规避垃圾块，批量 K1 全局统一须显式掩）
+        sel_src = torch.gather(valid_blk, 1, cand_blk.reshape(n, -1))
+        onehot.scatter_(1, cand_blk.reshape(n, -1), sel_src)
+        f_blk = (
+            t_t.view(-1, 1) // bs - torch.arange(p.sliding_blocks, device=device)
+        ).clamp(min=0)
+        onehot.scatter_(1, f_blk, True)
+
+        # ---- 候选 token 位置（并集块展开 + pos < S 截断，topk-min 压实）----
+        sel_mask = onehot.repeat_interleave(bs, dim=1)[:, :S_cap]  # [n, S_cap]
+        pos = torch.arange(S_cap, device=device)
+        cand = sel_mask & (pos.view(1, S_cap) < S_t.view(-1, 1))
+        Tc = min((K1 * Hkv + p.sliding_blocks) * bs, NBLK_CAP * bs, S_cap)
+        seq_m = torch.where(cand, pos.view(1, S_cap), torch.full_like(pos, S_cap))
+        tok = torch.topk(seq_m, Tc, dim=-1, largest=False).values  # [n, Tc] 升序
+        valid = tok < S_cap
+        tok_c = tok.clamp(max=S_cap - 1)
+
+        # ---- L2: 4bit 精筛打分（pool flat gather，行分块控峰值显存）----
+        q2 = q[..., self.idx2].reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
+        s2 = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=device)
+        rows_l = rows.to(torch.long)
+        d_off = torch.arange(nd2, device=device)
+        h_off = torch.arange(Hkv, device=device).view(1, Hkv, 1) * nd2
+        chunk = max(1, row_chunk_bytes // max(Tc * Hkv * nd2 * 4, 1))
+        for r0 in range(0, n, chunk):
+            r1 = min(r0 + chunk, n)
+            m = r1 - r0
+            # 槽位 s、kv head h、维 d → r*S_cap*Hkv*nd2 + s*Hkv*nd2 + h*nd2 + d
+            flat = (
+                rows_l[r0:r1].view(m, 1, 1, 1) * (S_cap * Hkv * nd2)
+                + tok_c[r0:r1].view(m, Tc, 1, 1) * (Hkv * nd2)
+                + h_off.view(1, Hkv, 1)
+                + d_off.view(1, 1, nd2)
+            )
+            kq_c = kq_pool.reshape(-1)[flat.view(-1)].view(m, Tc, Hkv, nd2)
+            s2[r0:r1] = torch.einsum("ahd,athd->aht", q2[r0:r1], kq_c)
+
+        causal = tok <= t_t.view(-1, 1)
+        SENT = S_cap
+
+        if self.skip_far:
+            # 单池口径（= per-request eager 的整体 topk + 滑窗 +inf）
+            sw_lo_t = (t_t - p.sliding_window + 1).clamp(min=0)
+            sc = s2.masked_fill(~(valid & causal).unsqueeze(1), float("-inf"))
+            sc = sc.masked_fill((tok >= sw_lo_t.view(-1, 1)).unsqueeze(1), float("inf"))
+            k = min(p.token_budget, Tc)
+            i_g = torch.topk(sc, k, dim=-1).indices
+            sc_g = torch.gather(sc, 2, i_g)
+            sel_g = torch.gather(tok_c.unsqueeze(1).expand(n, Hkv, Tc), 2, i_g)
+            return torch.where(
+                sc_g == float("-inf"), torch.full_like(sel_g, SENT), sel_g
+            )  # [n, Hkv, budget]
+
+        # ---- B'：far/near 分区（L2-kernel 路径口径）----
+        t_list = [S - 1 for S in S_list]
+        far_lo = p.sink_blocks * bs
+        far_hi_list = [max(far_lo, t + 1 - p.near_len) for t in t_list]
+        sw_lo_list = [max(0, t - p.sliding_window + 1) for t in t_list]
+        near_floor = p.sliding_window + far_lo
+        far_cap = max(0, p.token_budget - near_floor)
+        k2_far_list = [min(p.far_tokens, fh - far_lo, far_cap) for fh in far_hi_list]
+        F_list = [t + 1 - swl for t, swl in zip(t_list, sw_lo_list)]
+        k2n_eff_list = [
+            max(0, p.token_budget - kf - F) for kf, F in zip(k2_far_list, F_list)
+        ]
+        k2_far_max = max(k2_far_list)
+        k2n_max = max(k2n_eff_list)
+        F_max = max(F_list)
+        far_hi_t = torch.tensor(far_hi_list, device=device)
+        sw_lo_t = torch.tensor(sw_lo_list, device=device)
+        F_t = torch.tensor(F_list, device=device)
+
+        in_far = (tok >= far_lo) & (tok < far_hi_t.view(-1, 1)) & valid & causal
+        in_near = valid & causal & ~in_far & (tok < sw_lo_t.view(-1, 1))
+        far_sc = s2.masked_fill(~in_far.unsqueeze(1), float("-inf"))
+        near_sc = s2.masked_fill(~in_near.unsqueeze(1), float("-inf"))
+        tok_e = tok_c.unsqueeze(1).expand(n, Hkv, Tc)
+        parts = []
+        if k2_far_max > 0:
+            i_f = torch.topk(far_sc, min(k2_far_max, Tc), dim=-1).indices
+            sc_f = torch.gather(far_sc, 2, i_f)
+            sel_f = torch.gather(tok_e, 2, i_f)
+            # per-row 配额裁剪：k2_far_max 是跨行最大值（统一宽度），
+            # rank ≥ 该行 k2_far_r 的槽位（topk 降序 = 低分尾部）转哨兵；
+            # -inf 槽位（池不足）同样转哨兵
+            rank_f = torch.arange(k2_far_max, device=device).view(1, 1, -1) < (
+                torch.tensor(k2_far_list, device=device).view(-1, 1, 1)
+            )
+            keep_f = (sc_f != float("-inf")) & rank_f
+            parts.append(
+                torch.where(~keep_f, torch.full_like(sel_f, SENT), sel_f)
+            )
+        if k2n_max > 0:
+            i_n = torch.topk(near_sc, min(k2n_max, Tc), dim=-1).indices
+            sc_n = torch.gather(near_sc, 2, i_n)
+            sel_n = torch.gather(tok_e, 2, i_n)
+            rank_n = torch.arange(k2n_max, device=device).view(1, 1, -1) < (
+                torch.tensor(k2n_eff_list, device=device).view(-1, 1, 1)
+            )
+            keep_n = (sc_n != float("-inf")) & rank_n
+            parts.append(
+                torch.where(~keep_n, torch.full_like(sel_n, SENT), sel_n)
+            )
+        if F_max > 0:
+            f_pos = sw_lo_t.view(-1, 1) + torch.arange(F_max, device=device)
+            f_pad = torch.arange(F_max, device=device).view(1, -1) >= F_t.view(-1, 1)
+            forced = torch.where(f_pad, torch.full_like(f_pos, SENT), f_pos)
+            parts.append(forced.unsqueeze(1).expand(n, Hkv, F_max))
+        return torch.cat(parts, dim=-1)  # [n, Hkv, K2']
+
+    @torch.no_grad()
     def select_far_kmeans(self, index: dict, q: torch.Tensor, t: int, budget: int):
         """创新点 B：远端候选由聚类中心分数展开（E4/E7 实测口径）。
 

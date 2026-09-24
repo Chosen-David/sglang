@@ -60,6 +60,12 @@ class TLIProfile:
         self.use_l1_kernel: bool = _env_bool("SGLANG_TLI_L1_KERNEL", False)
         # ---- L2 级联 fused（M3-b 接入：单 launch/head 分区精筛，原型 1.63×）----
         self.use_l2_kernel: bool = _env_bool("SGLANG_TLI_L2_KERNEL", False)
+        # ---- M4 批量化 decode：n≥2 走共享 pool + 批量 eager select ----
+        # （关闭可回退 per-request 路径做 A/B 对拍；n==1 恒走 per-request
+        #   以保留 L1/L2 fused kernel 的 bs=1 延迟优势）
+        self.use_batch_select: bool = _env_bool("SGLANG_TLI_BATCH_SELECT", True)
+        # 共享 index pool 初始行数（请求行数不足时自动扩）
+        self.pool_rows: int = _env_int("SGLANG_TLI_POOL_R", 32)
         # 短序列退 dense
         self.dense_threshold: int = _env_int("SGLANG_TLI_DENSE_THRESHOLD", 2048)
 

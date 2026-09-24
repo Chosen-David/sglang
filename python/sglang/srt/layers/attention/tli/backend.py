@@ -11,6 +11,10 @@ M2 关键设计（correctness-first，kernel 化路线见 TWO_LEVEL_INDEXER_DESI
     （gov_report 186min 根因）
   - extend（prefill）：S > dense_threshold 时走两级稀疏（build 全量索引 +
     select_batched 批量选择 + torch 稀疏前向）；短序列 dense
+  - M4 批量化 decode：per-layer 共享 index pool（kq/kmin/kmax 预分配 +
+    几何扩容，行随请求生命周期回收）+ n≥2 时两级选择批量 eager 化
+    （select_decode_batched，launch 数与 bs 无关）+ 批量稀疏前向；
+    n==1 保留 per-request L1/L2 fused kernel 路径（bs=1 延迟优势）
   - CUDA graph：占位未支持（init_cuda_graph_state no-op）
 """
 
@@ -70,8 +74,11 @@ class TLISparseAttnBackend(AttentionBackend):
         self.runner = runner
         self.profile = TLIProfile()
         self.indexers: dict[int, TLIIndexer] = {}
-        # (layer_id, req_pool_idx) -> block index dict（TLIIndexer.build_block_index 产物）
-        self.block_indices: dict[tuple[int, int], dict] = {}
+        # M4：per-layer 共享 index pool（kq/kmin/kmax 预分配 [R, cap, ...]，
+        # 几何扩容），替代 per-request block_indices dict——跨请求批量
+        # select/gather 的寻址前提。有效长度由 pool["S"][row] 跟踪，
+        # [S:cap) 是垃圾，消费方必须按 S/nblk 切片或掩码访问。
+        self.index_pools: dict[int, dict] = {}
         self.layer_skip: list[bool] | None = None
         self.token_to_kv_pool = None  # _init_from_runner 填充（新版挂在 model_runner 上）
         self.req_to_token = None
@@ -105,6 +112,82 @@ class TLISparseAttnBackend(AttentionBackend):
 
     _layer_offset = 0
 
+    # ---------------- 共享 index pool（M4） ---------------- #
+
+    def _get_pool(self, layer_id: int) -> dict:
+        if layer_id not in self.index_pools:
+            p = self.profile
+            Hkv = self.num_kv_heads
+            dev = self.runner.device if self.runner else "cuda"
+            s_cap = max(4096, p.dense_threshold + 1)
+            nblk_cap = (s_cap + p.block_size - 1) // p.block_size
+            r_cap = p.pool_rows
+            self.index_pools[layer_id] = {
+                "kq": torch.zeros(r_cap, s_cap, Hkv, 2 * p.delta, device=dev),
+                "kmin": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
+                "kmax": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
+                "S_cap": s_cap,
+                "R_cap": r_cap,
+                "free": list(range(r_cap)),
+                "row_of": {},  # req_pool_idx -> row
+                "S": [-1] * r_cap,  # row -> 有效长度（-1 = 空）
+            }
+        return self.index_pools[layer_id]
+
+    def _alloc_row(self, pool_l: dict, req: int) -> int:
+        row = pool_l["row_of"].get(req)
+        if row is None:
+            if not pool_l["free"]:
+                self._grow_pool_r(pool_l)
+            row = pool_l["free"].pop()
+            pool_l["row_of"][req] = row
+            pool_l["S"][row] = -1
+        return row
+
+    def _ensure_pool_s(self, pool_l: dict, need: int) -> None:
+        """S 维几何扩容（need ≤ S_cap 时 no-op）。扩容后旧行内容前缀保留，
+        [old:cap) 新容量零初始化。"""
+        if need <= pool_l["S_cap"]:
+            return
+        old = pool_l["S_cap"]
+        new_cap = max(need + 2048, old * 2)
+        bs = self.profile.block_size
+        old_nblk = (old + bs - 1) // bs
+        new_nblk = (new_cap + bs - 1) // bs
+        for key, width in (("kq", old), ("kmin", old_nblk), ("kmax", old_nblk)):
+            t = pool_l[key]
+            new = t.new_zeros((t.shape[0], new_cap if key == "kq" else new_nblk, *t.shape[2:]))
+            new[:, :width] = t
+            pool_l[key] = new
+        pool_l["S_cap"] = new_cap
+
+    def _grow_pool_r(self, pool_l: dict, add: int = 16) -> None:
+        r0 = pool_l["R_cap"]
+        r1 = r0 + add
+        for key in ("kq", "kmin", "kmax"):
+            t = pool_l[key]
+            new = t.new_zeros((r1, *t.shape[1:]))
+            new[:r0] = t
+            pool_l[key] = new
+        pool_l["free"].extend(range(r0, r1))
+        pool_l["S"].extend([-1] * add)
+        pool_l["R_cap"] = r1
+
+    def _row_views(self, pool_l: dict, row: int, S: int) -> dict:
+        """构造 per-request select()/update_block_index() 兼容的 view dict。
+
+        张量是 pool 行的 view（[cap,...] 带容量 padding）——调用方须保证
+        pool 容量足够（update 内的 _ensure 不触发，否则会静默脱离 pool）。
+        """
+        nblk = (S + self.profile.block_size - 1) // self.profile.block_size
+        return {
+            "kmin": pool_l["kmin"][row],
+            "kmax": pool_l["kmax"][row],
+            "kq": pool_l["kq"][row],
+            "nblk": nblk,
+            "S": S,
+        }
+
     # ---------------- AttentionBackend 必须实现 ---------------- #
 
     def init_cuda_graph_state(self, max_bs: int, max_num_tokens: int):
@@ -115,7 +198,20 @@ class TLISparseAttnBackend(AttentionBackend):
         return 1
 
     def init_forward_metadata(self, forward_batch):
-        pass
+        # M4：lazy 回收——不在当前 batch 的请求释放 pool 行（请求结束/
+        # req 槽位被新请求复用前的清理；row_of 的 S 检查兜底漏网情形）
+        if not self.index_pools:
+            return
+        try:
+            active = {int(x) for x in forward_batch.req_pool_indices.tolist()}
+        except Exception:
+            return
+        for pool_l in self.index_pools.values():
+            for req in list(pool_l["row_of"]):
+                if req not in active:
+                    row = pool_l["row_of"].pop(req)
+                    pool_l["S"][row] = -1
+                    pool_l["free"].append(row)
 
     def forward_decode(
         self,
@@ -137,49 +233,85 @@ class TLISparseAttnBackend(AttentionBackend):
         v = v.view(bs, Hkv, self.head_dim)
         if save_kv_cache:
             self._save_kv_cache(k, v, layer, forward_batch)
-        pool = self.token_to_kv_pool
+        kv_pool = self.token_to_kv_pool
         req_to_token = self.req_to_token
         out = torch.empty_like(q)
         layer_id = layer.layer_id
         indexer = self._get_indexer(layer_id)
-        k_buf = pool.get_kv_buffer(layer_id)[0]
+        k_buf = kv_pool.get_kv_buffer(layer_id)[0]
+        pool_l = None
+        # M4：稀疏请求的索引写入 per-layer 共享 pool 行（增量 O(n)），
+        # n≥2 时两级选择批量 eager 化（launch 数与 bs 无关）；dense 逐请求
+        sparse_rows: list[tuple[int, int, int]] = []  # (batch_row, pool_row, seq_len)
         for i in range(bs):
             req = int(forward_batch.req_pool_indices[i])
             seq_len = int(forward_batch.seq_lens[i])  # 含当前 token
-            t = seq_len - 1
-            locs = req_to_token[req, :seq_len]  # [S] 逻辑位置 → pool 槽位
             if seq_len <= self.dense_threshold:
                 t0 = self.timer.tick()
-                out[i] = self._dense_attn(q[i], locs, pool, layer_id)
+                out[i] = self._dense_attn(q[i], req_to_token[req, :seq_len], kv_pool, layer_id)
                 self.timer.add("dense", time.time() - t0)
                 continue
-            key = (layer_id, req)
-            idx = self.block_indices.get(key)
-            if (
-                idx is None
-                or idx["S"] >= seq_len
-                or seq_len - idx["S"] > _MAX_INCREMENTAL_NEW
-            ):
-                # 新请求首步 / req 槽位复用 / 大跳变：全量 build
+            pool_l = self._get_pool(layer_id)
+            row = self._alloc_row(pool_l, req)
+            S_st = pool_l["S"][row]
+            if S_st < 0 or S_st >= seq_len or seq_len - S_st > _MAX_INCREMENTAL_NEW:
+                # 新请求首步 / req 槽位复用 / 大跳变：全量 build 写入 pool 行
                 t0 = self.timer.tick()
-                k_all = k_buf[locs].float()  # [S, Hkv, D]（RoPE 后）
-                self.block_indices[key] = indexer.build_block_index(k_all)
+                self._ensure_pool_s(pool_l, seq_len)
+                k_all = k_buf[req_to_token[req, :seq_len]].float()  # [S, Hkv, D]
+                idx_new = indexer.build_block_index(k_all)
+                nblk = idx_new["nblk"]
+                pool_l["kq"][row, :seq_len] = idx_new["kq"]
+                pool_l["kmin"][row, :nblk] = idx_new["kmin"]
+                pool_l["kmax"][row, :nblk] = idx_new["kmax"]
+                pool_l["S"][row] = seq_len
                 self.timer.add("build", time.time() - t0)
-            elif seq_len > idx["S"]:
+            elif seq_len > S_st:
                 # 增量：只取新 token（O(n)，E5b gov_report 186min 根因修复）
                 t0 = self.timer.tick()
-                k_new = k_buf[req_to_token[req, idx["S"] : seq_len]].float()
-                indexer.update_block_index(idx, k_new)
+                self._ensure_pool_s(pool_l, seq_len)
+                k_new = k_buf[req_to_token[req, S_st:seq_len]].float()
+                indexer.update_block_index(self._row_views(pool_l, row, S_st), k_new)
+                pool_l["S"][row] = seq_len
                 self.timer.add("increment", time.time() - t0)
+            sparse_rows.append((i, row, seq_len))
+        if sparse_rows:
             t0 = self.timer.tick()
-            sel = indexer.select(
-                self.block_indices[key], q[i : i + 1].float(), t,
-                use_l1_kernel=self.profile.use_l1_kernel,
-                use_l2_kernel=self.profile.use_l2_kernel,
-            )  # [Hkv,K2]（l2 kernel 路径为 [Hkv,K2+pad]，pad=哨兵 S）
+            if len(sparse_rows) >= 2 and self.profile.use_batch_select:
+                rows_t = torch.tensor([r for _, r, _ in sparse_rows], device=q.device)
+                S_list = [S for _, _, S in sparse_rows]
+                idx_t = torch.tensor(
+                    [i for i, _, _ in sparse_rows], device=q.device
+                )
+                sel = indexer.select_decode_batched(
+                    pool_l["kq"], pool_l["kmin"], pool_l["kmax"],
+                    rows_t, S_list, q[idx_t].float(),
+                )  # [n, Hkv, K2']（池不足槽位为哨兵 S_cap）
+            else:
+                # n==1 / A/B 对拍：per-request select（含 L1/L2 fused kernel 路径）
+                sels = []
+                for i, row, seq_len in sparse_rows:
+                    sels.append(
+                        indexer.select(
+                            self._row_views(pool_l, row, seq_len),
+                            q[i : i + 1].float(),
+                            seq_len - 1,
+                            use_l1_kernel=self.profile.use_l1_kernel,
+                            use_l2_kernel=self.profile.use_l2_kernel,
+                        )
+                    )
+                sel = torch.stack(sels)  # [n, Hkv, K2]
             self.timer.add("select", time.time() - t0)
             t0 = self.timer.tick()
-            out[i] = self._sparse_attn(q[i].float(), sel, locs, pool, layer_id, Hkv, G)
+            out_sparse = self._sparse_attn_batched(
+                q,
+                [i for i, _, _ in sparse_rows],
+                sel,
+                [S for _, _, S in sparse_rows],
+                forward_batch, req_to_token, kv_pool, layer_id, Hkv, G,
+            )
+            rows = [i for i, _, _ in sparse_rows]
+            out[rows] = out_sparse.to(out.dtype)  # 张量索引赋值要求 dtype 一致
             self.timer.add("sparse_attn", time.time() - t0)
         self.timer.maybe_report()
         # 返回约定：[T, H*D]（与 triton backend 的 reshape(-1, H*D) 一致）
@@ -230,7 +362,14 @@ class TLISparseAttnBackend(AttentionBackend):
             k_buf = pool.get_kv_buffer(layer_id)[0]
             k_all = k_buf[locs].float()  # [S, Hkv, D]
             index = indexer.build_block_index(k_all)
-            self.block_indices[(layer_id, req)] = index  # decode 增量起点
+            # M4：写入共享 index pool（decode 增量起点；不再存 per-request dict）
+            pool_l = self._get_pool(layer_id)
+            self._ensure_pool_s(pool_l, S)
+            row = self._alloc_row(pool_l, req)
+            pool_l["kq"][row, :S] = index["kq"]
+            pool_l["kmin"][row, : index["nblk"]] = index["kmin"]
+            pool_l["kmax"][row, : index["nblk"]] = index["kmax"]
+            pool_l["S"][row] = S
             t_arr = torch.arange(prefix, S, device=q.device)
             sel = indexer.select_batched(index, q_b, t_arr)  # [nq, Hkv, K2] 逻辑位置
             out[starts[b] : ends[b]] = self._sparse_extend_one(
@@ -298,6 +437,48 @@ class TLISparseAttnBackend(AttentionBackend):
         att = torch.softmax(att, dim=-1)
         o = torch.einsum("hgk,hkd->hgd", att, v_sel)  # [Hkv, G, D]
         return o.reshape(H, D)
+
+    def _sparse_attn_batched(
+        self, q, row_idx, sel, seq_lens, forward_batch, req_to_token, pool, layer_id, Hkv, G
+    ):
+        """M4：批量稀疏前向（所有稀疏请求一次 gather + 两个批量 einsum）。
+
+        row_idx: 批内行号列表；sel: [n, Hkv, K2]（批量或 per-request stack，
+        哨兵可为 S_i 或 S_cap——只需 ≥ seq_len_i）；seq_lens: list[int]。
+        哨兵 pad：valid = sel < seq_len_i（逐行界），softmax 前屏蔽。
+        数值与逐请求版一致（同 fp32 累加顺序）。
+        """
+        n = sel.shape[0]
+        H, D = q.shape[1], self.head_dim
+        rows = torch.tensor(row_idx, device=q.device)
+        seq_lens = torch.tensor(
+            seq_lens, device=q.device, dtype=sel.dtype
+        ).view(-1, 1, 1)
+        valid = sel < seq_lens  # [n, Hkv, K2]
+        sel_c = sel.clamp(max=int(seq_lens.max().item()) - 1)
+        # req_to_token 是 2D [max_req, max_S]：一次 gather 出全部请求槽位
+        reqs = forward_batch.req_pool_indices[rows]  # [n]
+        locs_full = req_to_token[reqs]  # [n, max_S]（每行 = 该请求逻辑位置 → 槽位）
+        pool_pos = torch.gather(
+            locs_full, 1, sel_c.view(n, -1)
+        ).view(n, Hkv, sel.shape[-1])  # [n, Hkv, K2] pool 槽位
+        K2 = pool_pos.shape[-1]
+        k_buf, v_buf = pool.get_kv_buffer(layer_id)
+        # flat 索引：槽位 s、kv head h、维 d → s*(Hkv*D) + h*D + d
+        d_off = torch.arange(D, device=q.device)
+        h_off = torch.arange(Hkv, device=q.device).view(1, Hkv, 1, 1) * D
+        flat = (
+            pool_pos.unsqueeze(-1) * (Hkv * D) + h_off + d_off.view(1, 1, 1, D)
+        )  # [n, Hkv, K2, D]
+        flat_v = flat.view(n, -1)
+        k_sel = k_buf.reshape(-1)[flat_v].view(n, Hkv, K2, D).float()
+        v_sel = v_buf.reshape(-1)[flat_v].view(n, Hkv, K2, D).float()
+        q_g = q[rows].float().view(n, Hkv, G, D)  # [n, Hkv, G, D]
+        att = torch.einsum("nhgd,nhkd->nhgk", q_g, k_sel) * (D**-0.5)
+        att = att.masked_fill(~valid.unsqueeze(2), float("-inf"))
+        att = torch.softmax(att, dim=-1)
+        o = torch.einsum("nhgk,nhkd->nhgd", att, v_sel)  # [n, Hkv, G, D]
+        return o.view(n, H, D)
 
     def _dense_extend_one(self, q_b, locs, pool, layer_id, Hkv, G):
         """单个请求的 dense causal attention（短序列 prefill / chunk）。"""

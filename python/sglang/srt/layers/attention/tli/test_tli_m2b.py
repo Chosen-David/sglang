@@ -252,7 +252,11 @@ def run_decode(n_steps, rebuild):
         fb.out_cache_loc = req_to_token[req, pos : pos + 1]
         q_i = q_dec[st : st + 1]
         if rebuild:
-            be2.block_indices.pop((layer.layer_id, req), None)
+            # M4 pool 版：重置所有 pool 行的有效长度 → 强制下一步全量重建
+            for pool_l in be2.index_pools.values():
+                for r in range(len(pool_l["S"])):
+                    if pool_l["S"][r] >= 0:
+                        pool_l["S"][r] = -1
         o = be2.forward_decode(
             q_i.reshape(1, H * D), k_inc[st].clone()[None].reshape(1, Hkv * D),
             v_inc[st].clone()[None].reshape(1, Hkv * D),
