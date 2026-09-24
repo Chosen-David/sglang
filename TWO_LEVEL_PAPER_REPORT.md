@@ -1,6 +1,6 @@
-# Two-Level Indexer 论文进展报告（v2，2026-09-23 晚）
+# Two-Level Indexer 论文进展报告（v3，2026-09-24）
 
-> 承接 `TWO_LEVEL_INDEXER_DESIGN.md`（设计 + 批判性分析）。本报告从**论文写作视角**整理全部已实测结论、图表资产与剩余待办，并纳入当晚两个重大更新：**E4c 对 E4b 的口径修正（B 创新点重定位）**与 **E8 系列组合收益实测**。
+> 承接 `TWO_LEVEL_INDEXER_DESIGN.md`（设计 + 批判性分析）。本报告从**论文写作视角**整理全部已实测结论、图表资产与剩余待办。v3 新增：**M3 sglang 系统集成实测**（L2 级联 fused kernel 接入对拍 1.0000 / e2e 逐字一致 / 高并发曲线与批量化缺口），此前版本已含 E4c 口径修正（B 重定位）、E8 组合收益、E5b 主表、32B 泛化复验。
 >
 > 数据基线：Qwen3-8B 真实权重 + 10 条真实 trace（needle/natural + 8 条 LongBench 官方样本），2×H20-3e。
 
@@ -8,7 +8,7 @@
 
 ## 1. 论文定位（一段话）
 
-**TLI（Two-Level Indexer）**：面向长上下文 decode 的 training-free 稀疏注意力索引器，在 TIA（第一代两级索引）之上引入三个实测支撑的改进——**A 位置稳定子空间粗筛**、**B' far/near 分区预算**、**D' 离线校准层跳过**——在 mass 覆盖持平或超过 TIA 的前提下，索引侧计算量降低 **2.57×**（跳层 4.88×），fused L1 kernel 原型 **3.6×/1.6×**。论文同时贡献一组**方法论级 negative results**（严格预算口径下聚类代表劣于 4bit 精筛、在线信号失效、跨层复用失效），为该方向划定清晰的可行边界。
+**TLI（Two-Level Indexer）**：面向长上下文 decode 的 training-free 稀疏注意力索引器，在 TIA（第一代两级索引）之上引入三个实测支撑的改进——**A 位置稳定子空间粗筛**、**B' far/near 分区预算**、**D' 离线校准层跳过**——在 mass 覆盖持平或超过 TIA 的前提下，索引侧计算量降低 **2.57×**（跳层 4.88×），fused L1 kernel 原型 **3.6×/1.6×**，sglang 全系统集成后两级选择 fused kernel **对拍精确一致**（jaccard 1.0000）、e2e 输出与 eager **逐字一致**、decode 步延迟 81→51.4 ms。论文同时贡献一组**方法论级 negative results**（严格预算口径下聚类代表劣于 4bit 精筛、在线信号失效、跨层复用失效、级联 kernel 化中「L1 可容忍多选、L2 不可」的边界），为该方向划定清晰的可行边界。
 
 ## 2. 贡献列表（写作时逐条对应实验）
 
@@ -19,7 +19,8 @@
 | 3 | **D'**：离线校准静态层跳过掩码（far 质量低的层免远端检索） | E6 | 13/36 层可跳，precision 0.92–1.00，far 质量损失 <0.3% |
 | 4 | 索引开销与 kernel：D' topk 截断真正兑现省算 + Triton fused L1 | E8-1/E8-2 | 索引 FLOP 2.57×（跳层 4.88×）；L1 kernel 3.6×/1.6× |
 | 5 | **Negative results**：严格预算口径下聚类代表无优势；在线 L1 信号失效；跨层复用失效 | E4c/E5 | km_blk 0.09–0.39 vs minmax 0.52–0.74；IoU 0.33；corr ≈0 |
-| 6 | E5b 端到端：TLI 在 LongBench 13 子集 vs TIA/TWI/Quest/FullKV | E5b（运行中） | 待填（逐层 mass 已验证） |
+| 6 | E5b 端到端：TLI 在 LongBench 13 子集 vs TIA/TWI/Quest/FullKV | E5b | **49.92** vs TIA 50.06 / FullKV 50.36 / Quest 47.72 |
+| 7 | **系统（M3）**：sglang 全链路集成——L2 级联 fused kernel + 增量索引预分配 + e2e 吞吐 | M3-a/b/c | 对拍 jaccard 1.0000；e2e 逐字一致；decode 81→51.4 ms/step（bs=1）；两级 select 1.34×@9.9K |
 
 ## 3. 关键叙事修正（相对开题 proposal）
 
@@ -39,6 +40,7 @@
 | Fig 5 | fig5_e8_speedup | E8-1 索引 FLOP + E8-2 kernel 延迟 | §6 开销 |
 | Fig 6 | fig6_tli_vs_tia_layers | TLI vs TIA 逐层 mass 覆盖（红色带 = D' 跳层） | §7 端到端 |
 | Fig 7 | fig7_tli_architecture | TLI 架构图（A/B'/D' 数据流） | §2 设计 |
+| **Fig 8** | **fig8_m3_system** | **M3 系统集成三联图**：(a) decode vs bs（高并发曲线 + 线性放大注记）；(b) decode 步延迟优化轨迹 81→56→51.4 ms；(c) 两级 select fused vs eager（9.9K 1.34× / 131K 1.05×） | §6 系统评估 |
 
 主表（E5b，LongBench 13 英文子集；baseline 已打分，TLI 列运行中待回填）：
 
@@ -87,12 +89,15 @@ D'-gate 机制（本轮发现并修复）：
 | E7 | analyze_e7.py | 增量聚类 staleness ≤0.03（保留为聚类数据结构结论） |
 | **E8-1** | **analyze_e8_1.py** | **索引 FLOP 2.57×/4.88×** |
 | **E8-2** | **e8_2_fused_topk.py** | **fused L1 kernel 3.6×/1.6×，块 id 对拍一致** |
-| E5b | run_e5b.sh + debug/test_tli_e5b.py | 逐层 mass 已过；LongBench 13 子集分数运行中 |
+| E5b | run_e5b.sh + debug/test_tli_e5b.py | 逐层 mass 已过；LongBench 13 子集分数 ✅ 49.92 |
+| **M3-a** | **sglang/test_tli_throughput.py** | **e2e 吞吐基线：decode 与 S 无关（launch 数主导）；吞吐口径工程坑沉淀** |
+| **M3-b** | **sglang/test_tli_l2_kernel.py + test_tli_l2_e2e_smoke.py** | **L2 级联 fused kernel：对拍 jaccard 1.0000 + e2e 逐字一致；纯 kernel 版 No-Go（4bit 并列过选 + 二分串行反慢）→ 混合形态** |
+| **M3-c** | **sglang/test_tli_batch_decode.py** | **高并发曲线 bs=1-32：逐请求循环线性放大 vs triton 批量化 3.2×→ 批量化是吞吐主表前置条件** |
 
 ## 6. 代码资产与提交
 
-- `two-level-attention`（master，commit b0a732d）：TLIIndexer 全实现 + E1–E8 脚本与结果 + figures
-- `sglang`（two-level-indexer 分支，commit e282de8）：M1 = tli backend 注册 + trace 单测；M2 前半 = B'/D' 算法同步 + Triton fused L1；**M2 后半 = paged 寻址（req_to_token 间接）+ O(n) 精确增量索引 + 稀疏 prefill（select_batched 批量两级选择）**——test_tli_m2b.py 全链路对拍：增量==全量重建逐位一致（gov_report 186min 根因的修复验证）、prefill mass cov 0.9896（行级）、decode 末位 0.99952、短序列 dense 精确一致；分支基于 fork 最新 main（4b186cfea，2026-09-15）
+- `two-level-attention`（master）：TLIIndexer 全实现 + E1–E8 脚本与结果 + figures（含 v3 的 fig8/make_fig8.py + TLI_progress_v3.pptx 13 页）
+- `sglang`（two-level-indexer 分支，至 commit 5021ef105）：M1 = tli backend 注册 + trace 单测；M2 前半 = B'/D' 算法同步 + Triton fused L1；M2 后半 = paged 寻址 + O(n) 精确增量索引 + 稀疏 prefill；**M3 = decode 归因 + _sparse_attn 向量化（bfe373c18）+ L2 级联 fused kernel 接入 + 增量索引预分配 + 批量 decode 基准（36b6c8a37）+ 设计报告 §5.0/§5.0.1（5021ef105）**。test_tli_m2b.py 全链路对拍在预分配改造后仍全 PASS；分支基于 fork 最新 main（4b186cfea，2026-09-15）
 
 ## 7. 消融表（hotpotqa trace，36 层 mass 覆盖口径）
 
@@ -145,13 +150,56 @@ narrativeqa 已修复同文档重复样本坑——8B 时代 e6_layer_skip.json 
    而非任务级 far 总量差异**。论文叙事修正：D' gate = per-task 层轮廓校准（长度匹配的同分布 trace），
    任务级 far 总量判据写进 negative results（两代模型均不成立）。
 
+## 8b. M3 sglang 系统集成实测（2026-09-24，任务 #20/21/22 完成）
+
+环境：sglang two-level-indexer 分支（6 commits 至 5021ef105）、Qwen3-8B 真实权重、
+真实 narrativeqa/LongBench 上下文、H20、无 CUDA graph（tli 路径暂不支持）。
+脚本：`sglang/test_tli_{throughput,profile_decode,l2_kernel,l2_e2e_smoke,batch_decode}.py`。
+
+**1. L2 级联 fused kernel（最终形态 = 混合）**：
+- Triton pass1（单 launch/head：融合 gather+GEMV 打分，写 far/near 双池 scratch，池外 -inf）
+  + `torch.topk` 精确选取 + Python 侧滑窗 `arange` 精确复制（近端配额扣减 F=t+1-sw_lo）；
+- **池边界即因果边界**：far 池 `[sink, t+1-near_len)`、near 池 `< t-sw+1`，两池上界严格 < t——
+  L1 多选产生的 -inf 垃圾块（位置 > t）天然落两池之外，替代 eager 的 fine 矩阵因果 mask；
+- 纯 kernel 版 No-Go（论文素材）：4bit 量化分数并列极多，阈值二分在终选级无人兜底 → 每 head
+  过选 130-256；120 轮二分 × 串行 chunk、8 program 打不满 78 SM 反慢 4.5×。
+  **教训：级联结构中 L1 能容忍多选（下游 L2 吸收），最末级不能——topk 留给 torch 是正确分工**；
+- 对拍：jaccard **1.0000**（S=9891/131072 × t=末位/回退/中段共 6 组，输出恰 1024 token）；
+  e2e（32K 字符真实上下文、64 token 生成）与 eager **逐字一致**。
+
+**2. 增量索引预分配**：cat 版每步 O(S) 全量拷贝（S=131K 时 kq 134MB × 36 层 ≈ 4.8GB/步纯
+memcpy）→ 几何扩容 buffer，update 延迟 **0.128ms 与 S 无关**；增量==全量重建仍逐位一致
+（test_tli_m2b 全 PASS）。
+
+**3. e2e decode 优化轨迹（bs=1，S≈9.9K token，墙钟）**：eager 81 → _sparse_attn 向量化 + L1
+kernel 56 → +L2 kernel **51.4 ms/step**；归因（TLI_PROFILE_TIMING 同口径）：select 46→28.7ms。
+两级 select 微基准（fused vs eager）：9.9K **1.34×** / 131K 1.05×（小 S 收益 = 砍 launch 数；
+大 S 时 eager L2 的 topk/gather 本身已占大头，fused 只省 fine 矩阵与 [Tc,Hkv,nd2] 中间量）。
+
+**4. M3-c 高并发曲线（bs=1/8/16/32 × S≈9.9K，64 步 decode）**：
+
+| bs | triton ms/step | triton tok/s | tli ms/step | tli tok/s |
+|---|---|---|---|---|
+| 1 | 10.0 | 99.9 | 51.4 | 19.5 |
+| 8 | 16.4 | 486.8 | 369.7 | 21.6 |
+| 16 | 19.0 | 842.3 | 666.4 | 24.0 |
+| 32 | 32.4 | 986.5 | 1236.8 | 25.9 |
+
+**结构性发现**：tli `forward_decode` 逐请求 Python 循环 → ~38ms/请求/步**线性放大**；triton
+全批量化仅 3.2× 涨幅。**高并发吞吐主表（论文硬件叙事的 H100+大 batch 展示位）必须先批量化**：
+共享 index pool + L1/L2 kernel grid 加 batch 维 + kq 真 4bit 存储（uint8+scale，134MB→16.8MB
+@131K，才能跨请求共享预分配）+ CUDA graph（批量化后捕获才有意义）——即 M4 里程碑（§9-3）。
+论文叙事：M3 曲线本身是「prototype 到生产级推理引擎的工程鸿沟」的直接证据，批量化前后对比
+（M3 vs M4 重跑同曲线）构成系统章节的完整故事线。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
-2. ~~sglang M2~~ ✅ 前半（算法同步+fused L1）+ 后半（paged 寻址 + O(n) 增量索引 + 稀疏 prefill，全链路对拍）；**e2e smoke ✅（2026-09-24，Qwen3-8B offline Engine：tli vs triton baseline，短 prompt + 5830 字符稀疏路径 2/3 逐字一致，1/3 bf16 累积顺序噪声级分歧）**；剩余 TileLang kernel 接入；M3：CUDA graph + e2e 吞吐
-3. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
-4. ~~L2 fused kernel~~ ✅ 已完成（E8-2 下半场：单 launch 分区 topk，对拍 4096/4096，1.63×）
-5. ~~Qwen3-32B 泛化复验~~ ✅（§8：A Go/D' Go 且更强/gate 判据修正为 negative result）+ 论文写作（骨架已定）
+2. ~~sglang M2/M3~~ ✅ 全部完成（§5.0 设计报告：算法同步 + fused L1 + paged 寻址 + O(n) 增量索引（预分配版）+ 稀疏 prefill + L2 级联 fused kernel + e2e 吞吐基线与归因 + 高并发曲线）；e2e smoke 逐字一致
+3. **M4 批量化 decode（当前主线，H20）**：共享 index pool（kmin/kmax 预分配 [R_max,NBLK_MAX,Hkv,d']）+ kq 真 4bit 存储（uint8+scale，kernel 内 dequant）+ L1/L2 kernel grid 加 batch 维 + _sparse_attn 批量 gather + CUDA graph → 吞吐主表（bs×S 矩阵）
+4. H100 吞吐主表（机器申请中；H20 层已备好算力无关性论证：H20 TC 仅 H100 15% 仍拿到质量/流量收益）
+5. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
+6. ~~Qwen3-32B 泛化复验~~ ✅（§8：A Go/D' Go 且更强/gate 判据修正为 negative result）+ 论文写作（骨架已定，主表已齐）
 
 ## 10. 答辩防御清单（更新版）
 
