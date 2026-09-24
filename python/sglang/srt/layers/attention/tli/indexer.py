@@ -27,6 +27,27 @@ def quant4(x: torch.Tensor) -> torch.Tensor:
     return torch.clamp(torch.round((x - mn) / sc), 0, 15) * sc + mn
 
 
+def quant4_pack(x: torch.Tensor):
+    """M6：kq 真 4bit 存储——量化为 (grid uint8, sc fp32, mn fp32)。
+
+    x: [..., nd2] → grid: uint8 同形（0-15 格点）；sc/mn: [...,]（尾维压掉）。
+    重建 kq_unpack(grid, sc, mn) 与 quant4(x) **逐位一致**：格点值是
+    [0,15] 整数（fp32 精确表示），float(grid)*sc+mn 与 round(...)*sc+mn
+    是同操作数同序的 IEEE 运算。
+    存储 128 → 40 B/token-head（32B grid + 8B 双 scale fp32）。
+    """
+    mx = x.amax(-1, keepdim=True)
+    mn = x.amin(-1, keepdim=True)
+    sc = (mx - mn).clamp(min=1e-9) / 15
+    grid = torch.clamp(torch.round((x - mn) / sc), 0, 15).to(torch.uint8)
+    return grid, sc.squeeze(-1), mn.squeeze(-1)
+
+
+def kq_unpack(grid: torch.Tensor, sc: torch.Tensor, mn: torch.Tensor) -> torch.Tensor:
+    """M6：uint8 格点 + scale 重建 fp32 kq（与 quant4 逐位一致，见上）。"""
+    return grid.float() * sc.unsqueeze(-1) + mn.unsqueeze(-1)
+
+
 def gpu_kmeans(x: torch.Tensor, K: int, niter: int = 20, seed: int = 0):
     """GEMM 距离 kmeans（创新点 B；复用 KMeans/CPU 调研的 GEMM 技巧）。"""
     g = torch.Generator().manual_seed(seed)
@@ -87,12 +108,15 @@ class TLIIndexer:
             valid_tail = S - (nblk - 1) * p.block_size
             kmin[-1] = kc[-1, :valid_tail].amin(0)
             kmax[-1] = kc[-1, :valid_tail].amax(0)
-        # 4bit 部分维（L2 精筛用；存 dequant 近似，生产版应存 uint4+scale）
-        kq = quant4(k[:S][..., self.idx2])  # [S, Hkv, 2*delta]
+        # 4bit 部分维（L2 精筛用；M6 真 4bit 存储：uint8 格点 + fp32 scale，
+        # 128→40B/token-head——S=131K pool 显存硬前提）
+        kq_q, kq_sc, kq_mn = quant4_pack(k[:S][..., self.idx2])  # [S, Hkv, 2δ] uint8 + [S, Hkv] ×2
         index = {
             "kmin": kmin,
             "kmax": kmax,
-            "kq": kq,
+            "kq_q": kq_q,
+            "kq_sc": kq_sc,
+            "kq_mn": kq_mn,
             "nblk": nblk,
             "S": S,
         }
@@ -137,9 +161,13 @@ class TLIIndexer:
             nb[:cap] = buf
             return nb
 
-        kq_new = quant4(k_new[..., self.idx2])
-        index["kq"] = _ensure(index["kq"], S)
-        index["kq"][S_old:S] = kq_new
+        kq_q_new, kq_sc_new, kq_mn_new = quant4_pack(k_new[..., self.idx2])
+        index["kq_q"] = _ensure(index["kq_q"], S)
+        index["kq_sc"] = _ensure(index["kq_sc"], S)
+        index["kq_mn"] = _ensure(index["kq_mn"], S)
+        index["kq_q"][S_old:S] = kq_q_new
+        index["kq_sc"][S_old:S] = kq_sc_new
+        index["kq_mn"][S_old:S] = kq_mn_new
         ks = k_new[..., self.idx1]  # [n, Hkv, d']
         Hkv = ks.shape[1]
         nblk_old = index["nblk"]
@@ -299,7 +327,7 @@ class TLIIndexer:
                     sw_lo = max(0, t - p.sliding_window + 1)
                     return tli_l2_partition_topk(
                         q_sub,
-                        index["kq"],
+                        kq_unpack(index["kq_q"][:S], index["kq_sc"][:S], index["kq_mn"][:S]).contiguous(),
                         cand_pos,
                         S,
                         k2_far,
@@ -311,11 +339,13 @@ class TLIIndexer:
                     )
 
         nd2 = 2 * p.delta
-        kq = index["kq"]  # [S, Hkv, nd2]
+        kq = index["kq_q"]  # M6 uint8 格点 [S, Hkv, nd2]（容量 padding 靠 cand_pos < S 规避）
         q2 = q[..., self.idx2].reshape(1, Hkv, G, nd2).sum(2)  # [1, Hkv, nd2]
         sel_mask = blk_onehot.any(0).repeat_interleave(p.block_size)[:S]
         cand_pos = torch.nonzero(sel_mask).squeeze(1)
-        kq_h = kq[cand_pos]  # [Tc, Hkv, nd2]
+        kq_h = kq_unpack(
+            kq[cand_pos], index["kq_sc"][cand_pos], index["kq_mn"][cand_pos]
+        )  # [Tc, Hkv, nd2]（逐位 == fp32 存储版）
         s2 = torch.einsum("hd,thd->ht", q2[0], kq_h)  # [Hkv, Tc]
         fine = torch.full((Hkv, S), float("-inf"), device=device)
         fine[:, cand_pos] = s2
@@ -379,7 +409,7 @@ class TLIIndexer:
         K1 = min(p.k1_blocks, nblk)
         nd2 = 2 * p.delta
         bs = p.block_size
-        kq = index["kq"]  # [S, Hkv, nd2]
+        kq = index["kq_q"]  # M6 uint8 格点（tok_c < S，容量 padding 无害）
         t_arr = t_arr.to(device)
         pos = torch.arange(S, device=device)
         out = []
@@ -426,7 +456,9 @@ class TLIIndexer:
             tok_c = tok.clamp(max=S - 1)
 
             # ---- L2: 4bit 部分维精筛 → scatter 进 fine [n, Hkv, S] ----
-            kq_c = kq[tok_c]  # [n, Tc, Hkv, nd2]（候选池跨 head 共享）
+            kq_c = kq_unpack(
+                kq[tok_c], index["kq_sc"][tok_c], index["kq_mn"][tok_c]
+            )  # [n, Tc, Hkv, nd2]（候选池跨 head 共享）
             q2 = q_c[..., self.idx2].reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
             s2 = torch.einsum("ahd,athd->aht", q2, kq_c)  # [n, Hkv, Tc]
             causal = (tok <= t_c.view(-1, 1)) & valid  # [n, Tc]
@@ -506,21 +538,27 @@ class TLIIndexer:
         nd2 = 2 * p.delta
         d1 = p.coarse_dim
         device = k_new.device
-        S_cap = pool_l["kq"].shape[1]
+        S_cap = pool_l["kq_q"].shape[1]
         nblk_cap = pool_l["kmin"].shape[1]
         rows_l = rows.to(torch.long)
         if S_old_t is None:
             S_old_t = torch.tensor(S_old, device=device)
 
-        # ---- kq 追加：kq_pool[row, S_old_r] = quant4(k_new_r[..., idx2]) ----
-        kq_new = quant4(k_new[..., self.idx2])  # [n, Hkv, nd2]
+        # ---- kq 追加（M6 uint8+scale 三张量 flat scatter）----
+        kq_q_new, kq_sc_new, kq_mn_new = quant4_pack(k_new[..., self.idx2])
         base_q = rows_l * (S_cap * Hkv * nd2) + S_old_t * (Hkv * nd2)
         off_q = (
             base_q.view(n, 1, 1)
             + torch.arange(Hkv, device=device).view(1, Hkv, 1) * nd2
             + torch.arange(nd2, device=device).view(1, 1, nd2)
         )
-        pool_l["kq"].reshape(-1)[off_q.reshape(-1)] = kq_new.reshape(-1)
+        pool_l["kq_q"].reshape(-1)[off_q.reshape(-1)] = kq_q_new.reshape(-1)
+        off_s = (
+            (rows_l * (S_cap * Hkv) + S_old_t * Hkv).view(n, 1)
+            + torch.arange(Hkv, device=device).view(1, Hkv)
+        )
+        pool_l["kq_sc"].reshape(-1)[off_s.reshape(-1)] = kq_sc_new.reshape(-1)
+        pool_l["kq_mn"].reshape(-1)[off_s.reshape(-1)] = kq_mn_new.reshape(-1)
 
         # ---- kmin/kmax：对齐行开新块（min=max=新 token），非对齐行
         # 与旧尾块 min/max 合并（结合律，与逐行 update 逐位一致）----
@@ -545,9 +583,7 @@ class TLIIndexer:
     @torch.no_grad()
     def select_decode_batched(
         self,
-        kq_pool: torch.Tensor,
-        kmin_pool: torch.Tensor,
-        kmax_pool: torch.Tensor,
+        pool_l: dict,
         rows: torch.Tensor,
         S_list: list[int],
         q: torch.Tensor,
@@ -555,7 +591,8 @@ class TLIIndexer:
     ) -> torch.Tensor:
         """M4：decode 批量两级选择（共享 index pool 行上的全 eager 批量化）。
 
-        kq_pool: [R, S_cap, Hkv, nd2]；kmin/kmax_pool: [R, NBLK_CAP, Hkv, d']；
+        M6 起直接收 pool dict（kq 三张量 uint8+scale：kq_q [R,S_cap,Hkv,nd2]
+        uint8、kq_sc/kq_mn [R,S_cap,Hkv] fp32；kmin/kmax [R,NBLK_CAP,Hkv,d']）；
         rows: [n] pool 行号；S_list: 每行有效长度（Python int 列表或 device
         tensor——M5 CUDA graph 路径传 tensor，杜绝 H2D 同步）；
         q: [n, H, D] fp32（t = S-1，decode 单步）。
@@ -591,6 +628,8 @@ class TLIIndexer:
         p = self.profile
         device = q.device
         n = q.shape[0]
+        kq_pool, kq_sc_pool, kq_mn_pool = pool_l["kq_q"], pool_l["kq_sc"], pool_l["kq_mn"]
+        kmin_pool, kmax_pool = pool_l["kmin"], pool_l["kmax"]
         Hkv = kmin_pool.shape[2]
         H = q.shape[1]
         G = H // Hkv
@@ -653,12 +692,15 @@ class TLIIndexer:
         valid = tok < S_cap
         tok_c = tok.clamp(max=S_cap - 1)
 
-        # ---- L2: 4bit 精筛打分（pool flat gather，行分块控峰值显存）----
+        # ---- L2: 4bit 精筛打分（M6：uint8 格点 + scale 的 flat gather + 重建）----
+        # 重建 kq_c = grid*sc+mn 与 fp32 存储版逐位一致（IEEE 同运算序），
+        # 打分数值零漂移；pool 常驻显存 128→40 B/token-head
         q2 = q[..., self.idx2].reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
         s2 = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=device)
         rows_l = rows.to(torch.long)
         d_off = torch.arange(nd2, device=device)
         h_off = torch.arange(Hkv, device=device).view(1, Hkv, 1) * nd2
+        h_off_s = torch.arange(Hkv, device=device)
         chunk = max(1, row_chunk_bytes // max(Tc * Hkv * nd2 * 4, 1))
         for r0 in range(0, n, chunk):
             r1 = min(r0 + chunk, n)
@@ -670,7 +712,16 @@ class TLIIndexer:
                 + h_off.view(1, Hkv, 1)
                 + d_off.view(1, 1, nd2)
             )
-            kq_c = kq_pool.reshape(-1)[flat.view(-1)].view(m, Tc, Hkv, nd2)
+            # scale/mn：r*S_cap*Hkv + s*Hkv + h（无维偏移）
+            flat_s = (
+                rows_l[r0:r1].view(m, 1, 1) * (S_cap * Hkv)
+                + tok_c[r0:r1].view(m, Tc, 1) * Hkv
+                + h_off_s.view(1, 1, Hkv)
+            )
+            grid_c = kq_pool.reshape(-1)[flat.view(-1)].view(m, Tc, Hkv, nd2)
+            sc_c = kq_sc_pool.reshape(-1)[flat_s.view(-1)].view(m, Tc, Hkv)
+            mn_c = kq_mn_pool.reshape(-1)[flat_s.view(-1)].view(m, Tc, Hkv)
+            kq_c = grid_c.float() * sc_c.unsqueeze(-1) + mn_c.unsqueeze(-1)
             s2[r0:r1] = torch.einsum("ahd,athd->aht", q2[r0:r1], kq_c)
 
         causal = tok <= t_t.view(-1, 1)

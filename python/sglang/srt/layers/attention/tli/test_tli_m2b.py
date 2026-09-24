@@ -45,10 +45,11 @@ ref = idxer.build_block_index(k_real[:S0])
 assert inc["S"] == ref["S"] == S0 and inc["nblk"] == ref["nblk"]
 # M3-c：增量路径 kq/kmin/kmax 带几何扩容的容量 padding（第 0 维 ≥ 有效长度），
 # 对拍按有效长度切片
-assert torch.equal(inc["kq"][:S0], ref["kq"][:S0]), "kq 增量 != 全量"
+for key in ("kq_q", "kq_sc", "kq_mn"):
+    assert torch.equal(inc[key][:S0], ref[key][:S0]), f"{key} 增量 != 全量"
 assert torch.equal(inc["kmin"][: ref["nblk"]], ref["kmin"][: ref["nblk"]]), "kmin 增量 != 全量（尾块精确界被破坏）"
 assert torch.equal(inc["kmax"][: ref["nblk"]], ref["kmax"][: ref["nblk"]]), "kmax 增量 != 全量（尾块精确界被破坏）"
-assert inc["kq"].shape[0] >= S0 and inc["kmin"].shape[0] >= ref["nblk"]
+assert inc["kq_q"].shape[0] >= S0 and inc["kmin"].shape[0] >= ref["nblk"]
 print("[1] 增量索引: kmin/kmax/kq 全部与全量重建逐位一致")
 
 # 增量索引下的 select 质量（mass coverage 口径；t 取索引前缀内的真实 q 行）

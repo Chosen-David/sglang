@@ -153,7 +153,12 @@ class TLISparseAttnBackend(AttentionBackend):
             nblk_cap = (s_cap + p.block_size - 1) // p.block_size
             r_cap = max(p.pool_rows, self._pool_r_cap_floor)
             self.index_pools[layer_id] = {
-                "kq": torch.zeros(r_cap, s_cap, Hkv, 2 * p.delta, device=dev),
+                # M6：kq 真 4bit 存储（128→40 B/token-head，S=131K 前提）：
+                # uint8 格点 [R,S,Hkv,2δ] + fp32 scale/mn [R,S,Hkv]
+                # （scale 用 fp32：重建 grid*sc+mn 与 fp32 存储版逐位一致）
+                "kq_q": torch.zeros(r_cap, s_cap, Hkv, 2 * p.delta, dtype=torch.uint8, device=dev),
+                "kq_sc": torch.zeros(r_cap, s_cap, Hkv, device=dev),
+                "kq_mn": torch.zeros(r_cap, s_cap, Hkv, device=dev),
                 "kmin": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
                 "kmax": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
                 "S_cap": s_cap,
@@ -195,9 +200,13 @@ class TLISparseAttnBackend(AttentionBackend):
         bs = self.profile.block_size
         old_nblk = (old + bs - 1) // bs
         new_nblk = (new_cap + bs - 1) // bs
-        for key, width in (("kq", old), ("kmin", old_nblk), ("kmax", old_nblk)):
+        for key, width in (
+            ("kq_q", old), ("kq_sc", old), ("kq_mn", old),
+            ("kmin", old_nblk), ("kmax", old_nblk),
+        ):
             t = pool_l[key]
-            new = t.new_zeros((t.shape[0], new_cap if key == "kq" else new_nblk, *t.shape[2:]))
+            s_dim = new_cap if key.startswith("kq") else new_nblk
+            new = t.new_zeros((t.shape[0], s_dim, *t.shape[2:]))
             new[:, :width] = t
             pool_l[key] = new
         pool_l["S_cap"] = new_cap
@@ -212,7 +221,7 @@ class TLISparseAttnBackend(AttentionBackend):
             )
         r0 = pool_l["R_cap"]
         r1 = r0 + add
-        for key in ("kq", "kmin", "kmax"):
+        for key in ("kq_q", "kq_sc", "kq_mn", "kmin", "kmax"):
             t = pool_l[key]
             new = t.new_zeros((r1, *t.shape[1:]))
             new[:r0] = t
@@ -231,7 +240,9 @@ class TLISparseAttnBackend(AttentionBackend):
         return {
             "kmin": pool_l["kmin"][row],
             "kmax": pool_l["kmax"][row],
-            "kq": pool_l["kq"][row],
+            "kq_q": pool_l["kq_q"][row],
+            "kq_sc": pool_l["kq_sc"][row],
+            "kq_mn": pool_l["kq_mn"][row],
             "nblk": nblk,
             "S": S,
         }
@@ -378,7 +389,9 @@ class TLISparseAttnBackend(AttentionBackend):
                     self._ensure_pool_s(pool_l, L)
                     k_all = k_buf[self.req_to_token[req, : L - 1]].float()
                     idx_new = indexer.build_block_index(k_all)
-                    pool_l["kq"][row, : L - 1] = idx_new["kq"]
+                    pool_l["kq_q"][row, : L - 1] = idx_new["kq_q"]
+                    pool_l["kq_sc"][row, : L - 1] = idx_new["kq_sc"]
+                    pool_l["kq_mn"][row, : L - 1] = idx_new["kq_mn"]
                     pool_l["kmin"][row, : idx_new["nblk"]] = idx_new["kmin"]
                     pool_l["kmax"][row, : idx_new["nblk"]] = idx_new["kmax"]
                 # 预记图内追加当前 token 后的有效长度（== eager 路径每步
@@ -454,7 +467,9 @@ class TLISparseAttnBackend(AttentionBackend):
                 k_all = k_buf[req_to_token[req, :seq_len]].float()  # [S, Hkv, D]
                 idx_new = indexer.build_block_index(k_all)
                 nblk = idx_new["nblk"]
-                pool_l["kq"][row, :seq_len] = idx_new["kq"]
+                pool_l["kq_q"][row, :seq_len] = idx_new["kq_q"]
+                pool_l["kq_sc"][row, :seq_len] = idx_new["kq_sc"]
+                pool_l["kq_mn"][row, :seq_len] = idx_new["kq_mn"]
                 pool_l["kmin"][row, :nblk] = idx_new["kmin"]
                 pool_l["kmax"][row, :nblk] = idx_new["kmax"]
                 pool_l["S"][row] = seq_len
@@ -496,8 +511,7 @@ class TLISparseAttnBackend(AttentionBackend):
                     [i for i, _, _ in sparse_rows], device=q.device
                 )
                 sel = indexer.select_decode_batched(
-                    pool_l["kq"], pool_l["kmin"], pool_l["kmax"],
-                    rows_t, S_list, q[idx_t].float(),
+                    pool_l, rows_t, S_list, q[idx_t].float(),
                 )  # [n, Hkv, K2']（池不足槽位为哨兵 S_cap）
             else:
                 # n==1 / A/B 对拍：per-request select（含 L1/L2 fused kernel 路径）
@@ -556,8 +570,7 @@ class TLISparseAttnBackend(AttentionBackend):
         indexer.update_pool_rows_decode(pool_l, rows_t, seq_lens_t - 1, k.float())
         # 统一两级稀疏选择（静态宽度 W_far/W_near/W_forced）
         sel = indexer.select_decode_batched(
-            pool_l["kq"], pool_l["kmin"], pool_l["kmax"],
-            rows_t, seq_lens_t, q.float(),
+            pool_l, rows_t, seq_lens_t, q.float(),
         )  # [bs, Hkv, W_far+W_near+W_forced]（哨兵 = S_cap）
         # 统一稀疏前向（全批一次 gather + 两个批量 einsum）
         out = self._sparse_attn_batched(
@@ -617,7 +630,9 @@ class TLISparseAttnBackend(AttentionBackend):
             pool_l = self._get_pool(layer_id)
             self._ensure_pool_s(pool_l, S)
             row = self._alloc_row(pool_l, req)
-            pool_l["kq"][row, :S] = index["kq"]
+            pool_l["kq_q"][row, :S] = index["kq_q"]
+            pool_l["kq_sc"][row, :S] = index["kq_sc"]
+            pool_l["kq_mn"][row, :S] = index["kq_mn"]
             pool_l["kmin"][row, : index["nblk"]] = index["kmin"]
             pool_l["kmax"][row, : index["nblk"]] = index["kmax"]
             pool_l["S"][row] = S

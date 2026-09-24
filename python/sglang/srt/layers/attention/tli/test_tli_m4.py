@@ -15,7 +15,9 @@ import os
 import torch
 
 from sglang.srt.layers.attention.tli.config import TLIProfile
-from sglang.srt.layers.attention.tli.indexer import TLIIndexer
+from sglang.srt.layers.attention.tli.indexer import (
+    TLIIndexer, quant4, quant4_pack, kq_unpack,
+)
 from sglang.srt.layers.attention.tli.backend import TLISparseAttnBackend
 
 dev = "cuda:0"
@@ -34,6 +36,18 @@ v_real = (torch.randn(S, Hkv, D, device=dev) * 0.05).float()
 prof = TLIProfile()
 idxer = TLIIndexer(prof, head_dim=D).to(dev)
 
+# ================= 0. M6 uint8+scale 三张量：逐位重建 + 显存口径 =================
+# 核心主张：kq_unpack(*quant4_pack(x)) 与 quant4(x) 逐位一致（格点 0-15 在
+# fp32 精确可表，重建与量化走同一 IEEE 运算序列）→ 4bit 存储零数值漂移；
+# 每 token-head 显存 nd2*4B(fp32) → nd2*1B(uint8) + 8B(双 scale) = 3.2×
+x0 = k_real[:2048][..., idxer.idx2]  # [2048, Hkv, nd2] 真实 trace
+g0, sc0, mn0 = quant4_pack(x0)
+assert g0.dtype == torch.uint8
+assert torch.equal(kq_unpack(g0, sc0, mn0), quant4(x0)), "M6 重建与 quant4 不逐位一致"
+b_old, b_new = x0.numel() * 4, g0.numel() + 8 * sc0.numel()
+print(f"[0] M6 4bit 存储: 重建与 quant4 逐位一致；"
+      f"{b_old // 2048 // Hkv}B → {b_new // 2048 // Hkv}B /token-head（{b_old / b_new:.2f}×）")
+
 # 4 个不同长度的"请求"（覆盖 span=0 边界 / span<far_tokens / 常规 / 长序列；
 # 最长取 S-64，给第二步 decode 留出 k_real 索引余量）
 S_list = [2049, 2500, 5000, S - 64]
@@ -46,11 +60,15 @@ indices = [idxer.build_block_index(k_real[:S_i]) for S_i in S_list]
 S_cap = max(S_list) + 128
 NBLK_CAP = (S_cap + prof.block_size - 1) // prof.block_size
 nd2 = 2 * prof.delta
-pool_kq = torch.zeros(n, S_cap, Hkv, nd2, device=dev)
+pool_kq = torch.zeros(n, S_cap, Hkv, nd2, dtype=torch.uint8, device=dev)
+pool_ksc = torch.zeros(n, S_cap, Hkv, device=dev)
+pool_kmn = torch.zeros(n, S_cap, Hkv, device=dev)
 pool_kmin = torch.zeros(n, NBLK_CAP, Hkv, prof.coarse_dim, device=dev)
 pool_kmax = torch.zeros_like(pool_kmin)
 for r, (S_i, idx) in enumerate(zip(S_list, indices)):
-    pool_kq[r, :S_i] = idx["kq"]
+    pool_kq[r, :S_i] = idx["kq_q"]
+    pool_ksc[r, :S_i] = idx["kq_sc"]
+    pool_kmn[r, :S_i] = idx["kq_mn"]
     pool_kmin[r, : idx["nblk"]] = idx["kmin"]
     pool_kmax[r, : idx["nblk"]] = idx["kmax"]
 
@@ -62,7 +80,11 @@ for t in t_list:
 q_b = torch.stack(q_rows)  # [n, H, D]（每请求取位置 ≤ t 的真实 q 行）
 
 rows_t = torch.arange(n, device=dev)
-sel_b = idxer.select_decode_batched(pool_kq, pool_kmin, pool_kmax, rows_t, S_list, q_b)
+pool_dict = {
+    "kq_q": pool_kq, "kq_sc": pool_ksc, "kq_mn": pool_kmn,
+    "kmin": pool_kmin, "kmax": pool_kmax,
+}
+sel_b = idxer.select_decode_batched(pool_dict, rows_t, S_list, q_b)
 
 mism_eager = mism_kern = 0
 for r, (S_i, idx, t) in enumerate(zip(S_list, indices, t_list)):
@@ -94,24 +116,31 @@ assert mism_kern == 0, "批量选择与 kernel per-request 不一致"
 row = 0
 S0 = 3000
 idx0 = idxer.build_block_index(k_real[:S0])
-pool_kq2 = torch.zeros(1, S_cap, Hkv, nd2, device=dev)
+pool_kq2 = torch.zeros(1, S_cap, Hkv, nd2, dtype=torch.uint8, device=dev)
+pool_ksc2 = torch.zeros(1, S_cap, Hkv, device=dev)
+pool_kmn2 = torch.zeros(1, S_cap, Hkv, device=dev)
 pool_kmin2 = torch.zeros(1, NBLK_CAP, Hkv, prof.coarse_dim, device=dev)
 pool_kmax2 = torch.zeros_like(pool_kmin2)
-pool_kq2[0, :S0] = idx0["kq"]
+pool_kq2[0, :S0] = idx0["kq_q"]
+pool_ksc2[0, :S0] = idx0["kq_sc"]
+pool_kmn2[0, :S0] = idx0["kq_mn"]
 pool_kmin2[0, : idx0["nblk"]] = idx0["kmin"]
 pool_kmax2[0, : idx0["nblk"]] = idx0["kmax"]
 # 步进覆盖：对齐开新块 / 单 token / 尾块+多新块
 cur = S0
 for step_n in [64, 1, 200, 337]:
     vd = {
-        "kmin": pool_kmin2[0], "kmax": pool_kmax2[0], "kq": pool_kq2[0],
+        "kmin": pool_kmin2[0], "kmax": pool_kmax2[0],
+        "kq_q": pool_kq2[0], "kq_sc": pool_ksc2[0], "kq_mn": pool_kmn2[0],
         "nblk": (cur + prof.block_size - 1) // prof.block_size, "S": cur,
     }
     idxer.update_block_index(vd, k_real[cur : cur + step_n])
     cur += step_n
 S_new = cur
 ref = idxer.build_block_index(k_real[:S_new])
-assert torch.equal(pool_kq2[0, :S_new], ref["kq"]), "pool 行增量 kq != 全量"
+assert torch.equal(pool_kq2[0, :S_new], ref["kq_q"]), "pool 行增量 kq_q != 全量"
+assert torch.equal(pool_ksc2[0, :S_new], ref["kq_sc"]), "pool 行增量 kq_sc != 全量"
+assert torch.equal(pool_kmn2[0, :S_new], ref["kq_mn"]), "pool 行增量 kq_mn != 全量"
 assert torch.equal(
     pool_kmin2[0, : ref["nblk"]], ref["kmin"]
 ), "pool 行增量 kmin != 全量"
@@ -126,32 +155,37 @@ m = 4
 S_starts = [2048, 2050, 3000, 3641]  # 2048 对齐；2050 尾块 2；3000 尾 48；3641 尾 57
 pools = []
 for side in range(2):
-    kq_ = torch.zeros(m, S_cap, Hkv, nd2, device=dev)
+    kq_ = torch.zeros(m, S_cap, Hkv, nd2, dtype=torch.uint8, device=dev)
+    ksc_ = torch.zeros(m, S_cap, Hkv, device=dev)
+    kmn2_ = torch.zeros(m, S_cap, Hkv, device=dev)
     kmn_ = torch.zeros(m, NBLK_CAP, Hkv, prof.coarse_dim, device=dev)
     kmx_ = torch.zeros_like(kmn_)
     for r, S_st in enumerate(S_starts):
         idx_r = idxer.build_block_index(k_real[:S_st])
-        kq_[r, :S_st] = idx_r["kq"]
+        kq_[r, :S_st] = idx_r["kq_q"]
+        ksc_[r, :S_st] = idx_r["kq_sc"]
+        kmn2_[r, :S_st] = idx_r["kq_mn"]
         kmn_[r, : idx_r["nblk"]] = idx_r["kmin"]
         kmx_[r, : idx_r["nblk"]] = idx_r["kmax"]
-    pools.append({"kq": kq_, "kmin": kmn_, "kmax": kmx_})
+    pools.append({"kq_q": kq_, "kq_sc": ksc_, "kq_mn": kmn2_, "kmin": kmn_, "kmax": kmx_})
 k_step = k_real[S_starts[0] : S_starts[0] + m].float()  # [m, Hkv, D] 各行新 token
 rows_m = torch.arange(m, device=dev)
 # 侧 A：逐行 update_block_index（view 口径）
 for r, S_st in enumerate(S_starts):
     vd = {
         "kmin": pools[0]["kmin"][r], "kmax": pools[0]["kmax"][r],
-        "kq": pools[0]["kq"][r],
+        "kq_q": pools[0]["kq_q"][r], "kq_sc": pools[0]["kq_sc"][r],
+        "kq_mn": pools[0]["kq_mn"][r],
         "nblk": (S_st + prof.block_size - 1) // prof.block_size, "S": S_st,
     }
     idxer.update_block_index(vd, k_step[r : r + 1])
 # 侧 B：批量 update_pool_rows_decode
 idxer.update_pool_rows_decode(pools[1], rows_m, S_starts, k_step)
 S_ends = [s + 1 for s in S_starts]
-for key in ("kq", "kmin", "kmax"):
+for key in ("kq_q", "kq_sc", "kq_mn", "kmin", "kmax"):
     for r, S_e in enumerate(S_ends):
         nb = (S_e + prof.block_size - 1) // prof.block_size
-        w = S_e if key == "kq" else nb
+        w = S_e if key.startswith("kq") else nb
         assert torch.equal(pools[0][key][r, :w], pools[1][key][r, :w]), (
             f"批量增量 {key} row{r} != 逐行"
         )
@@ -323,10 +357,36 @@ for r, (S_i, t) in enumerate(zip(S_list, t_list)):
         / p_.sum().item()
     )
 print(f"[4] 行级 mass coverage: mean={sum(covs) / len(covs):.5f} min={min(covs):.5f}")
+# 剩余 mass 口径（剔除强制 token）：sink [0, sink_bs) 与滑窗 [sw_lo, t]
+# 恒被选中、与索引器质量无关；总口径被 sink mass（H1 实测 0.37-0.71）
+# 稀释至接近饱和，区分度低。竞争区 coverage = 选中 token ∩ 竞争区
+# [sink_bs, sw_lo) 的 mass / 竞争区总 mass——索引器真实分辨力的口径
+# （E4c 的 L1 块级 far capture 是同思想在 L1/远端子集上的特例）
+sink_hi = prof.sink_blocks * prof.block_size
+covs_res, res_frac = [], []
+for r, (S_i, t) in enumerate(zip(S_list, t_list)):
+    qg = q_b[r].reshape(1, Hkv, G, D)
+    s = torch.einsum("bhgd,chd->bhgc", qg, k_real[: t + 1]).sum(-2) * (D**-0.5)
+    p_ = torch.softmax(s, dim=-1)[0]  # [Hkv, t+1]
+    sw_lo = max(0, t - prof.sliding_window + 1)
+    contested = (torch.arange(t + 1, device=dev) >= sink_hi) & (
+        torch.arange(t + 1, device=dev) < sw_lo
+    )
+    denom = p_[:, contested].sum().item()
+    sel_pos = sel_b[r].clamp(max=t)
+    in_c = contested[sel_pos] & (sel_b[r] < S_i)  # 哨兵/垃圾 lane 剔除
+    num = p_.gather(1, sel_pos).masked_fill(~in_c, 0).sum().item()
+    covs_res.append(num / denom)
+    res_frac.append(denom / p_.sum().item())
+print(f"[4] 剩余 mass coverage（竞争区 = 总 mass 去除 sink+滑窗）: "
+      f"mean={sum(covs_res) / len(covs_res):.5f} min={min(covs_res):.5f}")
+print(f"[4] 竞争区占总 mass 比例: mean={sum(res_frac) / len(res_frac):.5f} "
+      f"min={min(res_frac):.5f}（总口径 0.99+ 主要由强制位贡献的直接证据）")
 # 阈值口径：L03 是 far-heavy 层（E4c：L1 块上界 far capture 0.52-0.74，
 # far mass 集中单 head），行级 pooled coverage 固有方差 0.95-1.0
 # （eager 同行 exact 同值 0.95121@t=16892 / 0.99952@t=S-1）；批量与
 # eager 的语义一致已由 [1] 集合相等保证，此处仅设 sanity 下界
 assert min(covs) > 0.94 and sum(covs) / len(covs) > 0.98, f"批量选择质量异常: {covs}"
+assert sum(covs_res) / len(covs_res) > 0.9, f"竞争区 coverage 异常低: {covs_res}"
 
 print("ALL PASS")

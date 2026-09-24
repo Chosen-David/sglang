@@ -1,0 +1,502 @@
+[
+ {
+  "layer": 3,
+  "t": 16956,
+  "delta": 16,
+  "coarse_dim": 32,
+  "cov_total": 0.99952,
+  "cov_residual": 0.99747,
+  "residual_frac": 0.1886,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 3,
+  "t": 8478,
+  "delta": 16,
+  "coarse_dim": 32,
+  "cov_total": 0.83801,
+  "cov_residual": 0.81154,
+  "residual_frac": 0.85958,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 3,
+  "t": 16956,
+  "delta": 8,
+  "coarse_dim": 32,
+  "cov_total": 0.88351,
+  "cov_residual": 0.38237,
+  "residual_frac": 0.1886,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 3,
+  "t": 8478,
+  "delta": 8,
+  "coarse_dim": 32,
+  "cov_total": 0.66157,
+  "cov_residual": 0.61268,
+  "residual_frac": 0.85958,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 3,
+  "t": 16956,
+  "delta": 4,
+  "coarse_dim": 32,
+  "cov_total": 0.88279,
+  "cov_residual": 0.37854,
+  "residual_frac": 0.1886,
+  "kq_bytes_per_token_head": 16
+ },
+ {
+  "layer": 3,
+  "t": 8478,
+  "delta": 4,
+  "coarse_dim": 32,
+  "cov_total": 0.63901,
+  "cov_residual": 0.5954,
+  "residual_frac": 0.85958,
+  "kq_bytes_per_token_head": 16
+ },
+ {
+  "layer": 3,
+  "t": 16956,
+  "delta": 16,
+  "coarse_dim": 16,
+  "cov_total": 0.99952,
+  "cov_residual": 0.99747,
+  "residual_frac": 0.1886,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 3,
+  "t": 8478,
+  "delta": 16,
+  "coarse_dim": 16,
+  "cov_total": 0.83801,
+  "cov_residual": 0.81154,
+  "residual_frac": 0.85958,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 3,
+  "t": 16956,
+  "delta": 8,
+  "coarse_dim": 16,
+  "cov_total": 0.88351,
+  "cov_residual": 0.38237,
+  "residual_frac": 0.1886,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 3,
+  "t": 8478,
+  "delta": 8,
+  "coarse_dim": 16,
+  "cov_total": 0.66157,
+  "cov_residual": 0.61268,
+  "residual_frac": 0.85958,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 5,
+  "t": 16956,
+  "delta": 16,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.18881,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 5,
+  "t": 8478,
+  "delta": 16,
+  "coarse_dim": 32,
+  "cov_total": 0.74987,
+  "cov_residual": 0.72649,
+  "residual_frac": 0.91453,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 5,
+  "t": 16956,
+  "delta": 8,
+  "coarse_dim": 32,
+  "cov_total": 0.8726,
+  "cov_residual": 0.34065,
+  "residual_frac": 0.18881,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 5,
+  "t": 8478,
+  "delta": 8,
+  "coarse_dim": 32,
+  "cov_total": 0.50348,
+  "cov_residual": 0.48981,
+  "residual_frac": 0.91453,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 5,
+  "t": 16956,
+  "delta": 4,
+  "coarse_dim": 32,
+  "cov_total": 0.87259,
+  "cov_residual": 0.34061,
+  "residual_frac": 0.18881,
+  "kq_bytes_per_token_head": 16
+ },
+ {
+  "layer": 5,
+  "t": 8478,
+  "delta": 4,
+  "coarse_dim": 32,
+  "cov_total": 0.59481,
+  "cov_residual": 0.58967,
+  "residual_frac": 0.91453,
+  "kq_bytes_per_token_head": 16
+ },
+ {
+  "layer": 5,
+  "t": 16956,
+  "delta": 16,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.18881,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 5,
+  "t": 8478,
+  "delta": 16,
+  "coarse_dim": 16,
+  "cov_total": 0.74987,
+  "cov_residual": 0.72649,
+  "residual_frac": 0.91453,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 5,
+  "t": 16956,
+  "delta": 8,
+  "coarse_dim": 16,
+  "cov_total": 0.8726,
+  "cov_residual": 0.34067,
+  "residual_frac": 0.18881,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 5,
+  "t": 8478,
+  "delta": 8,
+  "coarse_dim": 16,
+  "cov_total": 0.50348,
+  "cov_residual": 0.48981,
+  "residual_frac": 0.91453,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 10,
+  "t": 16956,
+  "delta": 16,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 0.99999,
+  "residual_frac": 0.0,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 10,
+  "t": 8478,
+  "delta": 16,
+  "coarse_dim": 32,
+  "cov_total": 0.99967,
+  "cov_residual": 0.99772,
+  "residual_frac": 0.14373,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 10,
+  "t": 16956,
+  "delta": 8,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 0.99999,
+  "residual_frac": 0.0,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 10,
+  "t": 8478,
+  "delta": 8,
+  "coarse_dim": 32,
+  "cov_total": 0.99956,
+  "cov_residual": 0.99694,
+  "residual_frac": 0.14373,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 10,
+  "t": 16956,
+  "delta": 4,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 0.99994,
+  "residual_frac": 0.0,
+  "kq_bytes_per_token_head": 16
+ },
+ {
+  "layer": 10,
+  "t": 8478,
+  "delta": 4,
+  "coarse_dim": 32,
+  "cov_total": 0.99901,
+  "cov_residual": 0.99314,
+  "residual_frac": 0.14373,
+  "kq_bytes_per_token_head": 16
+ },
+ {
+  "layer": 10,
+  "t": 16956,
+  "delta": 16,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 0.99999,
+  "residual_frac": 0.0,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 10,
+  "t": 8478,
+  "delta": 16,
+  "coarse_dim": 16,
+  "cov_total": 0.99967,
+  "cov_residual": 0.99772,
+  "residual_frac": 0.14373,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 10,
+  "t": 16956,
+  "delta": 8,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 0.99999,
+  "residual_frac": 0.0,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 10,
+  "t": 8478,
+  "delta": 8,
+  "coarse_dim": 16,
+  "cov_total": 0.99956,
+  "cov_residual": 0.99694,
+  "residual_frac": 0.14373,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 20,
+  "t": 16956,
+  "delta": 16,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.01479,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 20,
+  "t": 8478,
+  "delta": 16,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.39951,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 20,
+  "t": 16956,
+  "delta": 8,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.01479,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 20,
+  "t": 8478,
+  "delta": 8,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.39951,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 20,
+  "t": 16956,
+  "delta": 4,
+  "coarse_dim": 32,
+  "cov_total": 0.99893,
+  "cov_residual": 0.92784,
+  "residual_frac": 0.01479,
+  "kq_bytes_per_token_head": 16
+ },
+ {
+  "layer": 20,
+  "t": 8478,
+  "delta": 4,
+  "coarse_dim": 32,
+  "cov_total": 0.95619,
+  "cov_residual": 0.98758,
+  "residual_frac": 0.39951,
+  "kq_bytes_per_token_head": 16
+ },
+ {
+  "layer": 20,
+  "t": 16956,
+  "delta": 16,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.01479,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 20,
+  "t": 8478,
+  "delta": 16,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.39951,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 20,
+  "t": 16956,
+  "delta": 8,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.01479,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 20,
+  "t": 8478,
+  "delta": 8,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.39951,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 33,
+  "t": 16956,
+  "delta": 16,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.01494,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 33,
+  "t": 8478,
+  "delta": 16,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.00852,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 33,
+  "t": 16956,
+  "delta": 8,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.01494,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 33,
+  "t": 8478,
+  "delta": 8,
+  "coarse_dim": 32,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.00852,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 33,
+  "t": 16956,
+  "delta": 4,
+  "coarse_dim": 32,
+  "cov_total": 0.99959,
+  "cov_residual": 0.97234,
+  "residual_frac": 0.01494,
+  "kq_bytes_per_token_head": 16
+ },
+ {
+  "layer": 33,
+  "t": 8478,
+  "delta": 4,
+  "coarse_dim": 32,
+  "cov_total": 0.875,
+  "cov_residual": 0.91974,
+  "residual_frac": 0.00852,
+  "kq_bytes_per_token_head": 16
+ },
+ {
+  "layer": 33,
+  "t": 16956,
+  "delta": 16,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.01494,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 33,
+  "t": 8478,
+  "delta": 16,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.00852,
+  "kq_bytes_per_token_head": 40
+ },
+ {
+  "layer": 33,
+  "t": 16956,
+  "delta": 8,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.01494,
+  "kq_bytes_per_token_head": 24
+ },
+ {
+  "layer": 33,
+  "t": 8478,
+  "delta": 8,
+  "coarse_dim": 16,
+  "cov_total": 1.0,
+  "cov_residual": 1.0,
+  "residual_frac": 0.00852,
+  "kq_bytes_per_token_head": 24
+ }
+]

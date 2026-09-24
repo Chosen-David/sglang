@@ -254,7 +254,8 @@ assert max(diffs_mix) < 1e-4, f"混跑不一致: {max(diffs_mix)}"
 pool_e, pool_g = be_e.index_pools[3], be_g.index_pools[3]
 row_e, row_g = pool_e["row_of"][req_ids[1]], pool_g["row_of"][req_ids[1]]
 L_now = cur[1] - 1
-assert torch.equal(pool_e["kq"][row_e, :L_now], pool_g["kq"][row_g, :L_now]), "pool kq 不一致"
+for key in ("kq_q", "kq_sc", "kq_mn"):
+    assert torch.equal(pool_e[key][row_e, :L_now], pool_g[key][row_g, :L_now]), f"pool {key} 不一致"
 nb = (L_now + 63) // 64
 assert torch.equal(pool_e["kmin"][row_e, :nb], pool_g["kmin"][row_g, :nb]), "pool kmin 不一致"
 print(f"[A2] pool 行内容（graph 增量 vs eager）逐位一致（S={L_now}，含跳变重建）")
@@ -346,8 +347,8 @@ for r_i, S_i in enumerate(S_short_list):
     s_attn = torch.einsum("bhgd,chd->bhgc", qg, k_real[: t + 1]).sum(-2) * (D**-0.5)
     p_ = torch.softmax(s_attn, dim=-1)[0]
     sel_r = be_s.indexers[3].select_decode_batched(
-        be_s.index_pools[3]["kq"], be_s.index_pools[3]["kmin"], be_s.index_pools[3]["kmax"],
-        be_s._graph_rows_l[3], fb_s.seq_lens.to(torch.long), q_full.float(),
+        be_s.index_pools[3], be_s._graph_rows_l[3],
+        fb_s.seq_lens.to(torch.long), q_full.float(),
     )[r_i]
     cov = (
         p_.gather(1, sel_r.clamp(max=t)).masked_fill(sel_r >= S_i, 0).sum().item()
