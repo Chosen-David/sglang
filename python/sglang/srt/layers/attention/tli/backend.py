@@ -242,10 +242,17 @@ class TLISparseAttnBackend(AttentionBackend):
         pool_l = None
         # M4：稀疏请求的索引写入 per-layer 共享 pool 行（增量 O(n)），
         # n≥2 时两级选择批量 eager 化（launch 数与 bs 无关）；dense 逐请求
+        # phase-3：req/seq_len 一次 .tolist()（2 次同步替代逐行 int() 的
+        # 2×bs 次）；单 token 增量行收集后批量维护（update_pool_rows_decode）
+        reqs_l = forward_batch.req_pool_indices.tolist()
+        lens_l = forward_batch.seq_lens.tolist()
         sparse_rows: list[tuple[int, int, int]] = []  # (batch_row, pool_row, seq_len)
+        inc_rows: list[int] = []  # 批量增量维护的 (pool 行, 旧 S, req)
+        inc_S_old: list[int] = []
+        inc_reqs: list[int] = []
         for i in range(bs):
-            req = int(forward_batch.req_pool_indices[i])
-            seq_len = int(forward_batch.seq_lens[i])  # 含当前 token
+            req = reqs_l[i]
+            seq_len = lens_l[i]  # 含当前 token
             if seq_len <= self.dense_threshold:
                 t0 = self.timer.tick()
                 out[i] = self._dense_attn(q[i], req_to_token[req, :seq_len], kv_pool, layer_id)
@@ -268,13 +275,32 @@ class TLISparseAttnBackend(AttentionBackend):
                 self.timer.add("build", time.time() - t0)
             elif seq_len > S_st:
                 # 增量：只取新 token（O(n)，E5b gov_report 186min 根因修复）
-                t0 = self.timer.tick()
-                self._ensure_pool_s(pool_l, seq_len)
-                k_new = k_buf[req_to_token[req, S_st:seq_len]].float()
-                indexer.update_block_index(self._row_views(pool_l, row, S_st), k_new)
+                if seq_len - S_st == 1:
+                    # decode 常态（每行恰 1 新 token）→ 收集后批量维护
+                    inc_rows.append(row)
+                    inc_S_old.append(S_st)
+                    inc_reqs.append(req)
+                else:
+                    t0 = self.timer.tick()
+                    self._ensure_pool_s(pool_l, seq_len)
+                    k_new = k_buf[req_to_token[req, S_st:seq_len]].float()
+                    indexer.update_block_index(self._row_views(pool_l, row, S_st), k_new)
+                    self.timer.add("increment", time.time() - t0)
                 pool_l["S"][row] = seq_len
-                self.timer.add("increment", time.time() - t0)
             sparse_rows.append((i, row, seq_len))
+        if inc_rows:
+            # 批量增量维护（~10 launch 总量）：新 token K 从 pool 槽位一次
+            # gather 出 [n, Hkv, D]，flat 索引 scatter 写 kq/kmin/kmax
+            t0 = self.timer.tick()
+            self._ensure_pool_s(pool_l, max(lens_l))
+            reqs_t = torch.tensor(inc_reqs, device=q.device)
+            S_old_t = torch.tensor(inc_S_old, device=q.device)
+            slots = req_to_token[reqs_t, S_old_t]  # [n]（req_to_token 已含新 token 槽位）
+            k_new_b = k_buf[slots].float()  # [n, Hkv, D]
+            indexer.update_pool_rows_decode(
+                pool_l, torch.tensor(inc_rows, device=q.device), inc_S_old, k_new_b
+            )
+            self.timer.add("increment", time.time() - t0)
         if sparse_rows:
             t0 = self.timer.tick()
             if len(sparse_rows) >= 2 and self.profile.use_batch_select:
@@ -451,11 +477,12 @@ class TLISparseAttnBackend(AttentionBackend):
         n = sel.shape[0]
         H, D = q.shape[1], self.head_dim
         rows = torch.tensor(row_idx, device=q.device)
-        seq_lens = torch.tensor(
-            seq_lens, device=q.device, dtype=sel.dtype
-        ).view(-1, 1, 1)
-        valid = sel < seq_lens  # [n, Hkv, K2]
-        sel_c = sel.clamp(max=int(seq_lens.max().item()) - 1)
+        seq_lens_t = torch.tensor(seq_lens, device=q.device, dtype=torch.long).view(
+            -1, 1, 1
+        )
+        valid = sel < seq_lens_t  # [n, Hkv, K2]
+        # Python max（避免 .item() 的 GPU 同步；seq_lens 是 Python list）
+        sel_c = sel.clamp(max=max(seq_lens) - 1)
         # req_to_token 是 2D [max_req, max_S]：一次 gather 出全部请求槽位
         reqs = forward_batch.req_pool_indices[rows]  # [n]
         locs_full = req_to_token[reqs]  # [n, max_S]（每行 = 该请求逻辑位置 → 槽位）

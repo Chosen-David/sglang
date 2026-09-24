@@ -192,14 +192,57 @@ kernel 56 → +L2 kernel **51.4 ms/step**；归因（TLI_PROFILE_TIMING 同口�
 论文叙事：M3 曲线本身是「prototype 到生产级推理引擎的工程鸿沟」的直接证据，批量化前后对比
 （M3 vs M4 重跑同曲线）构成系统章节的完整故事线。
 
+### 8b-2. M4 批量化 decode 实测（2026-09-24，commit 95a13278a 起，同曲线三阶段）
+
+实现（三阶段递进，每阶段对拍后提交）：
+- **phase-1 批量稀疏前向**：req_to_token 2D 一次 gather 全部槽位 + 批量 einsum（_sparse_attn_batched，
+  ~6 launch 替代每请求 ~40）；
+- **phase-2 共享 index pool + 批量选择**：per-layer pool（kq/kmin/kmax 预分配 [R,cap]+几何扩容+
+  行生命周期回收）+ `select_decode_batched`（全 eager 批量，~15 launch 与 bs 无关；哨兵 S_cap
+  语义 + per-row 配额裁剪 + 滑窗强制块保留）；n==1 保留 per-request L1/L2 fused kernel 路径；
+- **phase-3 批量增量维护 + 去同步**：`update_pool_rows_decode`（flat 索引 scatter，~10 launch 总量
+  替代逐行 update）+ `.tolist()` 一次替代逐行 `int()` 同步 + Python max 替代 `.item()`。
+
+正确性：test_tli_m4.py ALL PASS（批量 vs eager/kernel 选择 32/32 head 集合一致；pool 行增量 vs
+全量重建逐位一致；多请求前向两步 max|diff|=2.6e-08；行回收 ✓；mass coverage 与 eager 同行
+exact 同值——L03 far-heavy 层行级方差 0.95-1.0 属算法固有，eager 同值）；test_tli_m2b 回归 PASS。
+调试资产：①批量 topk 统一宽度必须 per-row 配额裁剪；②垃圾块剔除须作用于 scatter 源（整体 &
+  掩码会误删滑窗强制块）；③req_to_token 新位置未初始化=0 会让多请求 out_cache_loc 撞同一槽位
+（KV 池污染，表面症状是增量步对拍分歧）。
+
+同曲线对比（bs×S≈9.9K，ms/step，64 步 decode，无 CUDA graph）：
+
+| bs | M3-c 原型 | phase-1 | phase-2 | phase-3 | triton |
+|---|---|---|---|---|---|
+| 1 | 51.4 | 63.8* | 61.1* | 73.8* | 15.1 |
+| 8 | 369.7 | 261.9 | 197.0 | **166.4** | 15.7 |
+| 16 | 666.4 | 483.4 | 311.0 | **207.8** | 19.2 |
+| 32 | 1236.8 | 885.4 | 517.4 | (跑测中) | 31.9 |
+
+\* bs=1 各轮波动为 prompt 混合差异（narrativeqa 唯一长 context 不足，混其他 LongBench 子集）。
+
+**归因链**：线性项 38→14.3→5.2 ms/req（phase-3 后剩余线性项=批量路径的 GPU 计算）；
+固定项 ~125 ms/step = ~35 launch/层 × 36 层的纯调度开销 → **下一个杠杆是 CUDA graph（M5）**。
+定位修正：S=10K 档 decode KV 流量本来就小（triton 全量 KV 读 ~1.5GB/步 ≈ 0.45ms），稀疏收益
+不在此档兑现；**主表目标形态 = bs(8-64)×S(10K-131K) 矩阵**——bs=32×131K 时 triton KV 读
+~620GB/步（~188ms 纯 HBM），稀疏 1/8 流量的收益在长 S 才显现（与 Quest/HISA「收益随上下文
+长度增长」叙事一致）。S=131K 需要 kq 4bit（M6，fp32 pool 5.4GB/层装不下）。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
 2. ~~sglang M2/M3~~ ✅ 全部完成（§5.0 设计报告：算法同步 + fused L1 + paged 寻址 + O(n) 增量索引（预分配版）+ 稀疏 prefill + L2 级联 fused kernel + e2e 吞吐基线与归因 + 高并发曲线）；e2e smoke 逐字一致
-3. **M4 批量化 decode（当前主线，H20）**：共享 index pool（kmin/kmax 预分配 [R_max,NBLK_MAX,Hkv,d']）+ kq 真 4bit 存储（uint8+scale，kernel 内 dequant）+ L1/L2 kernel grid 加 batch 维 + _sparse_attn 批量 gather + CUDA graph → 吞吐主表（bs×S 矩阵）
-4. H100 吞吐主表（机器申请中；H20 层已备好算力无关性论证：H20 TC 仅 H100 15% 仍拿到质量/流量收益）
-5. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
-6. ~~Qwen3-32B 泛化复验~~ ✅（§8：A Go/D' Go 且更强/gate 判据修正为 negative result）+ 论文写作（骨架已定，主表已齐）
+3. ~~M4 批量化 decode~~ ✅（§8b-2：三阶段 1236.8→(跑测中)@bs32，线性项 38→5.2ms/req，对拍全过）
+4. **M5 CUDA graph decode**（#25）：去同步 + 形状静态化 + capture 对接——固定项 ~125ms/step
+   纯 launch 开销的唯一解
+5. **M6 kq 真 4bit**（#26）：uint8+scale（128→40B/token-head），S=131K 主表硬前提
+6. **M7 prefill 加速**（#27）：chunked 增量索引复用（现每 chunk 全量 rebuild O(S²/chunk)）+
+   批量 build + S 梯度基准（0.7K→131K）
+7. **M8 H 卡特有优化**（#28）：TMA/Tensor Descriptor gather（Hopper）+ 141GB 大显存专属实验轴
+   （bs=64×S=131K 只有此卡放得下）+ cluster/L2 residency 探索，microbench 前后对比
+8. H100 吞吐主表（机器申请中；H20 层已备好算力无关性论证：H20 TC 仅 H100 15% 仍拿到质量/流量收益）+ RULER/NIAH 补评测（对齐 Quest/SnapKV/HISA 论文数据集口径）
+9. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
+10. ~~Qwen3-32B 泛化复验~~ ✅（§8：A Go/D' Go 且更强/gate 判据修正为 negative result）+ 论文写作（骨架已定，主表已齐）
 
 ## 10. 答辩防御清单（更新版）
 

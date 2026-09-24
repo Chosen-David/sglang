@@ -1,0 +1,62 @@
+{
+ "triton": [
+  {
+   "bs": 1,
+   "prefill_s": 1.488,
+   "decode_s": 0.966,
+   "step_ms": 15.1,
+   "tok_per_s": 66.24
+  },
+  {
+   "bs": 8,
+   "prefill_s": 9.99,
+   "decode_s": 1.005,
+   "step_ms": 15.7,
+   "tok_per_s": 509.51
+  },
+  {
+   "bs": 16,
+   "prefill_s": 18.85,
+   "decode_s": 1.226,
+   "step_ms": 19.2,
+   "tok_per_s": 835.16
+  },
+  {
+   "bs": 32,
+   "prefill_s": 34.635,
+   "decode_s": 2.043,
+   "step_ms": 31.9,
+   "tok_per_s": 1002.4
+  }
+ ],
+ "tli": [
+  {
+   "bs": 1,
+   "prefill_s": 27.675,
+   "decode_s": 3.911,
+   "step_ms": 61.1,
+   "tok_per_s": 16.36
+  },
+  {
+   "bs": 8,
+   "prefill_s": 179.261,
+   "decode_s": 12.609,
+   "step_ms": 197.0,
+   "tok_per_s": 40.61
+  },
+  {
+   "bs": 16,
+   "prefill_s": 344.679,
+   "decode_s": 19.905,
+   "step_ms": 311.0,
+   "tok_per_s": 51.44
+  },
+  {
+   "bs": 32,
+   "prefill_s": 632.179,
+   "decode_s": 33.115,
+   "step_ms": 517.4,
+   "tok_per_s": 61.85
+  }
+ ]
+}

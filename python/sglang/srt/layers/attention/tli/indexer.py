@@ -471,6 +471,70 @@ class TLIIndexer:
         return torch.cat(out, dim=0)  # [Nq, Hkv, K2]
 
     @torch.no_grad()
+    def update_pool_rows_decode(
+        self,
+        pool_l: dict,
+        rows: torch.Tensor,
+        S_old: list[int],
+        k_new: torch.Tensor,
+    ) -> None:
+        """M4 phase-3：decode 批量增量维护（每行恰追加 1 个新 token）。
+
+        pool_l: backend 共享 pool dict；rows: [n] 行号；S_old: 每行旧有效
+        长度（Python int）；k_new: [n, Hkv, D] fp32（各行新 token）。
+        语义等价于逐行 update_block_index(_row_views(pool_l,row,S_old_r),
+        k_new_r[None])——对齐开新块 / 非对齐尾块 min/max 合并，全部
+        flat 索引 scatter 完成（~10 launch 总量，与行数无关地替代
+        O(n) 次逐行调用）。
+
+        前提：pool 容量已足够（backend 先 _ensure_pool_s）；调用方负责
+        更新 pool_l["S"][row]。
+        """
+        p = self.profile
+        bs = p.block_size
+        n = len(S_old)
+        if n == 0:
+            return
+        Hkv = k_new.shape[1]
+        nd2 = 2 * p.delta
+        d1 = p.coarse_dim
+        device = k_new.device
+        S_cap = pool_l["kq"].shape[1]
+        nblk_cap = pool_l["kmin"].shape[1]
+        rows_l = rows.to(torch.long)
+        S_old_t = torch.tensor(S_old, device=device)
+
+        # ---- kq 追加：kq_pool[row, S_old_r] = quant4(k_new_r[..., idx2]) ----
+        kq_new = quant4(k_new[..., self.idx2])  # [n, Hkv, nd2]
+        base_q = rows_l * (S_cap * Hkv * nd2) + S_old_t * (Hkv * nd2)
+        off_q = (
+            base_q.view(n, 1, 1)
+            + torch.arange(Hkv, device=device).view(1, Hkv, 1) * nd2
+            + torch.arange(nd2, device=device).view(1, 1, nd2)
+        )
+        pool_l["kq"].reshape(-1)[off_q.reshape(-1)] = kq_new.reshape(-1)
+
+        # ---- kmin/kmax：对齐行开新块（min=max=新 token），非对齐行
+        # 与旧尾块 min/max 合并（结合律，与逐行 update 逐位一致）----
+        ks = k_new[..., self.idx1]  # [n, Hkv, d']
+        aligned = S_old_t % bs == 0  # [n]
+        nblk_old = (S_old_t + bs - 1) // bs
+        blk_idx = torch.where(aligned, nblk_old, nblk_old - 1)  # 目标块
+        base_m = rows_l * (nblk_cap * Hkv * d1) + blk_idx * (Hkv * d1)
+        off_m = (
+            base_m.view(n, 1, 1)
+            + torch.arange(Hkv, device=device).view(1, Hkv, 1) * d1
+            + torch.arange(d1, device=device).view(1, 1, d1)
+        )
+        off_mf = off_m.reshape(-1)
+        old_mn = pool_l["kmin"].reshape(-1)[off_mf].view(n, Hkv, d1)
+        old_mx = pool_l["kmax"].reshape(-1)[off_mf].view(n, Hkv, d1)
+        mn_val = torch.where(aligned.view(n, 1, 1), ks, torch.minimum(old_mn, ks))
+        mx_val = torch.where(aligned.view(n, 1, 1), ks, torch.maximum(old_mx, ks))
+        pool_l["kmin"].reshape(-1)[off_mf] = mn_val.reshape(-1)
+        pool_l["kmax"].reshape(-1)[off_mf] = mx_val.reshape(-1)
+
+    @torch.no_grad()
     def select_decode_batched(
         self,
         kq_pool: torch.Tensor,

@@ -120,6 +120,43 @@ assert torch.equal(
 ), "pool 行增量 kmax != 全量"
 print(f"[2] pool 行增量维护: S={S0}→{S_new} 与全量重建逐位一致")
 
+# ---- 2b. update_pool_rows_decode 批量增量 vs 逐行 update_block_index ----
+# 4 行不同起点（覆盖对齐开新块 / 尾块合并），两份独立 pool 逐位对拍
+m = 4
+S_starts = [2048, 2050, 3000, 3641]  # 2048 对齐；2050 尾块 2；3000 尾 48；3641 尾 57
+pools = []
+for side in range(2):
+    kq_ = torch.zeros(m, S_cap, Hkv, nd2, device=dev)
+    kmn_ = torch.zeros(m, NBLK_CAP, Hkv, prof.coarse_dim, device=dev)
+    kmx_ = torch.zeros_like(kmn_)
+    for r, S_st in enumerate(S_starts):
+        idx_r = idxer.build_block_index(k_real[:S_st])
+        kq_[r, :S_st] = idx_r["kq"]
+        kmn_[r, : idx_r["nblk"]] = idx_r["kmin"]
+        kmx_[r, : idx_r["nblk"]] = idx_r["kmax"]
+    pools.append({"kq": kq_, "kmin": kmn_, "kmax": kmx_})
+k_step = k_real[S_starts[0] : S_starts[0] + m].float()  # [m, Hkv, D] 各行新 token
+rows_m = torch.arange(m, device=dev)
+# 侧 A：逐行 update_block_index（view 口径）
+for r, S_st in enumerate(S_starts):
+    vd = {
+        "kmin": pools[0]["kmin"][r], "kmax": pools[0]["kmax"][r],
+        "kq": pools[0]["kq"][r],
+        "nblk": (S_st + prof.block_size - 1) // prof.block_size, "S": S_st,
+    }
+    idxer.update_block_index(vd, k_step[r : r + 1])
+# 侧 B：批量 update_pool_rows_decode
+idxer.update_pool_rows_decode(pools[1], rows_m, S_starts, k_step)
+S_ends = [s + 1 for s in S_starts]
+for key in ("kq", "kmin", "kmax"):
+    for r, S_e in enumerate(S_ends):
+        nb = (S_e + prof.block_size - 1) // prof.block_size
+        w = S_e if key == "kq" else nb
+        assert torch.equal(pools[0][key][r, :w], pools[1][key][r, :w]), (
+            f"批量增量 {key} row{r} != 逐行"
+        )
+print(f"[2b] update_pool_rows_decode 批量增量: 4 行（对齐/非对齐混合）与逐行逐位一致")
+
 # ================= 3. backend 多请求 forward_decode =================
 class FakePool:
     def __init__(self, k_pool, v_pool):
