@@ -384,7 +384,7 @@ self.layer_far_skip: torch.BoolTensor [n_layers]   # True = 该层跳过远端�
 
 ## 5. sglang 集成设计（新分支 `two-level-indexer`，**M1 已落地 2026-09-23**）
 
-### 5.0 当前进度（M2 前半已落地 2026-09-23 晚）
+### 5.0 当前进度（M3-b/c 已落地 2026-09-24，commit 36b6c8a37）
 
 已落地（sglang 分支 `two-level-indexer`，基于 fork 最新 main 4b186cfea）：
 - **M1**：`tli/{config,indexer,backend}.py` + 注册名 **`tli`**（attention_registry.py + choices.py）；needle32k 真实 trace mass coverage 1.0000，算法移植正确性闭环。
@@ -392,10 +392,35 @@ self.layer_far_skip: torch.BoolTensor [n_layers]   # True = 该层跳过远端�
   - `indexer.select` 同步 E4c 修正算法：**B' far/near 分区 top-K2**（far_tokens=256，near_floor 保护防 far 预算吃光近端）+ **D' topk 截断到有效块数**；
   - `tli/kernels.py`——**Triton fused L1 kernel**（`tli_l1_topk`：单 launch 子空间区间算术 + D' 剔除 + 当前块强制 + in-kernel 阈值二分 top-K1），E8-2 原型生产化；
   - 单测 `tli/test_tli_m2.py`（真实 trace hotpotqa L03）：B' 分区 mass **0.99952**（与 two-level-attention 侧 0.9995 一致）；fused kernel 与 eager 块选择 **127/129 一致**（并列截断差异）。
+- **M2 后半（e282de8fc）**：paged 寻址（req_to_token 间接）+ O(n) 精确增量索引 + 稀疏 prefill（select_batched）；test_tli_m2b 全链路对拍 PASS。
+- **M3-a/b/c（2026-09-24，bfe373c18 + 36b6c8a37）**：
+  - 吞吐基线与归因（详见 §5.0.1）；`_sparse_attn` 向量化（Hkv 循环 → 单次 flat gather + 批量 einsum）；
+  - **L2 级联 fused kernel 接入**（`tli_l2_partition_topk`）：混合形态 = Triton pass1（gather+GEMV 打分写 far/near 双池 scratch）+ torch.topk 精选 + 滑窗 `arange` 精确复制（近端配额扣减 F=t+1-sw_lo）；**池边界即因果边界**（far 池上界 ≤ t+1-near_len、near 池 < SW_LO，替代 eager fine 矩阵因果 mask，L1 垃圾块天然落池外）；哨兵 S pad 约定。对拍 jaccard **1.0000**（S=9891/131072 × t=末位/回退/中段全过）+ e2e 输出与 eager **逐字一致**。纯 kernel 版 No-Go：4bit 分数并列在终选级过选 130-256/head 无下游兜底 + 120 轮二分串行反慢 4.5×——**L1 能容忍多选（L2 吸收）、L2 不能**（级联 kernel 化通用教训）；
+  - **增量索引预分配**（几何扩容 buffer 替代每步 torch.cat 的 O(S) 全量拷贝——S=131K 时 kq 134MB×36 层 ≈ 4.8GB/步纯 memcpy）；增量==全量重建仍逐位一致；update 延迟 0.128ms 与 S 无关。
 
-prototype 边界（M2 后半 / M3 待做，backend.py 头部已声明）：
-- decode 是 gather-全量-K + torch 稀疏前向（correctness-first）；M2 后半 = L2 级联 kernel（块选择→gather 4bit→分区 topk 单 launch）+ 接导师 TileLang 两级 kernel（`tls_attn/ops/`）+ paged gather（page table）；
-- prefill 退 dense；M2 = QSA 式行分块稀疏 prefill；
+#### 5.0.1 M3 实测结论（2026-09-24，Qwen3-8B 真实 narrativeqa/LongBench 上下文，H20）
+
+**decode 单步延迟（bs=1，tli vs triton，均 disable_cuda_graph）**：tli eager 84–90 → 向量化+L1k 59–66 ms/step（1.4×）；**与 S 无关** → 开销是 launch 数主导而非算力/带宽。select 微基准（L1+L2 双 kernel vs eager）：9.9K 1.34× / 131K 1.05×（小 S 收益=砍 launch 数，大 S 时 eager L2 的 topk/gather 本身已占大头，kernel 只省 fine 矩阵与 [Tc,Hkv,nd2] 中间量）。
+
+**M3-c 高并发曲线（bs=1/8/16/32 × S≈9.9K token，64 步 decode）**：
+
+| bs | triton ms/step | triton tok/s | tli ms/step | tli tok/s |
+|---|---|---|---|---|
+| 1 | 10.0 | 99.9 | 51.4 | 19.5 |
+| 8 | 16.4 | 486.8 | 369.7 | 21.6 |
+| 16 | 19.0 | 842.3 | 666.4 | 24.0 |
+| 32 | 32.4 | 986.5 | 1236.8 | 25.9 |
+
+**结构性发现：tli 的 `forward_decode` 是逐请求 Python 循环**——每请求 ~38ms/step（36 层 × select 0.39 + increment 0.13 + sparse_attn ~0.3 + Python 调度），随 bs **线性放大**；triton 全批量化仅 3.2×（10→32.4ms）涨幅。**要拿高并发吞吐主表（§硬件叙事的 H100+大 batch 展示位），必须把选择/增量/前向批量化**：
+
+1. **批量化重设计（下一里程碑，与 TileLang kernel 接入合并）**：per-layer 共享 index pool（kmin/kmax 预分配 `[R_max, NBLK_MAX, Hkv, d']`，~2.4GB@32req/2048blk 可容）+ L1/L2 kernel grid 加 batch 维（`grid=(bs, Hkv)`，per-request nblk/stride 进 metadata 张量）；kq（4bit 精筛缓存，134MB@131K/req）不可共享预分配 → **须改真 4bit 存储**（uint8 + per-token scale，kernel 内 dequant，16.8MB@131K）——与 TIA 的 kpool 设计合流；
+2. _sparse_attn 批量化可先行（独立于索引重设计）：req_to_token 本身是 2D `[max_req, max_S]`，`pool_pos = gather(r2t[reqs], 1, sel.view(bs,-1))` 一次 gather 出全部请求的槽位，flat 索引 + 批量 einsum `bhgd,bhkd->bhgk`，~8 launch 总量（现 bs×6）；
+3. CUDA graph 未支持（tli 路径 disable_cuda_graph=True），批量化后捕获才有意义。
+
+**逐 token 输出正确性**：tli eager vs L1+L2 双 kernel 在 32K 字符真实上下文上 **64 token 逐字一致**（test_tli_l2_e2e_smoke.py）。
+
+prototype 边界（M3 剩余待做）：
+- 批量化 decode（§5.0.1 上述重设计）+ 接导师 TileLang 两级 kernel（`tls_attn/ops/`）；
 - CUDA graph / MTP / speculative 未支持（参照 qwen_sparse_attn_backend.py 补）；
 - 模型侧无需改动（全局 `--attention-backend tli` 即生效）。
 
