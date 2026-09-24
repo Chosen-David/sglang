@@ -396,6 +396,15 @@ class TLIIndexer:
         - 远端区为空的行（t+1 ≤ near_len+far_lo）退化为整体 topk
         row_chunk 控制 kq gather [n, Tc, Hkv, nd2] 峰值显存（Tc ≈ K1*bs：
         64 行 ≈ 1.1GB@S=32K）。
+
+        M7 快路径：真实数据下 K1=128 块 × Hkv 个 head 的并集在 S ≲ 8K*Hkv
+        时覆盖全部因果 token（实测 S=10K 时 Tc==S）——此时逐 chunk 的
+        「掩码→topk 提取候选→gather→反量化→scatter 回 S 宽度」全是绕路，
+        直接对全宽 kq 反量化表做一次 einsum 即得同一 fine 矩阵（池==因果区
+        时 scatter 版语义逐位等价）。反量化表 [S,Hkv,nd2] 每次调用建一张、
+        全部 chunk 共享（S=10K 仅 10MB；131K 134MB 瞬态）。prefill 归因
+        （M7 微基准）：S=10K 时 select 865→~160 ms/层，瓶颈占比从 ~95%
+        降到次要项。
         """
         p = self.profile
         S = index["S"]
@@ -412,6 +421,8 @@ class TLIIndexer:
         kq = index["kq_q"]  # M6 uint8 格点（tok_c < S，容量 padding 无害）
         t_arr = t_arr.to(device)
         pos = torch.arange(S, device=device)
+        # M7：共享反量化表（快路径直接 einsum；慢路径 gather 打分也用）
+        kq_f = kq_unpack(kq[:S], index["kq_sc"][:S], index["kq_mn"][:S])
         out = []
         for r0 in range(0, Nq, row_chunk):
             r1 = min(r0 + row_chunk, Nq)
@@ -447,27 +458,34 @@ class TLIIndexer:
             ).clamp(min=0)  # 块级滑窗（select 的 force_blks 同语义）
             onehot.scatter_(1, f_blk, True)
             sel_mask = onehot.repeat_interleave(bs, dim=1)[:, :S]  # [n, S]
-            # 掩码位置 → 定长候选张量（topk 最小值技巧：哨兵 S 排最后补 pad）
-            seq = pos.view(1, S).expand(n, S)
-            seq_m = torch.where(sel_mask, seq, torch.full_like(seq, S))
-            Tc = int(sel_mask.sum(1).max().item())
-            tok = torch.topk(seq_m, Tc, dim=-1, largest=False).values  # [n, Tc]
-            valid = tok < S
-            tok_c = tok.clamp(max=S - 1)
-
-            # ---- L2: 4bit 部分维精筛 → scatter 进 fine [n, Hkv, S] ----
-            kq_c = kq_unpack(
-                kq[tok_c], index["kq_sc"][tok_c], index["kq_mn"][tok_c]
-            )  # [n, Tc, Hkv, nd2]（候选池跨 head 共享）
             q2 = q_c[..., self.idx2].reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
-            s2 = torch.einsum("ahd,athd->aht", q2, kq_c)  # [n, Hkv, Tc]
-            causal = (tok <= t_c.view(-1, 1)) & valid  # [n, Tc]
-            fine = torch.full((n, Hkv, S), float("-inf"), device=device)
-            fine.scatter_(
-                2,
-                tok_c.unsqueeze(1).expand(n, Hkv, Tc),
-                torch.where(causal.unsqueeze(1), s2, torch.full_like(s2, float("-inf"))),
-            )
+            # M7 快路径判定：池 ⊇ 因果区（池 ⊆ 因果区恒成立 → 即 ==）。
+            # 真实数据 S ≲ K1*bs*Hkv 量级时并集全选，Tc==S，scatter 是纯绕路
+            if bool((sel_mask.sum(1) >= t_c + 1).all()):
+                fine = torch.einsum("ahd,shd->ahs", q2, kq_f)  # [n, Hkv, S]
+                causal_full = pos.view(1, S) <= t_c.view(-1, 1)  # [n, S]
+                fine = fine.masked_fill(~causal_full.unsqueeze(1), float("-inf"))
+            else:
+                # 掩码位置 → 定长候选张量（topk 最小值技巧：哨兵 S 排最后补 pad）
+                seq = pos.view(1, S).expand(n, S)
+                seq_m = torch.where(sel_mask, seq, torch.full_like(seq, S))
+                Tc = int(sel_mask.sum(1).max().item())
+                tok = torch.topk(seq_m, Tc, dim=-1, largest=False).values  # [n, Tc]
+                valid = tok < S
+                tok_c = tok.clamp(max=S - 1)
+
+                # ---- L2: 4bit 部分维精筛 → scatter 进 fine [n, Hkv, S] ----
+                kq_c = kq_f[tok_c]  # [n, Tc, Hkv, nd2]（共享表 gather，替代逐 chunk 反量化）
+                s2 = torch.einsum("ahd,athd->aht", q2, kq_c)  # [n, Hkv, Tc]
+                causal = (tok <= t_c.view(-1, 1)) & valid  # [n, Tc]
+                fine = torch.full((n, Hkv, S), float("-inf"), device=device)
+                fine.scatter_(
+                    2,
+                    tok_c.unsqueeze(1).expand(n, Hkv, Tc),
+                    torch.where(
+                        causal.unsqueeze(1), s2, torch.full_like(s2, float("-inf"))
+                    ),
+                )
             # 强制 token：滑窗 [t-sw+1, t]（clamp 产生的重复位置由 scatter
             # overwrite 天然去重；无 sink 强制，与 select 一致）
             sw_off = torch.arange(p.sliding_window, device=device)
