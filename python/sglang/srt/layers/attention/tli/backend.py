@@ -16,6 +16,9 @@ M2 关键设计（correctness-first，kernel 化路线见 TWO_LEVEL_INDEXER_DESI
 
 from __future__ import annotations
 
+import os
+import time
+
 import torch
 
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
@@ -25,6 +28,40 @@ from sglang.srt.layers.attention.tli.indexer import TLIIndexer
 # 增量维护的单步上限：decode n=1 常态；超过（如 chunked/speculative 或
 # req_pool_idx 被新请求复用导致 S 倒退/跳变）则全量重建
 _MAX_INCREMENTAL_NEW = 512
+
+# M3-b 开销归因：TLI_PROFILE_TIMING=1 时累计 decode 各阶段墙钟，
+# 每 64 步打一行（torch.cuda.synchronize 后计时，含同步代价，仅供归因）
+_TIMING = os.environ.get("TLI_PROFILE_TIMING", "0") == "1"
+
+
+class _PhaseTimer:
+    def __init__(self):
+        self.acc = {}  # phase -> 秒（累计）
+        self.steps = 0
+
+    def add(self, phase, dt):
+        self.acc[phase] = self.acc.get(phase, 0.0) + dt
+
+    def tick(self):
+        if _TIMING:
+            torch.cuda.synchronize()
+        return time.time()
+
+    def maybe_report(self):
+        if not _TIMING:
+            return
+        self.steps += 1
+        if self.steps % 64 == 0:
+            total = sum(self.acc.values())
+            parts = " ".join(
+                f"{k}={v * 1000:.1f}ms" for k, v in sorted(self.acc.items())
+            )
+            print(
+                f"[TLI timing] steps={self.steps} total={total * 1000:.1f}ms "
+                f"({total / self.steps * 1000:.2f}ms/step) {parts}"
+            )
+            for k in self.acc:
+                self.acc[k] = 0.0
 
 
 class TLISparseAttnBackend(AttentionBackend):
@@ -38,6 +75,7 @@ class TLISparseAttnBackend(AttentionBackend):
         self.layer_skip: list[bool] | None = None
         self.token_to_kv_pool = None  # _init_from_runner 填充（新版挂在 model_runner 上）
         self.req_to_token = None
+        self.timer = _PhaseTimer()
         if runner is not None:
             self._init_from_runner(runner)
 
@@ -111,7 +149,9 @@ class TLISparseAttnBackend(AttentionBackend):
             t = seq_len - 1
             locs = req_to_token[req, :seq_len]  # [S] 逻辑位置 → pool 槽位
             if seq_len <= self.dense_threshold:
+                t0 = self.timer.tick()
                 out[i] = self._dense_attn(q[i], locs, pool, layer_id)
+                self.timer.add("dense", time.time() - t0)
                 continue
             key = (layer_id, req)
             idx = self.block_indices.get(key)
@@ -121,17 +161,26 @@ class TLISparseAttnBackend(AttentionBackend):
                 or seq_len - idx["S"] > _MAX_INCREMENTAL_NEW
             ):
                 # 新请求首步 / req 槽位复用 / 大跳变：全量 build
+                t0 = self.timer.tick()
                 k_all = k_buf[locs].float()  # [S, Hkv, D]（RoPE 后）
                 self.block_indices[key] = indexer.build_block_index(k_all)
+                self.timer.add("build", time.time() - t0)
             elif seq_len > idx["S"]:
                 # 增量：只取新 token（O(n)，E5b gov_report 186min 根因修复）
+                t0 = self.timer.tick()
                 k_new = k_buf[req_to_token[req, idx["S"] : seq_len]].float()
                 indexer.update_block_index(idx, k_new)
+                self.timer.add("increment", time.time() - t0)
+            t0 = self.timer.tick()
             sel = indexer.select(
                 self.block_indices[key], q[i : i + 1].float(), t,
                 use_l1_kernel=self.profile.use_l1_kernel,
             )  # [Hkv,K2]
+            self.timer.add("select", time.time() - t0)
+            t0 = self.timer.tick()
             out[i] = self._sparse_attn(q[i].float(), sel, locs, pool, layer_id, Hkv, G)
+            self.timer.add("sparse_attn", time.time() - t0)
+        self.timer.maybe_report()
         # 返回约定：[T, H*D]（与 triton backend 的 reshape(-1, H*D) 一致）
         return out.reshape(bs, H * self.head_dim)
 
@@ -214,23 +263,34 @@ class TLISparseAttnBackend(AttentionBackend):
         return o.reshape(H, -1)
 
     def _sparse_attn(self, q_i, sel, locs, pool, layer_id, Hkv, G):
-        """decode 稀疏：每 kv head 在 K2 候选上做 GQA attention。
+        """decode 稀疏：每 kv head 在 K2 候选上做 GQA attention（批量向量化）。
 
         sel: [Hkv, K2] 逻辑位置；locs[sel] → pool 槽位。
+        M3-b：Hkv Python 循环（每 head 4-5 个小 kernel × 8 head ≈ 40 launch）
+        → 展平成 [P, Hkv*D] 后一次 flat gather + 两个批量 einsum（~6 launch）。
+        数值与循环版逐位一致（同 fp32 累加顺序）。
         """
         H = q_i.shape[0]
-        outs = []
-        v_buf, k_buf = pool.get_kv_buffer(layer_id)
-        for h in range(Hkv):
-            pos = sel[h]  # [K2] 逻辑位置
-            pool_pos = locs[pos]  # [K2] pool 槽位
-            k_sel = k_buf[pool_pos, h].float()  # [K2, D]
-            v_sel = v_buf[pool_pos, h].float()
-            q_h = q_i[h * G : (h + 1) * G]  # [G, D]
-            att = q_h @ k_sel.T * (self.head_dim**-0.5)  # [G, K2]
-            att = torch.softmax(att, dim=-1)
-            outs.append(att @ v_sel)  # [G, D]
-        return torch.cat(outs, dim=0)
+        # 注意顺序：get_kv_buffer 返回 (k, v)——原实现写反（v_buf, k_buf），
+        # 因 smoke 的 decode 全走 dense 路径（S<2048）而潜伏，稀疏 decode
+        # 首次触发（M3 吞吐基线）才暴露
+        k_buf, v_buf = pool.get_kv_buffer(layer_id)
+        pool_pos = locs[sel]  # [Hkv, K2] pool 槽位
+        K2 = pool_pos.shape[-1]
+        D = self.head_dim
+        # flat 索引：槽位 s、kv head h、维 d → s*(Hkv*D) + h*D + d
+        d_off = torch.arange(D, device=pool_pos.device)
+        h_off = torch.arange(Hkv, device=pool_pos.device).view(Hkv, 1, 1) * D
+        flat = pool_pos.unsqueeze(-1) * (Hkv * D) + h_off + d_off.view(1, 1, D)
+        # 注意：必须 reshape(-1) 成 1D 再索引——reshape(-1, Hkv*D)[idx] 取的是
+        # 整行（[N, 1024]），第一次实现就栽在这（gathered 1024× 大小）
+        k_sel = k_buf.reshape(-1)[flat.view(-1)].view(Hkv, K2, D).float()
+        v_sel = v_buf.reshape(-1)[flat.view(-1)].view(Hkv, K2, D).float()
+        q_g = q_i.view(Hkv, G, D)  # [Hkv, G, D]
+        att = torch.einsum("hgd,hkd->hgk", q_g, k_sel) * (D**-0.5)
+        att = torch.softmax(att, dim=-1)
+        o = torch.einsum("hgk,hkd->hgd", att, v_sel)  # [Hkv, G, D]
+        return o.reshape(H, D)
 
     def _dense_extend_one(self, q_b, locs, pool, layer_id, Hkv, G):
         """单个请求的 dense causal attention（短序列 prefill / chunk）。"""
