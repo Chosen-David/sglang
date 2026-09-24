@@ -15,7 +15,25 @@ M2 关键设计（correctness-first，kernel 化路线见 TWO_LEVEL_INDEXER_DESI
     几何扩容，行随请求生命周期回收）+ n≥2 时两级选择批量 eager 化
     （select_decode_batched，launch 数与 bs 无关）+ 批量稀疏前向；
     n==1 保留 per-request L1/L2 fused kernel 路径（bs=1 延迟优势）
-  - CUDA graph：占位未支持（init_cuda_graph_state no-op）
+  - M5 CUDA graph decode（3 方法契约）：
+      init_cuda_graph_state   捕获前一次性预分配——全部层建池并预扩到
+                              req_to_token 全宽（pool 张量捕获后不可替换，
+                              否则已捕获图引用已释放内存）；行 0 保留为
+                              哨兵行（pad/dummy 批专用）
+      init_forward_metadata_out_graph  replay 前 host 侧维护：行生命周期
+                              回收 + 稳态不变式（每活跃行 pool 内容 =
+                              [0, seq_len-1)）+ 填 _graph_rows_l（batch
+                              行号 → pool 行号，pad 行 → 哨兵行 0）
+      init_forward_metadata_in_graph   no-op（图内全部工作在 forward_decode
+                              的 graph 分支，读静态 buffer）
+    图内路径 = 统一稀疏 + 统一增量（静态形状、零 host 同步）：
+      - 所有行（含 pad/短序列）统一走两级稀疏——S ≤ token_budget 时
+        far 池空、near+forced 配额 ≥ S，数学上等价 dense；
+        1024 < S ≤ dense_threshold 的行由 dense 改稀疏（top-1024 mass
+        ≈1.0，H1 实测），与 eager 路径的质量差异属已知偏差
+      - 稳态不变式：S_old = seq_len-1 恒成立（out_graph 维护），图内
+        update_pool_rows_decode 统一追加当前 token（pad 行 seq_len=1 →
+        写哨兵行 0，KV 写 slot 0——框架既有 sacrificial 语义）
 """
 
 from __future__ import annotations
@@ -82,6 +100,14 @@ class TLISparseAttnBackend(AttentionBackend):
         self.layer_skip: list[bool] | None = None
         self.token_to_kv_pool = None  # _init_from_runner 填充（新版挂在 model_runner 上）
         self.req_to_token = None
+        # ---- M5 CUDA graph 状态 ----
+        self._num_layers = None
+        self._use_graph_path = False  # out_graph 置 True / init_forward_metadata 置 False
+        self._graph_locked = False  # 捕获后禁止 pool 扩容（张量替换 = 悬垂引用）
+        self._pool_s_cap_floor = 0  # 建池 S 容量下限（graph 预分配时抬高）
+        self._pool_r_cap_floor = 0
+        self._graph_rows_l: dict[int, torch.Tensor] = {}  # layer → [max_bs] pool 行号
+        self._graph_arange: torch.Tensor | None = None
         self.timer = _PhaseTimer()
         if runner is not None:
             self._init_from_runner(runner)
@@ -91,6 +117,7 @@ class TLISparseAttnBackend(AttentionBackend):
         self.head_dim = model_config.head_dim if model_config.head_dim else 128
         self.num_kv_heads = getattr(model_config, "num_key_value_heads", None) or 1
         n_layers = model_config.num_hidden_layers
+        self._num_layers = n_layers
         if self.profile.layer_skip_path:
             self.layer_skip = self.profile.load_layer_skip(n_layers)
         self.dense_threshold = self.profile.dense_threshold
@@ -119,16 +146,19 @@ class TLISparseAttnBackend(AttentionBackend):
             p = self.profile
             Hkv = self.num_kv_heads
             dev = self.runner.device if self.runner else "cuda"
-            s_cap = max(4096, p.dense_threshold + 1)
+            # M5：容量下限由 init_cuda_graph_state 抬高（graph 预分配）；
+            # 行 0 保留为哨兵行（CUDA graph pad/dummy 批的写入目标，
+            # 内容恒为垃圾，永不分配给真实请求）
+            s_cap = max(4096, p.dense_threshold + 1, self._pool_s_cap_floor)
             nblk_cap = (s_cap + p.block_size - 1) // p.block_size
-            r_cap = p.pool_rows
+            r_cap = max(p.pool_rows, self._pool_r_cap_floor)
             self.index_pools[layer_id] = {
                 "kq": torch.zeros(r_cap, s_cap, Hkv, 2 * p.delta, device=dev),
                 "kmin": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
                 "kmax": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
                 "S_cap": s_cap,
                 "R_cap": r_cap,
-                "free": list(range(r_cap)),
+                "free": list(range(1, r_cap)),  # 行 0 = 哨兵，不进 free
                 "row_of": {},  # req_pool_idx -> row
                 "S": [-1] * r_cap,  # row -> 有效长度（-1 = 空）
             }
@@ -146,9 +176,20 @@ class TLISparseAttnBackend(AttentionBackend):
 
     def _ensure_pool_s(self, pool_l: dict, need: int) -> None:
         """S 维几何扩容（need ≤ S_cap 时 no-op）。扩容后旧行内容前缀保留，
-        [old:cap) 新容量零初始化。"""
+        [old:cap) 新容量零初始化。
+
+        M5：CUDA graph 捕获后（_graph_locked）禁止扩容——pool 张量替换
+        会使已捕获图引用已释放内存（静默数据损坏）。容量在
+        init_cuda_graph_state 一次性预扩到 req_to_token 全宽。
+        """
         if need <= pool_l["S_cap"]:
             return
+        if self._graph_locked:
+            raise RuntimeError(
+                f"tli: pool S 容量 ({pool_l['S_cap']}) 在 CUDA graph 捕获后"
+                f"不可扩容（need={need}）——请增大 --context-length 预算或"
+                "设置 SGLANG_TLI_POOL_S_CAP"
+            )
         old = pool_l["S_cap"]
         new_cap = max(need + 2048, old * 2)
         bs = self.profile.block_size
@@ -162,6 +203,13 @@ class TLISparseAttnBackend(AttentionBackend):
         pool_l["S_cap"] = new_cap
 
     def _grow_pool_r(self, pool_l: dict, add: int = 16) -> None:
+        if self._graph_locked:
+            # 行维同理：捕获后不可替换张量；行数应在 init_cuda_graph_state
+            # 按 max_bs 预扩（含哨兵行 0）
+            raise RuntimeError(
+                f"tli: pool 行数 ({pool_l['R_cap']}) 在 CUDA graph 捕获后"
+                "不可扩容——请增大 --cuda-graph-max-bs"
+            )
         r0 = pool_l["R_cap"]
         r1 = r0 + add
         for key in ("kq", "kmin", "kmax"):
@@ -191,15 +239,71 @@ class TLISparseAttnBackend(AttentionBackend):
     # ---------------- AttentionBackend 必须实现 ---------------- #
 
     def init_cuda_graph_state(self, max_bs: int, max_num_tokens: int):
-        # prototype 未支持 CUDA graph decode
-        pass
+        """M5：CUDA graph capture 前的一次性预分配（runner 在捕获前调用）。
+
+        - 全部层立即建池，S 维预扩到 req_to_token 全宽（捕获后 pool 张量
+          不可替换，见 _ensure_pool_s 注释）；R 维 ≥ max_bs+1（含哨兵行 0）
+        - _graph_rows_l[layer]：batch 行号 → pool 行号映射（out_graph 每步
+          填充，图内 forward_decode 读取）；_graph_arange：批内行号
+        - 显存量级（fp32 kq ≈ 1KB/token/行 + kmin/kmax 32B/token/行）：
+          16K context × 33 行 × 36 层 ≈ 20GB；131K 需 ~160GB —— 长上下文
+          主表须先落 M6（kq 4bit）。SGLANG_TLI_POOL_S_CAP 可显式封顶
+          （超出该长度的请求会在稳态维护处报错，而非静默错）。
+        """
+        if self._graph_rows_l:
+            return
+        if self.req_to_token is None or self.token_to_kv_pool is None:
+            raise RuntimeError("tli CUDA graph 需要 runner 的 req_to_token/KV pool")
+        if self._num_layers is None:
+            raise RuntimeError("tli CUDA graph 需要 runner.model_config")
+        dev = self.req_to_token.device
+        s_cap_env = int(os.environ.get("SGLANG_TLI_POOL_S_CAP", "0"))
+        s_cap = s_cap_env if s_cap_env > 0 else int(self.req_to_token.shape[1])
+        r_cap = max(max_bs + 1, self.profile.pool_rows)
+        self._pool_s_cap_floor = s_cap
+        self._pool_r_cap_floor = r_cap
+        for layer_id in range(self._num_layers):
+            pool_l = self._get_pool(layer_id)  # 按 floor 建池（行 0 已保留）
+            if pool_l["S_cap"] < s_cap:
+                self._ensure_pool_s(pool_l, s_cap)  # 捕获前最后扩容机会
+            if pool_l["R_cap"] < r_cap:
+                self._grow_pool_r(pool_l, r_cap - pool_l["R_cap"])
+            if 0 in pool_l["free"]:  # 防御：引擎启动期行 0 必未分配
+                pool_l["free"].remove(0)
+            self._graph_rows_l[layer_id] = torch.zeros(
+                max_bs, dtype=torch.long, device=dev
+            )
+        self._graph_arange = torch.arange(max_bs, device=dev)
+        # 之后禁止任何扩容（图已持有当前 pool 张量的引用）
+        self._graph_locked = True
 
     def get_cuda_graph_seq_len_fill_value(self):
+        # pad 行 seq_len=1：图内统一稀疏路径下 S≤1024+sw 数学等价 dense，
+        # 且 forced 窗含位置 0（softmax 恒有有效 lane，无 NaN）
         return 1
 
+    def veto_cuda_graph(self, forward_batch) -> bool:
+        """M5：批内含真实短序列行（token_budget < S ≤ dense_threshold）
+        → veto CUDA graph，整批回退 eager。
+
+        图内路径统一稀疏：S ≤ token_budget 的行 far 池空 + near/forced
+        配额 ≥ S → 选择集 = 全体位置，数学等价 dense（m5 单测 S=600
+        mass coverage = 1.00000）；超过预算的短行会以 4bit 近端排序淘汰
+        位置（S=1500 实测 mass 0.835）——此类行必须走 eager 的 dense
+        分支。pad 行（seq_len ≤ 1）不触发 veto（哨兵行语义安全）。
+        读 seq_lens_cpu（cpu 镜像，无 GPU 同步）。
+        """
+        slc = getattr(forward_batch, "seq_lens_cpu", None)
+        if slc is not None:
+            lens = slc.tolist()
+        else:
+            lens = forward_batch.seq_lens.tolist()  # 兜底一次同步
+        lo = self.profile.token_budget
+        return any(lo < int(L) <= self.dense_threshold for L in lens)
+
     def init_forward_metadata(self, forward_batch):
-        # M4：lazy 回收——不在当前 batch 的请求释放 pool 行（请求结束/
-        # req 槽位被新请求复用前的清理；row_of 的 S 检查兜底漏网情形）
+        """eager 入口：标记非图路径 + 行生命周期回收。"""
+        self._use_graph_path = False
         if not self.index_pools:
             return
         try:
@@ -212,6 +316,82 @@ class TLISparseAttnBackend(AttentionBackend):
                     row = pool_l["row_of"].pop(req)
                     pool_l["S"][row] = -1
                     pool_l["free"].append(row)
+
+    def init_forward_metadata_out_graph(self, forward_batch, in_capture: bool = False):
+        """M5：capture / replay 前的 host 侧维护（允许同步，图外执行）。
+
+        replay（in_capture=False）职责：
+          1) pool 行生命周期回收（请求退出）
+          2) 稳态不变式：每层每活跃请求 pool 行内容 = [0, seq_len-1)
+             ——图内统一增量追加当前 token 后即 [0, seq_len)，与 eager
+             路径每步结束时的语义一致（混跑可互换）
+          3) 填 _graph_rows_l[layer][batch 行号] = pool 行号
+             （pad 行 → 哨兵行 0；捕获后读取路径形状静态）
+        capture（in_capture=True）：dummy 批（req=0 / seq_len=1）只做行
+        映射（全部 → 哨兵行 0），不做稳态维护（kv pool 尚无真实数据，
+        且 dummy req 会污染 row_of）。
+        """
+        self._use_graph_path = True
+        bs = int(getattr(forward_batch, "batch_size", 0) or 0)
+        if not self._graph_rows_l or bs <= 0:
+            return
+        if in_capture:
+            for t in self._graph_rows_l.values():
+                t[:bs].zero_()
+            return
+        if getattr(forward_batch, "spec_info", None) is not None:
+            raise NotImplementedError("tli CUDA graph 暂不支持 speculative decoding")
+        num_padding = int(getattr(forward_batch, "num_padding", 0) or 0)
+        # seq_lens_cpu 是 replay 静态镜像（fill_from 已按 pad 策略填充），
+        # 读取无 GPU 同步；缺失时兜底一次 .tolist() 同步
+        seq_lens_cpu = getattr(forward_batch, "seq_lens_cpu", None)
+        if seq_lens_cpu is not None:
+            lens_l = seq_lens_cpu[:bs].tolist()
+        else:
+            lens_l = forward_batch.seq_lens[:bs].tolist()
+        reqs_l = forward_batch.req_pool_indices[:bs].tolist()
+        active: list[tuple[int, int, int]] = []  # (batch 行号, req, seq_len)
+        seen = set()
+        for i in range(max(bs - num_padding, 0)):
+            req = int(reqs_l[i])
+            L = int(lens_l[i])
+            if L <= 1 or req in seen:  # L=1 即 pad/异常行；重复 req 不可能
+                continue
+            seen.add(req)
+            active.append((i, req, L))
+        act_set = {req for _, req, _ in active}
+        for layer_id, pool_l in self.index_pools.items():
+            for req in list(pool_l["row_of"]):
+                if req not in act_set:
+                    row = pool_l["row_of"].pop(req)
+                    pool_l["S"][row] = -1
+                    pool_l["free"].append(row)
+            k_buf = self.token_to_kv_pool.get_kv_buffer(layer_id)[0]
+            indexer = self._get_indexer(layer_id)
+            rows_arr = [0] * bs  # pad 行 → 哨兵行 0
+            for i, req, L in active:
+                row = self._alloc_row(pool_l, req)
+                rows_arr[i] = row
+                if pool_l["S"][row] != L - 1:
+                    # 新请求首步 / S 跳变（chunked/spec/混跑遗留）：全量
+                    # 重建到 L-1（当前 token 由图内增量追加）
+                    self._ensure_pool_s(pool_l, L)
+                    k_all = k_buf[self.req_to_token[req, : L - 1]].float()
+                    idx_new = indexer.build_block_index(k_all)
+                    pool_l["kq"][row, : L - 1] = idx_new["kq"]
+                    pool_l["kmin"][row, : idx_new["nblk"]] = idx_new["kmin"]
+                    pool_l["kmax"][row, : idx_new["nblk"]] = idx_new["kmax"]
+                # 预记图内追加当前 token 后的有效长度（== eager 路径每步
+                # 结束时的 bookkeeping 语义，混跑无缝切换）
+                pool_l["S"][row] = L
+            self._graph_rows_l[layer_id][:bs] = torch.tensor(
+                rows_arr, device=self._graph_rows_l[layer_id].device
+            )
+
+    def init_forward_metadata_in_graph(self, forward_batch):
+        """图内元数据钩子：no-op——全部图内工作在 forward_decode 的 graph
+        分支（读静态 buffer + _graph_rows_l，形状静态、零 host 同步）。"""
+        pass
 
     def forward_decode(
         self,
@@ -233,6 +413,12 @@ class TLISparseAttnBackend(AttentionBackend):
         v = v.view(bs, Hkv, self.head_dim)
         if save_kv_cache:
             self._save_kv_cache(k, v, layer, forward_batch)
+        if self._use_graph_path:
+            # M5 图内路径（capture 时录制 / replay 时整图重放）：
+            # 统一稀疏 + 统一增量，形状静态、零 host 同步
+            return self._forward_decode_graph(
+                q, k, layer, forward_batch, bs, H, Hkv, G
+            )
         kv_pool = self.token_to_kv_pool
         req_to_token = self.req_to_token
         out = torch.empty_like(q)
@@ -342,6 +528,45 @@ class TLISparseAttnBackend(AttentionBackend):
         self.timer.maybe_report()
         # 返回约定：[T, H*D]（与 triton backend 的 reshape(-1, H*D) 一致）
         return out.reshape(bs, H * self.head_dim)
+
+    def _forward_decode_graph(
+        self, q, k, layer, forward_batch, bs, H, Hkv, G
+    ):
+        """M5 图内 decode 路径（录制时确定全部形状，replay 零 host 同步）。
+
+        统一处理所有行（真实 / pad / 短序列）：
+          1. 统一增量：update_pool_rows_decode(S_old = seq_lens-1, k)，
+             当前 token 直接取自输入 k（eager 路径从 KV pool 回读同一值）
+          2. 统一稀疏：select_decode_batched（S_list 传 seq_lens 张量 +
+             静态宽度）+ _sparse_attn_batched（tensor 化后全程可录制）
+        稳态不变式由 init_forward_metadata_out_graph 维护（pool 行内容 =
+        [0, seq_len-1)）；pad 行映射哨兵行 0——增量写哨兵行、KV 写 slot 0
+        （框架既有 sacrificial 语义），选择输出为哨兵/垃圾位置但被
+        valid 掩码屏蔽（forced 窗恒含位置 0，softmax 无 NaN）。
+        短序列行（S ≤ dense_threshold）由 dense 改稀疏：S ≤ 1024 时
+        far 池空、near+forced 配额 ≥ S 数学等价 dense；更长则 top-1024
+        mass ≈ 1.0（H1 实测），与 eager 的质量差异属已知偏差。
+        """
+        layer_id = layer.layer_id
+        indexer = self._get_indexer(layer_id)
+        pool_l = self._get_pool(layer_id)
+        rows_t = self._graph_rows_l[layer_id][:bs]
+        seq_lens_t = forward_batch.seq_lens.to(torch.long)  # 静态 buffer [bs]
+        # 统一增量追加当前 token（pad 行 seq_len=1 → S_old=0 写哨兵行 0）
+        indexer.update_pool_rows_decode(pool_l, rows_t, seq_lens_t - 1, k.float())
+        # 统一两级稀疏选择（静态宽度 W_far/W_near/W_forced）
+        sel = indexer.select_decode_batched(
+            pool_l["kq"], pool_l["kmin"], pool_l["kmax"],
+            rows_t, seq_lens_t, q.float(),
+        )  # [bs, Hkv, W_far+W_near+W_forced]（哨兵 = S_cap）
+        # 统一稀疏前向（全批一次 gather + 两个批量 einsum）
+        out = self._sparse_attn_batched(
+            q, self._graph_arange[:bs], sel, seq_lens_t,
+            forward_batch, self.req_to_token, self.token_to_kv_pool,
+            layer_id, Hkv, G,
+        )
+        # 返回约定：[T, H*D]
+        return out.to(q.dtype).reshape(bs, H * self.head_dim)
 
     def forward_extend(
         self,
@@ -469,20 +694,29 @@ class TLISparseAttnBackend(AttentionBackend):
     ):
         """M4：批量稀疏前向（所有稀疏请求一次 gather + 两个批量 einsum）。
 
-        row_idx: 批内行号列表；sel: [n, Hkv, K2]（批量或 per-request stack，
-        哨兵可为 S_i 或 S_cap——只需 ≥ seq_len_i）；seq_lens: list[int]。
+        row_idx: 批内行号（列表或 device tensor）；sel: [n, Hkv, K2]（批量
+        或 per-request stack，哨兵可为 S_i 或 S_cap——只需 ≥ seq_len_i）；
+        seq_lens: list[int] 或 device tensor（M5：图内路径必须传 tensor，
+        torch.tensor(list) 的 H2D 不能出现在 capture 区域）。
         哨兵 pad：valid = sel < seq_len_i（逐行界），softmax 前屏蔽。
+        clamp 上界用逐行 torch.minimum（原 Python 标量 max；数学等价——
+        valid lane 的位置恒 ≤ t_i = seq_len_i-1，clamp 不改变任何 valid
+        lane，仅保证 invalid/garbage lane 的 gather 索引在界内）。
         数值与逐请求版一致（同 fp32 累加顺序）。
         """
         n = sel.shape[0]
         H, D = q.shape[1], self.head_dim
-        rows = torch.tensor(row_idx, device=q.device)
-        seq_lens_t = torch.tensor(seq_lens, device=q.device, dtype=torch.long).view(
-            -1, 1, 1
-        )
-        valid = sel < seq_lens_t  # [n, Hkv, K2]
-        # Python max（避免 .item() 的 GPU 同步；seq_lens 是 Python list）
-        sel_c = sel.clamp(max=max(seq_lens) - 1)
+        if torch.is_tensor(row_idx):
+            rows = row_idx.to(torch.long)
+        else:
+            rows = torch.tensor(row_idx, device=q.device)
+        if torch.is_tensor(seq_lens):
+            seq_lens_t = seq_lens.to(torch.long)
+        else:
+            seq_lens_t = torch.tensor(seq_lens, device=q.device, dtype=torch.long)
+        seq_v = seq_lens_t.view(-1, 1, 1)
+        valid = sel < seq_v  # [n, Hkv, K2]
+        sel_c = torch.minimum(sel, seq_v - 1)
         # req_to_token 是 2D [max_req, max_S]：一次 gather 出全部请求槽位
         reqs = forward_batch.req_pool_indices[rows]  # [n]
         locs_full = req_to_token[reqs]  # [n, max_S]（每行 = 该请求逻辑位置 → 槽位）

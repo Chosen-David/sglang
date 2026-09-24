@@ -228,13 +228,58 @@ exact 同值——L03 far-heavy 层行级方差 0.95-1.0 属算法固有，eager
 ~620GB/步（~188ms 纯 HBM），稀疏 1/8 流量的收益在长 S 才显现（与 Quest/HISA「收益随上下文
 长度增长」叙事一致）。S=131K 需要 kq 4bit（M6，fp32 pool 5.4GB/层装不下）。
 
+### 8b-3. M5 CUDA graph decode 实测（2026-09-24，任务 #25 完成）
+
+实现（三方法契约，全在 tli/backend.py）：
+- **去同步 + 形状静态化**：B' far/near 分区重写为全 device 张量 + 静态宽度（W_far/W_near/
+  W_forced per-row 配额裁剪，输出宽度恒 1408）；`_sparse_attn_batched` tensor 化（`sel_c =
+  torch.minimum(sel, seq_v-1)` 替代 Python 标量 clamp）；
+- **capture 对接**：`init_cuda_graph_state`（捕获前预分配全部层 pool：行 0=哨兵、S 维 =
+  req_to_token 全宽、`_graph_locked` 禁捕获后扩容）+ `init_forward_metadata_out_graph`
+  （图外 host 维护：行回收 + 稳态不变式「每活跃行内容=[0, seq_len-1)」+ pad 行→哨兵行 0）
+  + 图内统一路径（统一增量 `update_pool_rows_decode` + 统一稀疏 `select_decode_batched`）；
+- **短行 veto 钩子**：runner 端 duck-typed `veto_cuda_graph`——批内含 1024 < S ≤
+  dense_threshold 的短行整批回退 eager（图内统一稀疏对短行有 4bit 近端排名损失，
+  S=1500 实测 mass 0.835；S ≤ 1024 数学等价 dense 不 veto）。
+
+正确性（test_tli_m5.py ALL PASS，真实 Qwen3-8B trace）：
+- 图内路径 vs eager 多步对拍（8 步含首步重建/增量/S 跳变/每步 pad 行）4.47e-08；
+  混跑（eager↔graph 交替同一 backend，模拟 veto 回退）4.28e-08；pool 行内容逐位一致；
+- **真 CUDA graph 捕获通过**（capture 区域零 host 同步的硬验证）+ replay vs eager
+  **逐位一致 0.00e+00**；e2e（32K 字符 narrativeqa、64 token 生成）graph 输出与
+  eager **逐字一致**。
+
+e2e 数字（S≈9.9K token、64 步 decode、同曲线）：
+
+| bs | M4 phase-3（无图） | M5 graph | 加速比 |
+|---|---|---|---|
+| 1 | 73.8 | 17.7–36.8 | 2.0–4.2× |
+| 8 | 166.4 | 70.3–75.5 | ~2.2× |
+| 16 | 207.8 | 87.5–115.2 | 1.8–2.4× |
+| 32 | 326.4 | **188.6** | **1.73×** |
+
+（两轮区间；bs=1 波动大，论文口径多轮取中位数。capture 4 shape 仅 2.8s。
+triton 同配置图基线 7.8/12.8/18.7/31.7 ms/step——triton 本身 launch 少，graph 仅
+bs=1 收益 2×；tli 在 S=10K 档仍慢于 triton 全量，符合 M4 定位修正：稀疏收益在长 S
+的 HBM 流量，S=131K 主表待 M6/M8。）
+**累计：M3 原型 1236.8 → M5 188.6 ms/step（6.6×，bs=32）；tok/s 25.9→169.7。**
+归因：launch 固定项被图消除后，剩余大头 = 批量路径 GPU 计算（M4 归因的 ~5.2ms/req
+线性项）→ 下一个杠杆是 kq 4bit（M6，同时解 S_cap 预分配显存口径：fp32 kq ≈1KB/token/行，
+12288 封顶下 36 层已 15GB，131K 硬依赖 4bit）。
+
+工程沉淀：①对拍两侧 q 必须预生成共享（现生成 randn_like 引入 4.85e-03 伪差异）；
+②`cuda_graph_config` 须传 dict（JSON 字符串在 parse 处 `str.items()` 崩）且 prefill 须显式
+disabled（默认 BREAKABLE 依赖 sgl_kernel.weak_ref_tensor，0.3.16.post6 无此 API）；
+③graph 池显存口径：S_cap 按 req_to_token 全宽预分配会爆（32K×33 行×36 层≈40GB），
+`SGLANG_TLI_POOL_S_CAP` 显式封顶。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
 2. ~~sglang M2/M3~~ ✅ 全部完成（§5.0 设计报告：算法同步 + fused L1 + paged 寻址 + O(n) 增量索引（预分配版）+ 稀疏 prefill + L2 级联 fused kernel + e2e 吞吐基线与归因 + 高并发曲线）；e2e smoke 逐字一致
 3. ~~M4 批量化 decode~~ ✅（§8b-2：三阶段 bs=32 1236.8→326.4（3.8×），线性项 38→6.7ms/req，对拍全过）
-4. **M5 CUDA graph decode**（#25）：去同步 + 形状静态化 + capture 对接——固定项 ~125ms/step
-   纯 launch 开销的唯一解
+4. ~~M5 CUDA graph decode~~ ✅（§8b-3：三方法契约 + 统一增量/稀疏图内路径 + veto 钩子；
+   replay 逐位一致 + e2e 逐字一致；bs=32 326.4→188.6 ms/step，累计 6.6× vs M3 原型）
 5. **M6 kq 真 4bit**（#26）：uint8+scale（128→40B/token-head），S=131K 主表硬前提
 6. **M7 prefill 加速**（#27）：chunked 增量索引复用（现每 chunk 全量 rebuild O(S²/chunk)）+
    批量 build + S 梯度基准（0.7K→131K）

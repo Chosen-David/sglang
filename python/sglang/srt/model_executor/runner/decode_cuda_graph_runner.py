@@ -707,6 +707,16 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
             else True
         )
 
+        # TLI（fork）：backend 级 veto 钩子（duck-typed，其他 backend 无此
+        # 属性不受影响）。批内存在真实短序列行（token_budget < S ≤
+        # dense_threshold）时回退 eager：图内统一稀疏路径对短行改稀疏，
+        # K2=1024 预算下 4bit 近端排序有实测质量损失（S=1500 mass 0.835
+        # vs dense 1.0，m5 单测）；S ≤ token_budget 的行数学等价 dense、
+        # pad 行（S=1）走哨兵行——均不触发 veto
+        attn_veto = getattr(self.attn_backend, "veto_cuda_graph", None)
+        if attn_veto is not None and attn_veto(forward_batch):
+            return False
+
         return (
             is_bs_supported
             and is_encoder_lens_supported
