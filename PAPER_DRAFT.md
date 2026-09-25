@@ -33,7 +33,7 @@ indexer: position-stable low-frequency tail dimensions for block-level upper
 bound filtering, PCA-projected 4-bit token-level refinement, far/near
 partitioned budgets, and offline-calibrated layer skipping. TLI is fully
 integrated into sglang with bit-exact 4-bit indexing, a four-kernel batched
-select (12.9×), and CUDA-graph compatibility—12.5× decode speedup over the
+select (15.9×), and CUDA-graph compatibility—12.5× decode speedup over the
 eager prototype. On LongBench-13, TLI scores 49.92 vs. FullKV 50.36; honest
 boundaries are reported end-to-end (crossover at S≈44K). All conclusions rest
 on 30+ measured hypotheses, each with parity checks, including two headline
@@ -67,7 +67,7 @@ position-stable 低频尾维子空间做块级上界粗筛（免校准），L2 �
 把名额分配从分数噪声驱动改为预算驱动；离线校准的层跳过（D'）免去
 far-empty 层的全部远端检索（跳 13/36 层，索引 FLOP 4.88×）。系统侧，
 TLI 以 sglang attention backend 形式全链路集成：4bit 三张量索引逐位
-一致、四 kernel 批量组合（select 12.9×）、CUDA graph 兼容——decode
+一致、五 kernel 组合（select 15.9×，near 池压缩直写）、CUDA graph 兼容——decode
 原型→生产级累计 12.5×（323 tok/s@bs32）。
 
 **贡献**（四条，对应 §4–§7）：
@@ -353,7 +353,7 @@ cat 版每步 4.8GB memcpy（S=131K 实测）。paged 寻址经 req_to_token
 预分配 [R,cap]，R=请求数行池 + 堆行回收），select launch 数与 bs 无关。
 
 **四 kernel 组合**（select_decode_batched，bs=32/131K 全函数
-23.25→1.80ms，12.9×）：
+23.25→1.46ms，15.9×，A-E 五 kernel）：
 
 | Kernel | 替代的 eager 阶段 | 机制 | 单项收益 |
 |---|---|---|---|
@@ -496,7 +496,7 @@ eager topk/gather launch 主导，三家在 131K 都远离 HBM bound——排名
 实现成熟度而非架构上限）；④TLI 的结构性优势在算法侧：每 token 索引 MAC
 ≈258 = DSA 的 1/32、存储 3×↓ vs Quest、+2.2 分 vs Quest——**算力/存储余量
 由 M8 kernel 化兑现**：批量化后 select_decode_batched 全函数
-23.25→1.80ms@bs=32/131K（12.9×），launch 数与 bs 无关（口径差异——单 token
+23.25→1.46ms@bs=32/131K（15.9×，含 near 池压缩 E），launch 数与 bs 无关（口径差异——单 token
 vs batch——在表注中如实标注）。补充批量口径对比：Quest/DSA 官方无批量
 decode_select 实现，此处只列单 token 口径 + TLI 批量数，避免跨口径直接
 比较。
@@ -582,7 +582,7 @@ kernel 级。
    0.92–1.00，索引 FLOP 4.88×）。12 项 negative results 与 design
    decisions 一一映射。
 2. **系统兑现**：sglang 全链路生产级集成——4bit 三张量索引（逐位一致）、
-   四 kernel 批量组合（select 12.9×）、CUDA graph 三方法契约；
+   五 kernel 组合（select 15.9×）、CUDA graph 三方法契约；
    decode 原型→生产级 12.5×（323 tok/s@bs32/9.9K），prefill 30K
    kernel 化 2.11×。
 3. **质量-成本**：LongBench 13 子集 49.92（vs FullKV 50.36 / TIA
