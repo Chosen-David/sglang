@@ -361,6 +361,7 @@ cat 版每步 4.8GB memcpy（S=131K 实测）。paged 寻址经 req_to_token
 | B | topk-min 全排序压实（0.88ms） | cumsum + 块展开；哨兵可在中段由下游 valid 掩掉 | ~0.3-0.5ms |
 | C | masked_fill 链 + far/near 分数物化 | -inf 烘进打分 kernel 写出口径（双池直写） | 消 P6/P7 链 |
 | D | 行 gather 268MB + permute 连续化拷贝 | rows 行间接直读 pool + GEMV（归约分组对齐 eager） | 消 2×268MB 拷贝 |
+| E | near 池 topk（98.6% -inf 输入，0.46ms） | KernelC 直写静态宽 WNCAP=2048 的压缩 near 表（确定性 slot 保序） | near topk 30× 宽度削减；select 1.80→1.46ms，三场景 torch.equal |
 
 **工程经验（写入论文的定量教训）**：寄存器压力断崖——CHUNK×Hkv×nd2
 fp32 元素/program ≤65K（8 warps），超限是 local memory 溢出的非线性
