@@ -193,35 +193,80 @@ far-empty 层的远端检索不承载质量（far mass <0.3%），可整层跳�
    链，eager 版实测该链占慢路径 44%）。该不变式使双池直写 kernel 的
    正确性论证退化为池界不等式，是 M8/M10 kernel 化可行性的前提。
 
-### 4.4 级联 kernel 化边界（跨级设计原则）
-
-- L1 容忍多选（L2 吸收）、L2 不能（无下游兜底）——纯 kernel L2 No-Go
-  （4bit 并列过选 130-256/head + 120 轮二分串行反慢 4.5×）。
-- 池边界即因果边界：far_hi≤t+1-near_len / sw_lo≤t → 垃圾块天然落池外，
-  替代显式 causal mask。【素材：报告§M3-b、M8-KernelC】
-
 ## 5. Implementation: Production-Scale Integration（2 页）
 
-### 5.1 索引存储与维护
+### 5.1 索引存储与维护【正文 v1】
 
-- kq 真 4bit 三张量（uint8 格点 + fp32 双 scale），40B/token-head（3.2×）；
-  重建≡量化逐位一致论证（格点 fp32 精确可表）。
-- PCA 投影口径（M9）：r=16 → 24B/token-head，同成本 far recall +27%。
-- O(n) 精确增量索引（增量==全量重建逐位一致）；预分配几何扩容。
+**4bit 三张量格式**：每 token-head 的 L2 精筛表示存为 `kq_q`（uint8
+[S,Hkv,nd2] 格点 0-15）+ `kq_sc`/`kq_mn`（fp32 每 token-head 双 scale），
+共 40B/token-head（选择口径 nd2=32；投影口径 r=16 时 24B）vs fp32 128B
+（3.2-5.3×）。**逐位一致论证**：格点值 0-15 在 fp32 精确可表，重建
+`grid.float()·sc+mn` 与量化 `round(...)·sc+mn` 走同一 IEEE 运算序列 →
+反量化零数值漂移（测试断言 torch.equal）——这使得 4bit 存储成为纯
+存储优化而非近似。
 
-### 5.2 批量 kernel 组合（M8/M10）
+**PCA 投影集成（M9）**：`SGLANG_TLI_PROJ_BASIS` 离线校准基（.pt
+[n_layers,Hkv,D,r] 常驻 2.36MB，2048 token 校准集与全量同值）；k/q 侧
+统一出口 `_k_refine/_q_refine` 六调用点同代码路径；同成本口径 far
+recall +27%（0.4423 vs 0.3480）。一致性口径修正：投影是 GEMV，
+cuBLAS 归约顺序使增量 vs 全量有 1e-7 尾差——逐位口径放宽为格点级
+（格点一致率 1.0、select 集合一致）。
 
-- 四 kernel：A（gather+寄存器反量化+GEMV，1.55TB/s）/ B（候选压实）/ C（双池
-  直写，-inf 烘进写出口径）/ D（L1 行间接直读）。23.25→1.80ms（12.9×）。
-- row_chunk 显存解耦：不物化 kq_c → 64→512 摊销。
-- 寄存器压力经验值：CHUNK×Hkv×ND2 ≤ 65K 元素/program。
-- prefill 慢路径移植（M10）：快路径失效边界（nblk>K1×Hkv）+ 双档 2.11×。
+**增量维护（O(n) 精确索引）**：每 decode 步仅对新 token 量化+写入，
+增量索引与全量重建**逐位一致**（测试断言）；预分配几何扩容避免
+cat 版每步 4.8GB memcpy（S=131K 实测）。paged 寻址经 req_to_token
+间接层，与 sglang KV pool 槽位管理解耦。
 
-### 5.3 CUDA Graph 兼容
+### 5.2 批量 kernel 组合（M8/M10）【正文 v1】
 
-- 三方法契约（init 预分配/init_forward_metadata host 维护/in_graph no-op）；
-  静态宽度 W_far+W_near+W_forced；replay vs eager 逐位 0.00e+00；
-  短行 veto 钩子（S≤1024 数学等价 dense，1024<S≤2048 有真实损失）。
+高并发批量化先决条件（M4）：per-layer 共享 index pool（kq/kmin/kmax
+预分配 [R,cap]，R=请求数行池 + 堆行回收），select launch 数与 bs 无关。
+
+**四 kernel 组合**（select_decode_batched，bs=32/131K 全函数
+23.25→1.80ms，12.9×）：
+
+| Kernel | 替代的 eager 阶段 | 机制 | 单项收益 |
+|---|---|---|---|
+| A | P5 flat gather+反量化物化+einsum（20.2ms/87.6%） | 每 token 256B 连续段 uint8 gather + 寄存器内反量化 + GEMV + 转置写 | 20.5→0.48ms（43×，1.55TB/s） |
+| B | topk-min 全排序压实（0.88ms） | cumsum + 块展开；哨兵可在中段由下游 valid 掩掉 | ~0.3-0.5ms |
+| C | masked_fill 链 + far/near 分数物化 | -inf 烘进打分 kernel 写出口径（双池直写） | 消 P6/P7 链 |
+| D | 行 gather 268MB + permute 连续化拷贝 | rows 行间接直读 pool + GEMV（归约分组对齐 eager） | 消 2×268MB 拷贝 |
+
+**工程经验（写入论文的定量教训）**：寄存器压力断崖——CHUNK×Hkv×nd2
+fp32 元素/program ≤65K（8 warps），超限是 local memory 溢出的非线性
+劣化（dual 输出 tile 512→128：1.06→0.43ms；CHUNK=1024 反而 3.2ms）；
+Triton tile 大了不是慢是断崖。
+
+**prefill 慢路径移植（M10）**：快路径失效边界——池==因果区的快路径
+只在 nblk ≤ K1×Hkv 时成立，S=30K 时 nblk=480 ≫ 128 → 慢路径必然触发。
+移植 M8 全套 + row_chunk 64→512（kernel 不物化 kq_c fp32 → 显存约束
+与 chunk 宽度解耦）：末 chunk 983.8→140.0ms（7.0×），30K e2e prefill
+双档 2.11×（787→373s / 1565→741s，两档加速比一致=线性项消除证据）。
+
+**对拍口径（每 kernel 配套）**：C vs B torch.equal（topk 输入一致）；
+full vs C 逐元素差 0；full vs eager jaccard 1.0（仅并列排序/哨兵 lane
+不同）；GEMV 归约序尾差 2.4e-07 → topk 第 k 名 tie 翻转容忍对称差 ≤2。
+
+### 5.3 CUDA Graph 兼容【正文 v1】
+
+**三方法契约**：`init_cuda_graph_state`（捕获前预分配全层 pool：S_cap
+封顶 `SGLANG_TLI_POOL_S_CAP`（131K 主表硬依赖 4bit），R_cap=max_bs+1，
+行 0=哨兵；`_graph_locked` 禁扩容）；`init_forward_metadata_out_graph`
+（host 维护行回收 + 稳态不变式「每活跃行内容=[0,seq_len)」+ pad→哨兵行
+0，读 seq_lens_cpu 避同步）；`in_graph` no-op。
+
+**图内路径**：统一增量 update_pool_rows_decode + 统一稀疏
+select_decode_batched（静态宽度 W_far+W_near+W_forced）+ tensor 化
+_sparse_attn——零 host 同步，replay vs eager **逐位一致 0.00e+00**。
+
+**短行质量边界 → veto 钩子**：S ≤ K2（1024）时数学等价 dense；
+1024 < S ≤ dense_threshold 有真实损失（S=1500 cov=0.835，4bit 近端
+排名噪声）→ decode_cuda_graph_runner 的 duck-typed veto 钩子整批回退
+eager。混跑（eager↔graph 交替）对拍 4.28e-08。
+
+**显存账（H20 141GB）**：KV=144KB/token；kq pool fp32 ≈1KB/token/行
+→ S_cap 全宽预分配会爆（32K×33 行×36 层 ≈40GB）→ 4bit + 封顶是
+CUDA graph 与 131K 主表的共同前提。
 
 ## 6. Evaluation（3.5 页）
 
