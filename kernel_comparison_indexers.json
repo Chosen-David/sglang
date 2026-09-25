@@ -1,0 +1,67 @@
+{
+  "machine": "H20-3e cc9.0 78SM, CUDA_VISIBLE_DEVICES=1",
+  "caliber": "decode 单 token indexer 全链路 per-layer-call，同机同口径；kernel 级 microbench（DSA/Quest 合成数据对齐量级，TLI 真实 trace）",
+  "quest_official": {
+    "note": "page 分数 GEMV(einsum max of q·kmin/q·kmax, fp16, 32head×128d) + 官方 decode_select_k(raft radix) ；k=64 pages=1024 token 预算",
+    "S10000": {
+      "score_ms": 0.058,
+      "select_k_ms": 0.008,
+      "total_ms": 0.066
+    },
+    "S40000": {
+      "score_ms": 0.068,
+      "select_k_ms": 0.009,
+      "total_ms": 0.077
+    },
+    "S131072": {
+      "score_ms": 0.094,
+      "select_k_ms": 0.013,
+      "total_ms": 0.107
+    },
+    "index_storage_per_token": "~1KB (fp16 min/max 32head×128d, page=16)",
+    "training_free": true,
+    "longbench": 47.72
+  },
+  "dsa_official": {
+    "note": "DeepSeek-V3.2 官方 inference/kernel.py tilelang fp8_index(64head×128d FP8 GEMV+ReLU+headsum) + torch.topk(2048)；S 无关=launch 主导",
+    "S10000": {
+      "total_ms": 0.476,
+      "fp8_index_ms": 0.401,
+      "topk_ms": 0.075
+    },
+    "S40000": {
+      "total_ms": 0.49,
+      "fp8_index_ms": 0.402,
+      "topk_ms": 0.088
+    },
+    "S131072": {
+      "total_ms": 0.503,
+      "fp8_index_ms": 0.407,
+      "topk_ms": 0.096
+    },
+    "index_storage_per_token": "~132B (fp8 proj d=128)",
+    "training_free": false,
+    "trained_warmup": "1000 步 / 2.1B token"
+  },
+  "tli": {
+    "note": "sglang tli 两级 select 全链路（L1 块筛+L2 4bit 细筛+滑窗），真实 trace qwen3-8b layer03(far-heavy)/layer17 两层均值；Hkv=8 GQA",
+    "eager": {
+      "S9891": 0.736,
+      "S40000": 0.78,
+      "S131072": 0.853
+    },
+    "fusedL1": {
+      "S9891": 0.604,
+      "S40000": 0.658,
+      "S131072": 0.787
+    },
+    "index_storage_per_token": "~336B (kq 4bit 40B/token-head×Hkv8 + L1 bounds)",
+    "training_free": true,
+    "longbench": 49.92
+  },
+  "flop_per_token": {
+    "dsa": "64head×128d = 8192 MAC",
+    "tli": "8kv-head×2δ32 + L1摊销 ≈ 258 MAC (32×↓)",
+    "quest": "32head×128d×2 = 8192 MAC (GEMV)"
+  }
+}

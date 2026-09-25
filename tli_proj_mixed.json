@@ -1,0 +1,272 @@
+[
+ {
+  "task": "hotpotqa",
+  "layer": 3,
+  "t": 8478,
+  "pca32": 0.7168,
+  "tail32": 0.4736,
+  "mixed32": 0.585,
+  "mixed16": 0.5156
+ },
+ {
+  "task": "hotpotqa",
+  "layer": 3,
+  "t": 16956,
+  "pca32": 0.7085,
+  "tail32": 0.5791,
+  "mixed32": 0.6294,
+  "mixed16": 0.5308
+ },
+ {
+  "task": "hotpotqa",
+  "layer": 5,
+  "t": 8478,
+  "pca32": 0.6738,
+  "tail32": 0.4873,
+  "mixed32": 0.561,
+  "mixed16": 0.4106
+ },
+ {
+  "task": "hotpotqa",
+  "layer": 5,
+  "t": 16956,
+  "pca32": 0.562,
+  "tail32": 0.4849,
+  "mixed32": 0.4805,
+  "mixed16": 0.3931
+ },
+ {
+  "task": "hotpotqa",
+  "layer": 10,
+  "t": 8478,
+  "pca32": 0.6743,
+  "tail32": 0.3862,
+  "mixed32": 0.582,
+  "mixed16": 0.4995
+ },
+ {
+  "task": "hotpotqa",
+  "layer": 10,
+  "t": 16956,
+  "pca32": 0.7407,
+  "tail32": 0.4644,
+  "mixed32": 0.7178,
+  "mixed16": 0.6025
+ },
+ {
+  "task": "hotpotqa",
+  "layer": 20,
+  "t": 8478,
+  "pca32": 0.6421,
+  "tail32": 0.5967,
+  "mixed32": 0.499,
+  "mixed16": 0.3154
+ },
+ {
+  "task": "hotpotqa",
+  "layer": 20,
+  "t": 16956,
+  "pca32": 0.7109,
+  "tail32": 0.7334,
+  "mixed32": 0.605,
+  "mixed16": 0.4526
+ },
+ {
+  "task": "hotpotqa",
+  "layer": 33,
+  "t": 8478,
+  "pca32": 0.7129,
+  "tail32": 0.6143,
+  "mixed32": 0.5889,
+  "mixed16": 0.4092
+ },
+ {
+  "task": "hotpotqa",
+  "layer": 33,
+  "t": 16956,
+  "pca32": 0.8267,
+  "tail32": 0.7944,
+  "mixed32": 0.7222,
+  "mixed16": 0.5732
+ },
+ {
+  "task": "musique",
+  "layer": 3,
+  "t": 8366,
+  "pca32": 0.6968,
+  "tail32": 0.4575,
+  "mixed32": 0.5962,
+  "mixed16": 0.4595
+ },
+ {
+  "task": "musique",
+  "layer": 3,
+  "t": 16732,
+  "pca32": 0.6748,
+  "tail32": 0.5552,
+  "mixed32": 0.5776,
+  "mixed16": 0.4731
+ },
+ {
+  "task": "musique",
+  "layer": 5,
+  "t": 8366,
+  "pca32": 0.6304,
+  "tail32": 0.4629,
+  "mixed32": 0.5469,
+  "mixed16": 0.4243
+ },
+ {
+  "task": "musique",
+  "layer": 5,
+  "t": 16732,
+  "pca32": 0.5732,
+  "tail32": 0.4692,
+  "mixed32": 0.4546,
+  "mixed16": 0.3545
+ },
+ {
+  "task": "musique",
+  "layer": 10,
+  "t": 8366,
+  "pca32": 0.5737,
+  "tail32": 0.2734,
+  "mixed32": 0.502,
+  "mixed16": 0.3799
+ },
+ {
+  "task": "musique",
+  "layer": 10,
+  "t": 16732,
+  "pca32": 0.7236,
+  "tail32": 0.4351,
+  "mixed32": 0.6953,
+  "mixed16": 0.5884
+ },
+ {
+  "task": "musique",
+  "layer": 20,
+  "t": 8366,
+  "pca32": 0.6714,
+  "tail32": 0.6343,
+  "mixed32": 0.4849,
+  "mixed16": 0.1987
+ },
+ {
+  "task": "musique",
+  "layer": 20,
+  "t": 16732,
+  "pca32": 0.6958,
+  "tail32": 0.73,
+  "mixed32": 0.6323,
+  "mixed16": 0.4683
+ },
+ {
+  "task": "musique",
+  "layer": 33,
+  "t": 8366,
+  "pca32": 0.707,
+  "tail32": 0.6846,
+  "mixed32": 0.5039,
+  "mixed16": 0.2949
+ },
+ {
+  "task": "musique",
+  "layer": 33,
+  "t": 16732,
+  "pca32": 0.7808,
+  "tail32": 0.7432,
+  "mixed32": 0.6602,
+  "mixed16": 0.5122
+ },
+ {
+  "task": "gov_report",
+  "layer": 3,
+  "t": 16384,
+  "pca32": 0.6982,
+  "tail32": 0.5942,
+  "mixed32": 0.5474,
+  "mixed16": 0.4839
+ },
+ {
+  "task": "gov_report",
+  "layer": 3,
+  "t": 32767,
+  "pca32": 0.6895,
+  "tail32": 0.5962,
+  "mixed32": 0.6064,
+  "mixed16": 0.4087
+ },
+ {
+  "task": "gov_report",
+  "layer": 5,
+  "t": 16384,
+  "pca32": 0.5283,
+  "tail32": 0.5942,
+  "mixed32": 0.4546,
+  "mixed16": 0.3901
+ },
+ {
+  "task": "gov_report",
+  "layer": 5,
+  "t": 32767,
+  "pca32": 0.4951,
+  "tail32": 0.6597,
+  "mixed32": 0.459,
+  "mixed16": 0.4102
+ },
+ {
+  "task": "gov_report",
+  "layer": 10,
+  "t": 16384,
+  "pca32": 0.5317,
+  "tail32": 0.3267,
+  "mixed32": 0.4409,
+  "mixed16": 0.3276
+ },
+ {
+  "task": "gov_report",
+  "layer": 10,
+  "t": 32767,
+  "pca32": 0.6094,
+  "tail32": 0.0889,
+  "mixed32": 0.5479,
+  "mixed16": 0.415
+ },
+ {
+  "task": "gov_report",
+  "layer": 20,
+  "t": 16384,
+  "pca32": 0.708,
+  "tail32": 0.626,
+  "mixed32": 0.5425,
+  "mixed16": 0.4155
+ },
+ {
+  "task": "gov_report",
+  "layer": 20,
+  "t": 32767,
+  "pca32": 0.5234,
+  "tail32": 0.5112,
+  "mixed32": 0.4248,
+  "mixed16": 0.2051
+ },
+ {
+  "task": "gov_report",
+  "layer": 33,
+  "t": 16384,
+  "pca32": 0.7109,
+  "tail32": 0.6582,
+  "mixed32": 0.5942,
+  "mixed16": 0.3999
+ },
+ {
+  "task": "gov_report",
+  "layer": 33,
+  "t": 32767,
+  "pca32": 0.6138,
+  "tail32": 0.5801,
+  "mixed32": 0.4062,
+  "mixed16": 0.2505
+ }
+]

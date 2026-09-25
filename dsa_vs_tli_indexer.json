@@ -1,0 +1,40 @@
+{
+  "machine": "H20-3e cc9.0",
+  "note": "kernel-level microbench; DSA side synthetic q/k (aligned magnitude), TLI side real trace",
+  "dsa_indexer": {
+    "10000": {
+      "total_ms": 0.475,
+      "fp8_index_ms": 0.401,
+      "topk_ms": 0.074,
+      "k_write_ms": 0.0273
+    },
+    "40000": {
+      "total_ms": 0.492,
+      "fp8_index_ms": 0.405,
+      "topk_ms": 0.087,
+      "k_write_ms": 0.0275
+    },
+    "131072": {
+      "total_ms": 0.509,
+      "fp8_index_ms": 0.419,
+      "topk_ms": 0.09,
+      "k_write_ms": 0.0275
+    }
+  },
+  "tli_select_eager": {
+    "layer03_S9891": 0.756,
+    "layer03_S40000": 0.795,
+    "layer03_S131072": 0.889,
+    "layer17_S9891": 0.715,
+    "layer17_S40000": 0.764,
+    "layer17_S131072": 0.817
+  },
+  "tli_select_fusedL1": {
+    "layer03_S9891": 0.609,
+    "layer03_S40000": 0.67,
+    "layer03_S131072": 0.827,
+    "layer17_S9891": 0.599,
+    "layer17_S40000": 0.646,
+    "layer17_S131072": 0.747
+  }
+}
