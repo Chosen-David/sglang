@@ -662,6 +662,7 @@ G-sum 后点积）→ **P1+P2（gather 262μs + einsum permute 346μs）整体�
 | C 档（+双池直写） | 2.15 ms | 10.8×（与 B 持平——双倍转置写 ≈ masked_fill 消除，价值在 launch 数↓与 C+D 组合） |
 | **full（A+B+C+D）** | **1.80 ms** | **12.9×** |
 | **+E near 压缩（§8b-19）** | **1.46 ms** | **15.9×** |
+| **+F CHUNK 形态调优（§8b-20）** | **1.55 ms**（三档同进程自洽：eager 23.19/off 1.93/on 1.55） | **15.0×**（自洽口径，论文主数字；E/F 两步绝对值跨轮环境漂移 ±7% 不可直比，kernel 级硬数字 dual 0.49→0.39ms） |
 
 诚实口径：C 档单独看是平手（2.15 vs 2.11ms）——双池直写的收益被第二张表的
 转置写吃掉；保留默认开的原因是 launch 数减少（低 bs 时 launch 主导）与语义
@@ -969,7 +970,10 @@ empty+部分写模式下无越界、无 NaN——唯一防线是有效集对拍�
 0.493→0.385ms（22%）；select_decode_batched @bs32/131K 同轮环境
 1.70→1.545ms。回归：near compact 三场景 torch.equal / M9（131K 1.06×）/
 M10（双口径对拍）/ M5 smoke（CUDA graph）/ M8 e2e 全过。e2e 主表不重跑
-（同 §8b-19 口径：节省 0.11ms < 测量噪声）。
+（同 §8b-19 口径：节省 0.11ms < 测量噪声）；但 M8 e2e 复测（干净独占
+GPU1）确认 headline：bs=32 **102.0 ms/step / 313.9 tok/s**（vs 原 99.0/323，
+±3% 噪声级一致——首轮并行跑 bench 污染出的 109.1 作废，又一例「跑 e2e
+期间该卡禁跑其他任务」的教训）。
 
 **M8 H 卡优化收官**：TMA 写 No-Go（本轮）+ L1 TC 化 No-Go（§8b-18）+ 唯一
 落地 = CHUNK/warps 形态调优 22%。dual kernel 剩余时间 = 稀疏 gather 读侧

@@ -1,0 +1,20 @@
+{
+ "A_full_ms": 0.3592,
+ "A_nostore_ms": 0.0766,
+ "A_noload_ms": 0.1069,
+ "B_c64_w4_ms": 0.3185,
+ "B_c64_w8_ms": 0.3651,
+ "B_c64_w16_ms": 0.399,
+ "B_c128_w4_ms": 0.3097,
+ "B_c128_w8_ms": 0.3578,
+ "B_c128_w16_ms": 0.4361,
+ "B_c256_w4_ms": 0.3844,
+ "B_c256_w8_ms": 0.3814,
+ "B_c256_w16_ms": 0.386,
+ "B_best": "chunk=128,nw=4",
+ "D_copy_ms": 0.071,
+ "D_copy_GBps": 1.9,
+ "traffic_read_GB": 0.404,
+ "traffic_write_GB": 0.069,
+ "ideal_us_3TBps": 157.7
+}
