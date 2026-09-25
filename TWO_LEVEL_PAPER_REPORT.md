@@ -729,9 +729,11 @@ watchdog 1800（30K 稀疏 prefill 数百秒）。显存账：KV=144KB/token →
 - **真实图景：30K 下 tli decode 稳定慢于 dense triton 基线 ~1.5×，未打平**。
   扩展比 tli 1.49× ≈ triton 1.45×——30K/bs16 档两者 decode step 均被
   MLP 前向主导，attention 流量差异（tli ∝K2=1024 恒定 vs triton ∝bs×S）
-  被稀释；与 9.9K 口径（bs16 慢 ~5×）构成「S 增长差距收窄 5×→1.5×」的
-  单调链。**理论翻转点在 S≈128K（attention 成 step 主导项后 triton 流量
-  ∝S 显性化，tli 恒定）**——H100 主表口径（bs≥16 × S=128K）是收益验证位。
+  被稀释；与 9.9K 口径（bs16 慢 3.48×）构成「S 增长差距收窄 3.5×→1.55×」
+  的单调链（fig9c）。**两点线性外推翻转点 S≈44K**（triton_step=a+b·S 从
+  两个实测点解出 b=1.20ms/K、a=6.8ms，tli≈60ms 缓增；模型粗但方向明确：
+  attention 成 step 主导项后 triton 流量 ∝S 显性化、tli 恒定）——**H100
+  主表口径（bs≥16 × S=128K）远在翻转点之后，是收益验证位**（fig9）。
 - **诚实口径 1**：每配置单次测量（M5 经验：波动大须多轮中位数）；
   prefill 数字双侧两版一致（57.7/114.9 vs 58.1/114.9，<1%）。
 - **诚实口径 2（prefill 短板 → M10 已修）**：tli prefill 787-1565s vs
@@ -846,7 +848,7 @@ far=256）vs triton（dense FullKV）同机同卡。
    **M8 的打分 kernel 现在有 r=16 投影口径可用（M9），打分 GEMV FLOP 减半待此兑现**
 7b. ~~M10 prefill kernel 化~~ ✅（§8b-15：快路径失效边界归因 + M8 全套移植，
    微基准 7.0× / e2e prefill 双档 2.11×；decode 差分法失效教训 → N=256 双侧
-   复测修正 §8b-14 结论——30K decode 稳定慢 ~1.5× 未打平，翻转点 S≈128K）
+   复测修正 §8b-14 结论——30K decode 稳定慢 ~1.5× 未打平，线性外推翻转点 S≈44K（fig9c）)
 8. H100 吞吐主表（机器申请中；H20 层已备好算力无关性论证：H20 TC 仅 H100 15% 仍拿到质量/流量收益）+ RULER/NIAH 补评测（对齐 Quest/SnapKV/HISA 论文数据集口径）
 9. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
 10. ~~Qwen3-32B 泛化复验~~ ✅（§8：A Go/D' Go 且更强/gate 判据修正为 negative result）+ 论文写作（骨架已定，主表已齐）

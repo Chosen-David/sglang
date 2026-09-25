@@ -157,8 +157,9 @@ TLI 三创新点（A 非对称压缩 / B' 分区预算 / D' 层跳过）→ 三�
 
 - decode 阶梯：M3 原型 1236.8 → M5 graph 188.6 → M8 kernel+graph 99.0 ms/step
   （bs=32，12.5×；vs triton 31.7 仍慢 3.1×——诚实边界）。
-- 9.9K→30K 差距收窄链：bs16 慢 5×→1.55×（S 增长单调收窄，理论翻转点
-  S≈128K）；30K 扩展比 tli 1.49× vs triton 1.45×。
+- 9.9K→30K 差距收窄链：bs16 慢 3.48×→1.55×（S 增长单调收窄，fig9c）；
+  两点线性外推翻转点 S≈44K——H100 主表（S=128K）远在翻转点后；30K 扩展比
+  tli 1.49× vs triton 1.45×。
 - prefill：M7 快路径 2.08×@10K + M10 慢路径 kernel 化 2.11×@30K
   （累计短板 13.6×→6.4×，剩余结构性 topk 67%）。
 - 【缺：H100 + S=131K + bs≥16 主表（机器申请中）——论文 headline 表】
@@ -179,8 +180,9 @@ TLI 三创新点（A 非对称压缩 / B' 分区预算 / D' 层跳过）→ 三�
 
 ## 8. Conclusion
 
-三层贡献重述 + 诚实边界（10K/30K 档 decode 未胜 dense，收益位在 S≈128K HBM
-流量 + 大 batch）+ 未来工作（H100 主表、held-out gate、RULER 全量）。
+三层贡献重述 + 诚实边界（10K/30K 档 decode 未胜 dense，线性外推翻转点
+S≈44K（fig9c），收益位在 S≥128K HBM 流量 + 大 batch）+ 未来工作（H100 主表、
+held-out gate、RULER 全量）。
 
 ---
 
@@ -196,7 +198,7 @@ TLI 三创新点（A 非对称压缩 / B' 分区预算 / D' 层跳过）→ 三�
 | §5 Impl | §8b-2~5/8b-8/8b-12/8b-13/8b-15 | — |
 | §6.2 质量 | §4 主表/§8b-16 | fig6、tli_niah_results.json |
 | §6.3 kernel | §8b-6 | kernel_comparison_indexers.json |
-| §6.4 e2e | §8b-13/8b-14/8b-15 | tli_m8_e2e_results.json、tli_m10_bench.json、tli_m8_e2e_long_results.json |
+| §6.4 e2e | §8b-13/8b-14/8b-15 | fig9、tli_m8_e2e_results.json、tli_m10_bench.json、tli_m8_e2e_long_results.json |
 | §7 测量学 | §8b-14 修正段/§8b-16 修正段 | — |
 
 ## 写作待办（并入任务链）
@@ -204,5 +206,5 @@ TLI 三创新点（A 非对称压缩 / B' 分区预算 / D' 层跳过）→ 三�
 1. 【缺】H100 主表（S=131K×bs16/32）——§6.4 headline
 2. 【缺】held-out gate 验证——§4.3 审稿防御
 3. 【缺】RULER 全量（若 H100 短缺，NIAH 双口径可先行撑住质量叙事）
-4. 图表升级：fig8 系统三联图需更新至 M8/M10 数字（新做 fig9）
+4. ~~图表升级 fig9~~ ✅（make_fig9.py：M3→M8 轨迹 + M10 prefill 双档 + S 收窄链含 44K 翻转点外推）
 5. 多 seed 置信区间（主表 200 样本已有；e2e 曲线单次——按测量学 §7 原则标注）
