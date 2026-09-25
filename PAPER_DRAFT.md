@@ -35,7 +35,7 @@ partitioned budgets, and offline-calibrated layer skipping. TLI is fully
 integrated into sglang with bit-exact 4-bit indexing, a four-kernel batched
 select (15.0×), and CUDA-graph compatibility—12.5× decode speedup over the
 eager prototype. On LongBench-13, TLI scores 49.92 vs. FullKV 50.36; honest
-boundaries are reported end-to-end (crossover at S≈44K). All conclusions rest
+boundaries are reported end-to-end (crossover at S≈44–51K). All conclusions rest
 on 30+ measured hypotheses, each with parity checks, including two headline
 claims we retracted ourselves upon replication—treating measurement
 methodology as a first-class contribution.
@@ -87,7 +87,7 @@ TLI 以 sglang attention backend 形式全链路集成：4bit 三张量索引逐
 
 全部结论建立在 30+ 个实测假设之上——每个设计决策都可追溯到一次
 带对拍的实验，每个被否决的方向都有数字。TLI 的诚实边界同样明确：
-10K/30K 档 decode 尚未跑赢 dense（慢 3.1×/1.5×），收益位在 S≥44K
+10K/30K 档 decode 尚未跑赢 dense（慢 3.1×/1.5×），收益位在 S≥44–51K
 翻转点之后的长上下文大 batch 区间（fig9c），以及 training-free + 低索引
 存储的部署约束区间。
 
@@ -515,7 +515,9 @@ kernel 1.9×）。vs triton dense 31.7 ms/step 仍慢 3.1×——9.9K 档 attent
 **S 增长收窄链（bs=16）**：9.9K 慢 3.48×（64.7/18.7）→ 30K 慢 1.55×
 （67.1/43.4，N=256 双侧复测）——S 增长下差距单调收窄；tli 扩展比 1.49× ≈
 triton 1.45×（30K/9.9K），两互不依赖口径交叉验证。两点线性外推（triton
-attention 流量 ∝S 的斜率 1.20ms/K vs tli ≈K2 恒定）给出**翻转点 S≈44K**
+attention 流量 ∝S 的斜率 1.23ms/K vs tli ≈K2 恒定）给出**翻转点
+S≈44–51K**（两条拟合线交叉 51K；tli 取平台 60–67ms 时 44–50K——两点
+外推模型粗，区间报告）
 （fig9c 虚线）：模型粗但方向明确——attention 成为 step 主导项后 triton 线性
 劣化、tli 恒定。**H100 主表口径（bs≥16 × S=128K）远在翻转点之后**，是
 收益验证位【缺：机器申请中，论文 headline 表】。
@@ -540,7 +542,8 @@ DSA ~132B/token+训练；141GB 显存的 H20 上 131K×bs32 主表因此可行�
 
 ### 6.6 图表映射
 
-fig9（a/b/c 三联）= §6.4 全部数字的图形化；fig5 = §6.5 FLOP/延迟；
+fig9（a/b/c 三联）= §6.4 全部数字的图形化；fig10（a/b/c）= §5.2 kernel
+阶梯 + §6.3 三方微基准 + M3→M8 decode 轨迹；fig5 = §6.5 FLOP/延迟；
 fig6 = §6.2 逐层；fig1–4 归 §3/§4。所有数字可由 JSON（tli_m8_e2e_results /
 tli_m8_e2e_long_results / tli_m10_bench / tli_niah_results /
 kernel_comparison_indexers）复现，无手抄。
@@ -606,7 +609,7 @@ kernel 级；④**microbench 的输入形态必须取自真实管线**——合�
    每 token 索引 MAC = DSA 的 1/32，免训练。
 
 **诚实边界**：10K/30K 档 decode 未跑赢 dense triton（慢 3.1×/1.5×）；
-两点线性外推翻转点 S≈44K（fig9c），收益位在 S≥128K 的 HBM 流量主导
+两点线性外推翻转点 S≈44–51K（fig9c），收益位在 S≥128K 的 HBM 流量主导
 区间 + 大 batch；NIAH 0.625 vs dense 1.0 是 far 池 0.8% 预算的物理上限
 （与 Quest/HISA 同性质）。**未来工作**：H100 主表（S=131K × bs≥16，
 机器申请中）、held-out gate 验证（precision ≥0.98 硬阈值）、RULER 全量、
@@ -635,6 +638,6 @@ kernel 级；④**microbench 的输入形态必须取自真实管线**——合�
 2. ~~held-out gate 验证~~ ✅（E6b LOO 16 trace：TH=0.01 prec mean 0.990，
    narrativeqa 单点 0.923 + 误跳 far 占 0.29% + e2e 不掉分交叉验证——§4.3 已回填）
 3. 【缺】RULER 全量（若 H100 短缺，NIAH 双口径可先行撑住质量叙事）
-4. ~~图表升级 fig9~~ ✅（make_fig9.py：M3→M8 轨迹 + M10 prefill 双档 + S 收窄链含 44K 翻转点外推）
+4. ~~图表升级 fig9/fig10~~ ✅（make_fig9.py：S 收窄链 + M10 prefill 双档 + 44–51K 翻转点外推；make_fig10.py：kernel 阶梯 + 三方微基准 + decode 轨迹）
 5. 多 seed 置信区间（主表 200 样本已有；NIAH 双 seed 已测；e2e 曲线单次——按测量学 §7 原则标注）
 6. ~~正文八节+摘要~~ ✅ 全部【正文 v1】（2026-09-26，b3c10336a→b5c228f75）
