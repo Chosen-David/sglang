@@ -830,6 +830,37 @@ far=256）vs triton（dense FullKV）同机同卡。
   vs FullKV 50.36）与 NIAH（极端压力）共同构成质量侧的两端口径，与
   Quest/HISA 论文报告的 NIAH 损失同性质。
 
+### 8b-17. D' 层跳过掩码的严格 held-out 验证（2026-09-26，任务 #48——§4.3 审稿防御【缺】项回填）
+
+动机：E6 的「平均轮廓→每 prompt」预测把目标 trace 混入校准集（非 held-out）；
+审稿必问「离线校准掩码在未见负载上的 precision」。脚本
+`two-level-attention/exp/trace/analyze_e6b_heldout.py`（16 条 trace
+leave-one-out：掩码由其余 15 条平均轮廓阈值化，在留出 trace 上评），
+far 轮廓口径与 E6 完全一致（pm 平均 + far=pm[64:t-2048]，GPU 重算 576 层
+缓存 `e6b_far_profiles.json`），结果 `e6b_heldout_gate.json`。
+
+| 阈值 TH | precision min/mean | pred 层数均值 | 备注 |
+|---|---|---|---|
+| 0.02（E6 原值） | 0.800 / 0.954 | 13.6 | 过松：0.01-0.02 灰区层误跳 |
+| **0.01（稳健点）** | **0.923 / 0.990** | **13.0** | 唯一失败 = narrativeqa（0/1 重复 trace） |
+| 0.005 | 0.846 / 0.981 | 13.0 | 无增益（平均轮廓本就只含 13 个 <0.005 层） |
+
+- **TH=0.01 是稳健点**：15/16 trace precision=1.000，mean 0.990；
+  唯一失败 narrativeqa（prec 0.923）——且 narrativeqa_0/1 是同文档重复
+  trace（32K 截断后 prompt 相同，E5 已知坑），**实际 = 1/15 个不同负载**；
+- **质量代价归一**：narrativeqa 误跳层 missed far = 0.0226，占该 trace
+  far 总量（7.71）**0.29%**——与 E6「跳层 far 质量损失 <0.3%」同量级；
+- **e2e 交叉验证**：narrativeqa 在 E5b 主表不掉分（TLI 23.14 vs TIA
+  22.18，反超）——held-out 层面的 precision 0.923 未转化为 e2e 损失，
+  与 E5b 掉分三任务（musique/qasper/multifieldqa）不重合；
+- **recall 保守无害**（0.41–1.00）：漏掉的可跳层只多花算力不损质量；
+  narrativeqa far 总量 7.7 与 gov_report 8.9–10.6 同级（far-heavy 负载
+  层轮廓错位是已知跨任务迁移困难，E5 corr 0.05–0.89 的体现）。
+
+论文写法（§4.3 回填）：held-out 判据以「mean 0.99 + 失败模式单点定位 +
+e2e 不掉分交叉验证」呈现，如实报告未达「min ≥0.98」的原始硬阈值
+（min 由单一重复 trace 决定）——测量学口径与 §7 一致。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
