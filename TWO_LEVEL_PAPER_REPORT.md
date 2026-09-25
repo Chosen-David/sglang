@@ -1014,6 +1014,38 @@ key 的干扰数字（与单针 NIAH 同机制）；③gap（−0.21）小于单
 ③TLI 生成 1045s vs triton 173s/任务 = 稀疏 prefill 慢路径 6×（M10 已修
 但 32K prefill 仍 ~2× 于 dense + 索引构建），质量评测不计入速度口径。
 
+### 8b-22. RULER CWE/FWE 扩展：模型能力上限证伪链（2026-09-26，#53——negative result 资产）
+
+**动机**：RULER 四任务（§8b-21）全为检索/链式，补聚合型压力测试
+（CWE/FWE：合成词流 common×30/uncommon×3/filler×8，问最高频词，
+信号词散布全上下文，与检索型互补）。词表从 LongBench 语料抽取
+（101K 词种，中频 3≤c≤200），`test_tli_ruler_cwe.py`。
+
+**构造自验通过**：离线 Counter 复现 = 10 个 common×30 恒为词流 top10，
+filler×8/uncommon×3 频率沟清晰，prompt_tokens=32029 精确——**排除构造
+bug**。四轮诊断链（每轮一个变量，4K 短上下文快速定位 + 32K 复测）：
+
+1. **Raw prompt → 停用词先验**：模型输出 'and,of,for,with,by,as,...'
+   （词流里根本不含这些词）——模型自己陈述「list 里的词不是标准英文词」
+   转而用语言先验作答；
+2. **+防先验约束**（"random word generator / answer must come from the
+   list"）：模型转入计数模式，但 thinking 链吃满 256 token 无答案——
+   raw prompt 下 Qwen3 无 chat template，`/no_think` 软开关不生效；
+3. **+chat 格式 + assistant prefill 空 think 块**（Qwen3 官方 no-think
+   方式）：输出全部变为流中词、无 thinking——修复确认；但 4K 截断把
+   频率沟砍窄（common 30→~3.5 次），32K 下计数错误（0 分）；
+4. **+thinking + max_new_tokens=2048**：模型策略退化为**逐词抄写词流**
+   （8K 词抄不完即截断），子串评分被抄写虚高污染（hits=3 为作弊命中）。
+
+**结论**：CWE/FWE 聚合计数任务对 Qwen3-8B 在 8K–32K 词流上**不可解**
+（no-think 计数失败、thinking 截断失败、抄写污染评分）——FullKV 基线
+本身 0 分 → 该任务族**无方法区分度**，与 RULER 文献一致（CWE/FWE 为
+最难任务族，聚合计数需远超 8B 级的 CoT 能力）。RULER 覆盖面由检索型
+（niah×3）+ 链式（VT）承担（§8b-21 gap −0.21 有区分度）。CWE/FWE
+完整诊断链如实归档为 negative result：**质量上限由模型能力而非注意力
+稀疏决定的任务，不能作为稀疏方法对比口径**（避免「双 0 分被误读为
+无损」的反向错觉）。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）

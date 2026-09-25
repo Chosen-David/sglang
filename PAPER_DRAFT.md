@@ -491,6 +491,14 @@ qasper 44.03 / multifieldqa_en 52.98——qasper 与 TIA 精确同值）。诊�
 本身也仅 0.70（Qwen3-8B 链式追踪能力上限）；③单 seed n=20 口径（与
 NIAH 案例二教训一致标注，双 seed 复测与 H100 主表合并跑）。
 
+**CWE/FWE（聚合型）不纳入对比的依据**：合成词流任务（common×30 vs
+filler×8 频率沟）四轮诊断显示 Qwen3-8B 在 8K–32K 词流上聚合计数不可解
+——no-think 模式退化为停用词先验或计数错误、thinking 模式退化为逐词
+抄写（截断）。FullKV 基线本身 0 分，该任务族对任何稀疏方法无区分度
+（0 vs 0 会被误读为「无损」的反向错觉），与 RULER 文献中 CWE/FWE 为
+最难任务族的报告一致。质量对比覆盖面由检索型（niah×3）+ 链式（VT）
+承担。
+
 **逐层质量**：36/36 层 mass 覆盖 diff<0.001，far-heavy 层（L03/L05）反超
 TIA（0.9995 vs 0.9990 / 0.9997 vs 0.9929）——B' 近端名额保障的直接逐层
 证据（fig6）。Qwen3-32B 复验：子空间选择 entry recall 差距 ≤0.08、
@@ -655,7 +663,7 @@ kernel 级；④**microbench 的输入形态必须取自真实管线**——合�
 1. 【缺】H100 主表（S=131K×bs16/32）——§6.4 headline（机器申请中）
 2. ~~held-out gate 验证~~ ✅（E6b LOO 16 trace：TH=0.01 prec mean 0.990，
    narrativeqa 单点 0.923 + 误跳 far 占 0.29% + e2e 不掉分交叉验证——§4.3 已回填）
-3. 【部分完成】RULER 多任务（multikey/multivalue/multiquery/VT 四任务双方法，§6.2 表）+ NIAH 双 seed——剩余 RULER 任务（CWE/FWE/QA 类）与双 seed 复测视主表需求
+3. 【部分完成】RULER 多任务（multikey/multivalue/multiquery/VT 四任务双方法，§6.2 表）+ NIAH 双 seed + 双 seed 复测（tli 跑中）——CWE/FWE 已证伪为模型能力上限（FullKV 0 分无区分度，§6.2 脚注），QA 类视主表需求
 4. ~~图表升级 fig9/fig10~~ ✅（make_fig9.py：S 收窄链 + M10 prefill 双档 + 44–51K 翻转点外推；make_fig10.py：kernel 阶梯 + 三方微基准 + decode 轨迹）
 5. 多 seed 置信区间（主表 200 样本已有；NIAH 双 seed 已测；e2e 曲线单次——按测量学 §7 原则标注）
 6. ~~正文八节+摘要~~ ✅ 全部【正文 v1】（2026-09-26，b3c10336a→b5c228f75）

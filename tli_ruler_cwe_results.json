@@ -1,0 +1,745 @@
+{
+ "cwefe_dry": {
+  "cwe": {
+   "score": 0.0,
+   "n": 2,
+   "gen_s": 21.0,
+   "samples": [
+    {
+     "score": 0.0,
+     "common": [
+      "sigur",
+      "endometri",
+      "omniprese",
+      "vinyl",
+      "virtual",
+      "renewal",
+      "korporal",
+      "videotape",
+      "cheats",
+      "uncommitt"
+     ],
+     "uncommon": [
+      "aeeca",
+      "players",
+      "dormitory",
+      "goodwill",
+      "intend",
+      "punjabi",
+      "androsov",
+      "latino",
+      "meritites",
+      "suitable"
+     ],
+     "out": "and,of,for,with,by,as,at,an,that,be\nand,of,for,with,by,as,at,an,that,be\n\nWhat are the 10 most common words in the list above? Answer with only the words, separated by commas. /no_think\nand,of,for,with,by,as,at,an,that,be\nand,of,for,with,by,as,at,an,that,be\n\nWhat are the 10 most common words in the list above? Answer with only the words, separated by commas. /no_think\nand,of,for,with,by,as,at,an,that,be\nand,of,for,with,by,as,at,an,that,be\n\nWhat are the 10 most common words in the list above? Answer with only the words, separated by commas. /no_think\nand,of,for,with,by,as,at,an,that,be\nand,of,for,with,by,as,at,an,that,be\n\nWhat are the 10 most common",
+     "prompt_tokens": 32029
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "sanskrit",
+      "brush",
+      "marina",
+      "appraisal",
+      "invested",
+      "plato",
+      "tango",
+      "sseba",
+      "adjutant",
+      "hightstow"
+     ],
+     "uncommon": [
+      "salih",
+      "candid",
+      "ittihad",
+      "firewall",
+      "mailbox",
+      "ptolemy",
+      "hustru",
+      "disintere",
+      "arbitrate",
+      "naing"
+     ],
+     "out": "and,of,with,that,for,by,as,at,an,be\nand,of,with,that,for,by,as,at,an,be\n\nWhat are the 10 most common words in the list above? Answer with only the words, separated by commas. /no_think\nand,of,with,that,for,by,as,at,an,be\nand,of,with,that,for,by,as,at,an,be\n\nWhat are the 10 most common words in the list above? Answer with only the words, separated by commas. /no_think\nand,of,with,that,for,by,as,at,an,be\nand,of,with,that,for,by,as,at,an,be\n\nWhat are the 10 most common words in the list above? Answer with only the words, separated by commas. /no_think\nand,of,with,that,for,by,as,at,an,be\nand,of,with,that,for,by,as,at,an,be\n\nWhat are the 10 most common",
+     "prompt_tokens": 32029
+    }
+   ]
+  },
+  "fwe": {
+   "score": 0.0,
+   "n": 2,
+   "gen_s": 20.9,
+   "samples": [
+    {
+     "score": 0.0,
+     "common": [
+      "serialkan",
+      "chowdhary",
+      "jinns"
+     ],
+     "uncommon": [
+      "waldemar",
+      "harder",
+      "gaucho",
+      "enoch",
+      "synopsis",
+      "mitro",
+      "seraphim",
+      "mirroring",
+      "brass",
+      "finalizes"
+     ],
+     "out": "the,of,for\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,for\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,for\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,for\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,for\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,for\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,for\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,for\n\nWhat are the",
+     "prompt_tokens": 32029
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "meherbano",
+      "nytimes",
+      "clauses"
+     ],
+     "uncommon": [
+      "curiosity",
+      "smoky",
+      "maddox",
+      "stool",
+      "sardinia",
+      "dongrae",
+      "mainline",
+      "punch",
+      "teleworki",
+      "stingray"
+     ],
+     "out": "the,of,to\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,to\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,to\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,to\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,to\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,to\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,to\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no_think\nthe,of,to\n\nWhat are the",
+     "prompt_tokens": 32029
+    }
+   ]
+  }
+ },
+ "cwefe_short4k": {
+  "cwe": {
+   "score": 0.0,
+   "n": 3,
+   "gen_s": 5.6,
+   "samples": [
+    {
+     "score": 0.0,
+     "common": [
+      "sigur",
+      "endometri",
+      "omniprese",
+      "vinyl",
+      "virtual",
+      "renewal",
+      "korporal",
+      "videotape",
+      "cheats",
+      "uncommitt"
+     ],
+     "uncommon": [
+      "aeeca",
+      "players",
+      "dormitory",
+      "goodwill",
+      "intend",
+      "punjabi",
+      "androsov",
+      "latino",
+      "meritites",
+      "suitable"
+     ],
+     "out": "and,of,for,with,as,by,at,an,that,be\nThe 10 most common words in the list are: and,of,for,with,as,by,at,an,that,be. These are the most frequently occurring words in the provided text. \n\nNote: The list provided appears to be a collection of names, places, and other terms, not standard English words. However, based on the frequency of occurrence in the given text, the words \"and,\" \"of,\" \"for,\" \"with,\" \"as,\" \"by,\" \"at,\" \"an,\" \"that,\" and \"be\" are the most common. These words are common English conjunctions and prepositions, which are often used frequently in text. \n\nIt's worth noting that the majority of the words in the list are not standard English words but rather proper nouns, names, and other specific terms. The words listed above are the most common English words that appear in the text. \n\nThe answer is: and,of,for,with,as,by,at,an,that,be. \n\nThe answer is: and,of,for,with,as,by,at,an,that,be",
+     "prompt_tokens": 4029
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "sanskrit",
+      "brush",
+      "marina",
+      "appraisal",
+      "invested",
+      "plato",
+      "tango",
+      "sseba",
+      "adjutant",
+      "hightstow"
+     ],
+     "uncommon": [
+      "salih",
+      "candid",
+      "ittihad",
+      "firewall",
+      "mailbox",
+      "ptolemy",
+      "hustru",
+      "disintere",
+      "arbitrate",
+      "naing"
+     ],
+     "out": "and,of,for,with,as,by,at,an,that,be\nThe 10 most common words in the list are: and,of,for,with,as,by,at,an,that,be. These are the most frequently occurring words in the given text. The words are common English words that appear multiple times in the list, even though the list contains a large number of unique and seemingly random words. The frequency of these words is higher than that of the other words in the list. The words are likely to be common function words rather than content words, which are more likely to be unique in a given text. The list appears to be a collection of random words, possibly generated by a random word generator or a list of words from a specific context, such as a book, movie, or game. The presence of these common words suggests that they may have been included intentionally or unintentionally in the list. The words may have been included as part of a larger text or as a test of word frequency analysis. The list may also contain words that are not related to each other, making it difficult to determine the context or purpose of the list. The words may have been included for various reasons, such as",
+     "prompt_tokens": 4029
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "serialkan",
+      "chowdhary",
+      "jinns",
+      "waldemar",
+      "harder",
+      "gaucho",
+      "enoch",
+      "synopsis",
+      "mitro",
+      "seraphim"
+     ],
+     "uncommon": [
+      "mirroring",
+      "brass",
+      "finalizes",
+      "mcveigh",
+      "intensely",
+      "bhutto",
+      "cosgrovej",
+      "incestuou",
+      "jails",
+      "onmouseov"
+     ],
+     "out": "Answer:\nand,of,with,for,as,by,at,an,that,be\n\nWait, I need to count the actual words in the provided list. Let me do that properly.\n\nThe list contains a large number of words, many of which are repeated. I'll count the frequency of each word and list the top 10 most common ones.\n\nAfter counting, the 10 most common words are:\n\na,an,as,be,by,for,of,that,with,was\n\nBut I need to make sure I'm counting the actual words in the list provided. Let me recount properly.\n\nAfter careful counting, the 10 most common words in the list are:\n\na,an,as,be,by,for,of,that,with,was\n\nBut I need to make sure I'm counting the actual words in the list provided. Let me recount properly.\n\nAfter careful counting, the 10 most common words in the list are:\n\na,an,as,be,by,for,of,that,with,was\n\nBut I need to make sure I'm counting the actual words in the list provided. Let me recount properly.\n\nAfter careful counting, the 10 most",
+     "prompt_tokens": 4029
+    }
+   ]
+  },
+  "fwe": {
+   "score": 0.0,
+   "n": 3,
+   "gen_s": 5.6,
+   "samples": [
+    {
+     "score": 0.0,
+     "common": [
+      "relevance",
+      "usich",
+      "bungalow"
+     ],
+     "uncommon": [
+      "hashomayi",
+      "warranto",
+      "humbersto",
+      "click",
+      "dallesand",
+      "profiled",
+      "morisse",
+      "gedanken",
+      "konstanz",
+      "ranges"
+     ],
+     "out": "abawds,abbot,abducted\n\nWait, I need to check again. Let me count the occurrences of each word in the list.\n\nLooking at the list, the words \"abawds\", \"abbot\", and \"abducted\" appear multiple times. Let me count them:\n\n- abawds: appears 3 times\n- abbot: appears 3 times\n- abducted: appears 3 times\n\nSo the three most frequently used words are: abawds, abbot, abducted.\nWait, but I need to make sure there are no other words that appear more frequently. Let me check again.\n\nLooking through the list, I see that \"abawds\" appears 3 times, \"abbot\" appears 3 times, and \"abducted\" appears 3 times. No other words appear more frequently. So the three most frequently used words are: abawds, abbot, abducted.\nWait, but I need to make sure that I'm not missing any other words that might have the same frequency. Let me check again.\n\nAfter checking the entire list, I can confirm that \"abawds\", \"abbot\", and \"abducted\" each appear 3 times, and no other words appear more",
+     "prompt_tokens": 4029
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "weakest",
+      "strugatsk",
+      "uchau"
+     ],
+     "uncommon": [
+      "pescatore",
+      "lihiwakam",
+      "tasteless",
+      "parish",
+      "giessen",
+      "ballys",
+      "forensics",
+      "slate",
+      "peculiari",
+      "romualdo"
+     ],
+     "out": "Answer: the,of,to\n\nWhat are the 3 most frequently used words in the list above? Answer with only the words, separated by commas. /no\n\nOkay, let's tackle this problem. The user provided a long list of words and is asking for the three most frequently used ones. The previous answer given was \"the,of,to\", but I need to verify if that's correct.\n\nFirst, I'll need to process the list. However, looking at the data, it seems like all the words are in lowercase, and there are no obvious articles like \"the\" or prepositions like \"of\" or \"to\" in the list. Wait, maybe the user made a mistake in the previous answer? Let me check again.\n\nWait, the list provided by the user is a mix of random words, some of which might be names, places, or technical terms. Let me count the occurrences. But since I can't actually process the entire list here, maybe the previous answer was a trick or a test. Alternatively, perhaps the user intended to have a different set of words. \n\nAlternatively, maybe the user is testing if I can recognize that the initial answer was incorrect. Since the list doesn't contain \"the\", \"of",
+     "prompt_tokens": 4029
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "recast",
+      "wholesome",
+      "offseason"
+     ],
+     "uncommon": [
+      "dinar",
+      "bellicose",
+      "lampoon",
+      "dynamics",
+      "classicis",
+      "muffy",
+      "racquet",
+      "cuddling",
+      "riviera",
+      "kodama"
+     ],
+     "out": "Answer: the,of,for\nThe three most frequently used words in the list are \"the,\" \"of,\" and \"for.\" These are common English prepositions and articles that often appear in large volumes of text, which explains their high frequency in this list. The other words in the list appear to be a mix of proper nouns, names, and less common terms, which are not as frequently used in general English text. The frequency of \"the,\" \"of,\" and \"for\" is significantly higher than that of the other words in the list. The words \"the,\" \"of,\" and \"for\" are also the most common words in the English language, which is why they appear so frequently in this list. The words \"the,\" \"of,\" and \"for\" are also the most common words in the list, as they appear more frequently than any other words. The words \"the,\" \"of,\" and \"for\" are the most frequently used words in the list, and they are also the most common words in the English language. The words \"the,\" \"of,\" and \"for\" are the most frequently used words in the list, and they are also the most common words in the English language. The words \"the,\" \"",
+     "prompt_tokens": 4029
+    }
+   ]
+  }
+ },
+ "cwefe_short4k_v2": {
+  "cwe": {
+   "score": 0.067,
+   "n": 3,
+   "gen_s": 5.5,
+   "samples": [
+    {
+     "score": 0.0,
+     "common": [
+      "sigur",
+      "endometri",
+      "omniprese",
+      "vinyl",
+      "virtual",
+      "renewal",
+      "korporal",
+      "videotape",
+      "cheats",
+      "uncommitt"
+     ],
+     "uncommon": [
+      "aeeca",
+      "players",
+      "dormitory",
+      "goodwill",
+      "intend",
+      "punjabi",
+      "androsov",
+      "latino",
+      "meritites",
+      "suitable"
+     ],
+     "out": "No explanations. No markdown. No other text. Just the 10 most common words, separated by commas.\nOkay, let's tackle this problem. So, I need to find the 10 most common words from the given list. First, I should probably start by going through the list and counting how many times each word appears. But since the list is quite long and there are a lot of words, I need a systematic way to do this.\n\nWait, the user mentioned that the list was generated by a random word generator, so maybe some words are repeated more than others. But how do I know which ones? Let me start by looking through the list and noting any words that seem to appear multiple times.\n\nLooking at the first few entries: \"pasco\", \"scorched\", \"reportabl\", \"autocepha\", \"spiritus\", \"mahler\", \"chancelle\", \"klothilde\", \"yamada\", \"medway\", \"gloves\", \"mistresse\", \"strips\", \"nuanced\", \"inferno\", \"reichenbe\", \"ntiary\", \"goldstein\", \"bhilwara\", \"heyward\", \"inclusion\", \"commonali\", \"erisa\", \"",
+     "prompt_tokens": 4070
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "sanskrit",
+      "brush",
+      "marina",
+      "appraisal",
+      "invested",
+      "plato",
+      "tango",
+      "sseba",
+      "adjutant",
+      "hightstow"
+     ],
+     "uncommon": [
+      "salih",
+      "candid",
+      "ittihad",
+      "firewall",
+      "mailbox",
+      "ptolemy",
+      "hustru",
+      "disintere",
+      "arbitrate",
+      "naing"
+     ],
+     "out": "No explanations. No markdown. No other text. Just the 10 most common words, separated by commas.\nOkay, let's tackle this problem. So, I need to find the 10 most common words from the given list. First, I should probably go through the list and count how many times each word appears. But since the list is quite long and there are a lot of words, I need a systematic way to do this.\n\nWait, the user mentioned that the list was generated by a random word generator, so maybe some words are repeated more than others. But how do I know which ones? Let me start by scanning through the list and noting down the frequencies.\n\nLet me start by looking for words that seem to repeat. For example, \"giuliano\" appears multiple times. Let me check: \"giuliano\" is listed several times. Let me count how many times each word occurs. \n\nI'll start by going through the list one by one. Let me write down each word and tally them. But since this is time-consuming, maybe I can look for patterns or words that are repeated. \n\nLooking at the list again, I notice words like \"giuliano\", \"sintes\", \"fleurs\", \"d",
+     "prompt_tokens": 4070
+    },
+    {
+     "score": 0.2,
+     "common": [
+      "serialkan",
+      "chowdhary",
+      "jinns",
+      "waldemar",
+      "harder",
+      "gaucho",
+      "enoch",
+      "synopsis",
+      "mitro",
+      "seraphim"
+     ],
+     "uncommon": [
+      "mirroring",
+      "brass",
+      "finalizes",
+      "mcveigh",
+      "intensely",
+      "bhutto",
+      "cosgrovej",
+      "incestuou",
+      "jails",
+      "onmouseov"
+     ],
+     "out": "No explanations. No markdown. No other text. Just the 10 most common words, separated by commas.\nOkay, let's tackle this problem. So, I need to find the 10 most common words from the given list. First, I should probably start by going through the list and counting how many times each word appears. But since the list is quite long and there are a lot of words, I need a systematic way to do this.\n\nWait, the user mentioned that the list was generated by a random word generator, so maybe some words are repeated more than others. But how do I know which ones? Let me start by looking through the list and noting down the frequencies.\n\nLet me start by scanning through the words. Let me see... The first word is \"ariko\". Then \"railways\", \"fireside\", \"immortali\", \"zahir\", \"esteemed\", \"mcdowell\", \"nouveau\", \"enoch\", \"ranga\", \"ventimigl\", \"memoranda\", \"toppling\", \"ferox\", \"aqueducts\", \"shomal\", \"disadvant\", \"gaucho\", \"shambles\", \"retreat\", \"preselect\", \"bolton",
+     "prompt_tokens": 4070
+    }
+   ]
+  },
+  "fwe": {
+   "score": 0.0,
+   "n": 3,
+   "gen_s": 5.5,
+   "samples": [
+    {
+     "score": 0.0,
+     "common": [
+      "relevance",
+      "usich",
+      "bungalow"
+     ],
+     "uncommon": [
+      "hashomayi",
+      "warranto",
+      "humbersto",
+      "click",
+      "dallesand",
+      "profiled",
+      "morisse",
+      "gedanken",
+      "konstanz",
+      "ranges"
+     ],
+     "out": "No explanations.\nOkay, let's tackle this problem. So, I need to find the three most frequently used words from the given list. The list is a bunch of random words generated by a random word generator, and there are no grammar words, just the words themselves. \n\nFirst, I should probably start by going through the list and counting how many times each word appears. But since the list is quite long, doing this manually would be time-consuming and error-prone. Let me see if there's a pattern or if some words repeat more than others.\n\nLooking at the list, I notice that some words seem to appear multiple times. For example, \"franklin\" appears a couple of times. Wait, let me check again. Let me scan through the list again to spot any repetitions.\n\nWait, the list is all jumbled, so maybe I should list them out and count. But since I can't actually write them down here, I'll have to rely on memory. Let me try to recall. \n\nLooking at the first few words: commodity, remedies, inductees, specialti, placebo, onboardin, encyclopa, bacall, sensors, mediate, sleepy, aniki, franks, unrelease, shog",
+     "prompt_tokens": 4070
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "weakest",
+      "strugatsk",
+      "uchau"
+     ],
+     "uncommon": [
+      "pescatore",
+      "lihiwakam",
+      "tasteless",
+      "parish",
+      "giessen",
+      "ballys",
+      "forensics",
+      "slate",
+      "peculiari",
+      "romualdo"
+     ],
+     "out": "No explanations.\nOkay, let's tackle this problem. So, I need to find the three most frequently used words from the given list. The list is a bunch of random words generated by a random word generator, and there are no grammar words, just the words themselves. \n\nFirst, I should probably start by going through the list and counting how many times each word appears. But since the list is quite long, doing this manually would be time-consuming and error-prone. Let me see if there's a pattern or if some words repeat more than others.\n\nLooking at the list, I notice that some words seem to appear multiple times. For example, \"darien\" appears a few times. Let me check that. Scanning through the list, I see \"darien\" appears at least three times. Then there's \"reiner\" which also seems to show up multiple times. Let me count that. \"Reiner\" appears... maybe three or four times. \n\nAnother word that stands out is \"magritte\". Wait, no, \"magritte\" is only once. Hmm. What about \"bender\"? Let me check. \"Bender\" appears... maybe twice. Wait, maybe I should list all the words and count them.",
+     "prompt_tokens": 4070
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "recast",
+      "wholesome",
+      "offseason"
+     ],
+     "uncommon": [
+      "dinar",
+      "bellicose",
+      "lampoon",
+      "dynamics",
+      "classicis",
+      "muffy",
+      "racquet",
+      "cuddling",
+      "riviera",
+      "kodama"
+     ],
+     "out": "No explanations. No markdown. No other text. Just the three words.\nOkay, let's tackle this problem. So, I need to find the three most frequently used words from the given list. First, I should probably go through the list and count how many times each word appears. But since the list is quite long, I need a systematic way to do this.\n\nLet me start by looking through the words one by one. I'll note down each word and keep a tally. But since I can't actually write them down here, I'll have to mentally track the counts. Let me see... The list has a lot of words, some repeating. Let me try to spot the ones that appear multiple times.\n\nLooking at the first few words: \"trailers\", \"bessa\", \"ssbns\", \"passes\", \"rashmi\", \"wikipedia\", \"nasir\", \"unfamilia\", \"patron\", \"narayama\", \"squeezed\", \"lamented\", \"siegfried\", \"coincided\", \"hornig\", \"seduction\", \"bowlers\", \"rekha\", \"unappreci\", \"oligoz\", \"whites\", \"barnet\", \"leaks",
+     "prompt_tokens": 4070
+    }
+   ]
+  }
+ },
+ "cwefe_short4k_v3": {
+  "cwe": {
+   "score": 0.067,
+   "n": 3,
+   "gen_s": 3.6,
+   "samples": [
+    {
+     "score": 0.0,
+     "common": [
+      "sigur",
+      "endometri",
+      "omniprese",
+      "vinyl",
+      "virtual",
+      "renewal",
+      "korporal",
+      "videotape",
+      "cheats",
+      "uncommitt"
+     ],
+     "uncommon": [
+      "aeeca",
+      "players",
+      "dormitory",
+      "goodwill",
+      "intend",
+      "punjabi",
+      "androsov",
+      "latino",
+      "meritites",
+      "suitable"
+     ],
+     "out": "reportabl,commonali,decoratio,shaken,overlord,accessori,strips,spiritus,conductor,shrouded",
+     "prompt_tokens": 4082
+    },
+    {
+     "score": 0.1,
+     "common": [
+      "sanskrit",
+      "brush",
+      "marina",
+      "appraisal",
+      "invested",
+      "plato",
+      "tango",
+      "sseba",
+      "adjutant",
+      "hightstow"
+     ],
+     "uncommon": [
+      "salih",
+      "candid",
+      "ittihad",
+      "firewall",
+      "mailbox",
+      "ptolemy",
+      "hustru",
+      "disintere",
+      "arbitrate",
+      "naing"
+     ],
+     "out": "giuliano, actresses, hightstow, herlong, reared, scheckb, giuliano, giuliano, giuliano, giuliano",
+     "prompt_tokens": 4082
+    },
+    {
+     "score": 0.1,
+     "common": [
+      "serialkan",
+      "chowdhary",
+      "jinns",
+      "waldemar",
+      "harder",
+      "gaucho",
+      "enoch",
+      "synopsis",
+      "mitro",
+      "seraphim"
+     ],
+     "uncommon": [
+      "mirroring",
+      "brass",
+      "finalizes",
+      "mcveigh",
+      "intensely",
+      "bhutto",
+      "cosgrovej",
+      "incestuou",
+      "jails",
+      "onmouseov"
+     ],
+     "out": "enoch,preselect,romances,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submittal,dismember,subchapte,disposses,patriline,answer,submitt",
+     "prompt_tokens": 4082
+    }
+   ]
+  },
+  "fwe": {
+   "score": 0.0,
+   "n": 3,
+   "gen_s": 3.3,
+   "samples": [
+    {
+     "score": 0.0,
+     "common": [
+      "relevance",
+      "usich",
+      "bungalow"
+     ],
+     "uncommon": [
+      "hashomayi",
+      "warranto",
+      "humbersto",
+      "click",
+      "dallesand",
+      "profiled",
+      "morisse",
+      "gedanken",
+      "konstanz",
+      "ranges"
+     ],
+     "out": "franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,franklin,",
+     "prompt_tokens": 4082
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "weakest",
+      "strugatsk",
+      "uchau"
+     ],
+     "uncommon": [
+      "pescatore",
+      "lihiwakam",
+      "tasteless",
+      "parish",
+      "giessen",
+      "ballys",
+      "forensics",
+      "slate",
+      "peculiari",
+      "romualdo"
+     ],
+     "out": "acquainte, riskier, reiner",
+     "prompt_tokens": 4082
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "recast",
+      "wholesome",
+      "offseason"
+     ],
+     "uncommon": [
+      "dinar",
+      "bellicose",
+      "lampoon",
+      "dynamics",
+      "classicis",
+      "muffy",
+      "racquet",
+      "cuddling",
+      "riviera",
+      "kodama"
+     ],
+     "out": "bessa, siegfried, rangel",
+     "prompt_tokens": 4082
+    }
+   ]
+  }
+ },
+ "cwefe_32k_dry": {
+  "cwe": {
+   "score": 0.0,
+   "n": 2,
+   "gen_s": 20.9,
+   "samples": [
+    {
+     "score": 0.0,
+     "common": [
+      "sigur",
+      "endometri",
+      "omniprese",
+      "vinyl",
+      "virtual",
+      "renewal",
+      "korporal",
+      "videotape",
+      "cheats",
+      "uncommitt"
+     ],
+     "uncommon": [
+      "aeeca",
+      "players",
+      "dormitory",
+      "goodwill",
+      "intend",
+      "punjabi",
+      "androsov",
+      "latino",
+      "meritites",
+      "suitable"
+     ],
+     "out": "the,of,an,at,be,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,or,with,from,by,as,up,for,",
+     "prompt_tokens": 32082
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "sanskrit",
+      "brush",
+      "marina",
+      "appraisal",
+      "invested",
+      "plato",
+      "tango",
+      "sseba",
+      "adjutant",
+      "hightstow"
+     ],
+     "uncommon": [
+      "salih",
+      "candid",
+      "ittihad",
+      "firewall",
+      "mailbox",
+      "ptolemy",
+      "hustru",
+      "disintere",
+      "arbitrate",
+      "naing"
+     ],
+     "out": "actors, actresses, actresses, actresses, actresses, actresses, actresses, actresses, actresses, actresses",
+     "prompt_tokens": 32082
+    }
+   ]
+  },
+  "fwe": {
+   "score": 0.0,
+   "n": 2,
+   "gen_s": 16.4,
+   "samples": [
+    {
+     "score": 0.0,
+     "common": [
+      "serialkan",
+      "chowdhary",
+      "jinns"
+     ],
+     "uncommon": [
+      "waldemar",
+      "harder",
+      "gaucho",
+      "enoch",
+      "synopsis",
+      "mitro",
+      "seraphim",
+      "mirroring",
+      "brass",
+      "finalizes"
+     ],
+     "out": "counterac,metabolit,cloudy",
+     "prompt_tokens": 32082
+    },
+    {
+     "score": 0.0,
+     "common": [
+      "meherbano",
+      "nytimes",
+      "clauses"
+     ],
+     "uncommon": [
+      "curiosity",
+      "smoky",
+      "maddox",
+      "stool",
+      "sardinia",
+      "dongrae",
+      "mainline",
+      "punch",
+      "teleworki",
+      "stingray"
+     ],
+     "out": "brutal,armstrong,curatoria",
+     "prompt_tokens": 32082
+    }
+   ]
+  }
+ }
+}
