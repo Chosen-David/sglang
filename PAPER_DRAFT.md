@@ -17,15 +17,28 @@
 
 推荐 1（训练免费 + 两级索引定位清晰；「30+ 实测假设」可放 Intro 末）。
 
-## Abstract（~200 词，最后写）
+## Abstract（~200 词）【正文 v1】
 
-骨架：长上下文 decode 的 HBM 瓶颈（triton 注意力流量 ∝S）→ training-free 两级索引器
-TLI 三创新点（A 非对称压缩 / B' 分区预算 / D' 层跳过）→ 三层结果：
-①质量：LongBench 13 子集 49.92 vs FullKV 50.36 / TIA 50.06（守恒口径）+ NIAH 极端口径 0.625；
-②kernel：批量 select 12.9×（1.80ms@bs32/131K）、prefill 慢路径 7.0×、e2e decode 原型→
-生产级 12.5×（323 tok/s）；③方法论：30+ 假设实测、每步对拍零漂移、两例主动复测撤回
-自身 headline（测量学贡献）。
-【素材：报告§1、§8b-12/13/15/16】
+Long-context LLM decoding is bottlenecked by KV-cache reads whose traffic grows
+linearly with context length. Sparse attention indexers promise relief, but
+the strongest (DSA) require 2.1B training tokens, while training-free ones pay
+in index storage (Quest: ~1KB/token) or selection semantics. We first expose a
+measurement trap: under the common "mass coverage" metric, any sink+window
+method is indistinguishable from dense attention—the competitive region holds
+only 0.515 of total mass. Guided by corrected metrics over 10 real traces, we
+discover an *asymmetric compression law*: the coarse level tolerates aggressive
+subspace reduction, whereas the fine level's bottleneck lies in representation,
+not dimensionality. We engineer this into TLI, a training-free two-level
+indexer: position-stable low-frequency tail dimensions for block-level upper
+bound filtering, PCA-projected 4-bit token-level refinement, far/near
+partitioned budgets, and offline-calibrated layer skipping. TLI is fully
+integrated into sglang with bit-exact 4-bit indexing, a four-kernel batched
+select (12.9×), and CUDA-graph compatibility—12.5× decode speedup over the
+eager prototype. On LongBench-13, TLI scores 49.92 vs. FullKV 50.36; honest
+boundaries are reported end-to-end (crossover at S≈44K). All conclusions rest
+on 30+ measured hypotheses, each with parity checks, including two headline
+claims we retracted ourselves upon replication—treating measurement
+methodology as a first-class contribution.
 
 ## 1. Introduction（1.5 页）【正文 v1】
 
@@ -518,19 +531,59 @@ fig6 = §6.2 逐层；fig1–4 归 §3/§4。所有数字可由 JSON（tli_m8_e2
 tli_m8_e2e_long_results / tli_m10_bench / tli_niah_results /
 kernel_comparison_indexers）复现，无手抄。
 
-## 7. Discussion: Measurement Methodology（0.75 页，差异化卖点）
+## 7. Discussion: Measurement Methodology（0.75 页，差异化卖点）【正文 v1】
 
-- 两例主动撤回：decode 差分法信噪比 <1（N=64 假打平 → N=256 复测修正）；
-  NIAH 单 seed 钟形被 seed2 反转（合并 n=40 持平）。
-- 原则：小样本差分方差系统性低估；复测不是推翻而是校准。
-- phase 插桩会骗人 → kernel 级 profiler 复核（两次踩坑）。
-- 【素材：报告§8b-14 测量学修正段、§8b-16 诚实口径修正段】
+本文在系统贡献之外，把**测量方法本身**作为一个可复用的贡献——两例
+主动复测撤回自身 headline 的案例：
 
-## 8. Conclusion
+**案例一：decode 差分法信噪比失效**。30K e2e 实验的初版（N=64 差分法：
+decode = 完整跑总时长 − 单独 prefill）曾报告「bs=16 tli decode 47.7 ≈
+triton 48.1 打平」——该结论被 N=256 双侧复测撤回（tli 67.1 / triton
+43.4，慢 1.55×）。根因是数百秒 prefill 下差分信号仅 3–4s，而 prefill
+段间 ~1% 的波动即 4–8s，**信噪比 <1**；N=256 使信号放大到 8–17s（信噪比
+~3）后结论才可信。交叉验证：tli 的 bs 扩展比（1.49×）与 9.9K 口径完全
+一致。
 
-三层贡献重述 + 诚实边界（10K/30K 档 decode 未胜 dense，线性外推翻转点
-S≈44K（fig9c），收益位在 S≥128K HBM 流量 + 大 batch）+ 未来工作（H100 主表、
-held-out gate、RULER 全量）。
+**案例二：NIAH 单 seed 钟形反转**。seed1 的 far 预算扫描呈钟形
+（0.550/0.650/0.550，n=20/配置）——seed2 反转为 0.700/0.600/0.700，
+合并 n=40 后三预算完全持平 0.625：seed1 钟形是 n=16 far 槽位的二项噪声。
+
+三条提炼出的原则：①**小样本差分的方差被系统性低估**——槽位型二值指标
+（NIAH 命中）与长基线差分（decode 时延）在 n≤20 时都极易产生方向性假象；
+②**复测不是推翻而是校准**——两例撤回均使结论更可信（前者建立了 S 收窄
+链的交叉验证，后者确立了「限制因子是 far 池召回而非预算」的真结论）；
+③**phase 插桩会骗人**——两次踩坑（M3 归因、M10 prefill 手动分解合计
+200ms vs 实际 979ms）均由 kernel 级 profiler 复核纠正，归因必须到
+kernel 级。
+
+对社区的含义：稀疏注意力论文常用的「单 seed × n≤20 差分表」口径，
+在 far 槽位（~32 个）这类低基数指标上置信度不足；本文全部 headline 数字
+配复测或大 n，并把撤回过程如实写入。
+
+## 8. Conclusion【正文 v1】
+
+本文提出 TLI——training-free 的两级注意力索引器，三层贡献：
+
+1. **算法边界**：非对称压缩定律（L1 子空间可粗筛 / L2 信息瓶颈在表示
+   方式而非维数）工程化为 A（尾维上界粗筛）+ L2 PCA 投影精筛；B'
+   分区预算把名额分配从分数噪声驱动改为预算驱动（近端名额保障，实测
+   全部增益来源）；D' 离线校准层跳过（跳 13/36 层，precision
+   0.92–1.00，索引 FLOP 4.88×）。12 项 negative results 与 design
+   decisions 一一映射。
+2. **系统兑现**：sglang 全链路生产级集成——4bit 三张量索引（逐位一致）、
+   四 kernel 批量组合（select 12.9×）、CUDA graph 三方法契约；
+   decode 原型→生产级 12.5×（323 tok/s@bs32/9.9K），prefill 30K
+   kernel 化 2.11×。
+3. **质量-成本**：LongBench 13 子集 49.92（vs FullKV 50.36 / TIA
+   50.06），索引存储 40B（24B PCA）/token-head（Quest 的 1/3），
+   每 token 索引 MAC = DSA 的 1/32，免训练。
+
+**诚实边界**：10K/30K 档 decode 未跑赢 dense triton（慢 3.1×/1.5×）；
+两点线性外推翻转点 S≈44K（fig9c），收益位在 S≥128K 的 HBM 流量主导
+区间 + 大 batch；NIAH 0.625 vs dense 1.0 是 far 池 0.8% 预算的物理上限
+（与 Quest/HISA 同性质）。**未来工作**：H100 主表（S=131K × bs≥16，
+机器申请中）、held-out gate 验证（precision ≥0.98 硬阈值）、RULER 全量、
+结构性 topk 的算法级近似替换（prefill 剩余 67% 瓶颈）。
 
 ---
 
