@@ -1,0 +1,590 @@
+{
+ "niah_triton": {
+  "score": 1.0,
+  "n": 20,
+  "gen_s": 162.9,
+  "samples": [
+   {
+    "depth": 5,
+    "needle": "7117010",
+    "ok": true,
+    "out": "The magic number is 7117010.\nPassage:\nLunda Norte Province\nL",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 5,
+    "needle": "8165220",
+    "ok": true,
+    "out": "Answer:\n8165220\nPassage:\nThe Magic Number\nThe Magic Number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "5974037",
+    "ok": true,
+    "out": "The magic number is 5974037.\nThe magic number is 5974037. Th",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "7522914",
+    "ok": true,
+    "out": "The magic number is 7522914.\nThe magic number is 7522914.\nTh",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "7854786",
+    "ok": true,
+    "out": "The magic number is 7854786. The magic number is 7854786. Th",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "5727980",
+    "ok": true,
+    "out": "The magic number is 5727980.\nThe magic number is 5727980.\nTh",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 35,
+    "needle": "5310697",
+    "ok": true,
+    "out": "Answer:\n5310697\nPassage:\nThe Magic Number\nThe Magic Number i",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 35,
+    "needle": "3843799",
+    "ok": true,
+    "out": "The magic number is 3843799.\nThe magic number is 3843799. Th",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "8621768",
+    "ok": true,
+    "out": "The magic number is 8621768.\nThe magic number is 8621768. Th",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "7022201",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 7022201.\nThe ma",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 55,
+    "needle": "4370643",
+    "ok": true,
+    "out": "The magic number is 4370643. \n\nThe magic number is 4370643. ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 55,
+    "needle": "9529991",
+    "ok": true,
+    "out": "The magic number is 9529991.\nPassage:\nThe Rose Tattoo | Bay ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "4071405",
+    "ok": true,
+    "out": "The magic number is 4071405.\nBased on the passage, what is t",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "2043816",
+    "ok": true,
+    "out": "One important piece of information is that the magic number ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 75,
+    "needle": "7326185",
+    "ok": true,
+    "out": "The magic number is 7326185.\nAnswer:\n7326185\nPassage:\nThe Ma",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 75,
+    "needle": "8620738",
+    "ok": true,
+    "out": "The magic number is 8620738.\nThe magic number is 8620738.\n\nT",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 85,
+    "needle": "3225147",
+    "ok": true,
+    "out": "The magic number is 3225147.\nAnswer:\n3225147\nPassage:\nThe ma",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 85,
+    "needle": "4976964",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 4976964.\n\nThe p",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "7300681",
+    "ok": true,
+    "out": "The magic number is 7300681.\nThe magic number mentioned in t",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "6108112",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 6108112.\nPassag",
+    "prompt_tokens": 32041
+   }
+  ]
+ },
+ "niah_tli": {
+  "score": 0.65,
+  "n": 20,
+  "gen_s": 1015.9,
+  "samples": [
+   {
+    "depth": 5,
+    "needle": "7117010",
+    "ok": false,
+    "out": "Answer:\n74\nPassage:\nSedimentation\nSedimentation is the proce",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 5,
+    "needle": "8165220",
+    "ok": true,
+    "out": "Answer:\n8165220\nPassage:\nThe Magic Number\nThe Magic Number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "5974037",
+    "ok": true,
+    "out": "(The magic number is 5974037)\nAnswer:\n5974037\nPassage:\nThe 2",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "7522914",
+    "ok": false,
+    "out": "Answer:\n12\nPassage:\nThe 1960s\nThe 1960s were a period of soc",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "7854786",
+    "ok": false,
+    "out": "What is the name of the person who is the author of the book",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "5727980",
+    "ok": false,
+    "out": "What is the magic number mentioned in the passage? Answer wi",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 35,
+    "needle": "5310697",
+    "ok": false,
+    "out": "1940\nPassage:\nThe Magic Number\nThe Magic Number is the numbe",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 35,
+    "needle": "3843799",
+    "ok": true,
+    "out": "Answer:\n3843799\nPassage:\nThe magic number is 3843799.\nAnswer",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "8621768",
+    "ok": true,
+    "out": "8621768\n\nWhat is the name of the act that was passed in 2010",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "7022201",
+    "ok": true,
+    "out": "1234567890\n\nThe magic number is 7022201.\n\nThe magic number i",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 55,
+    "needle": "4370643",
+    "ok": true,
+    "out": "4370643\n\nWhat is the name of the program that is mentioned i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 55,
+    "needle": "9529991",
+    "ok": false,
+    "out": "1228\nPassage:\nThe Magic Number\nThe Magic Number is a number ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "4071405",
+    "ok": true,
+    "out": "The magic number is 4071405.\nBased on the passage, what is t",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "2043816",
+    "ok": true,
+    "out": "The magic number is 2043816.\nPassage:\nThe Magic Number\nThe M",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 75,
+    "needle": "7326185",
+    "ok": true,
+    "out": "The magic number is 7326185.\nAnswer:\n7326185\nPassage:\nThe Ma",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 75,
+    "needle": "8620738",
+    "ok": true,
+    "out": "1234567890\nAnswer:\n8620738\nPassage:\nThe Magic Number\nThe Mag",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 85,
+    "needle": "3225147",
+    "ok": true,
+    "out": "(Do not include the word \"magic\" in your answer.)\nAnswer:\n32",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 85,
+    "needle": "4976964",
+    "ok": false,
+    "out": "What is the name of the football club that Graham Farmer pla",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "7300681",
+    "ok": true,
+    "out": "Answer:\n7300681\nPassage:\nThe Magic Number\nThe Magic Number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "6108112",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 6108112.\nPassag",
+    "prompt_tokens": 32041
+   }
+  ]
+ },
+ "niah_tli_far512": {
+  "score": 0.55,
+  "n": 20,
+  "gen_s": 997.5,
+  "samples": [
+   {
+    "depth": 5,
+    "needle": "7117010",
+    "ok": false,
+    "out": "Answer:\n74\nPassage:\nThe Magic Number\nThe Magic Number is a n",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 5,
+    "needle": "8165220",
+    "ok": true,
+    "out": "Answer:\n8165220\nPassage:\nThe Magic Number\nThe Magic Number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "5974037",
+    "ok": true,
+    "out": "(The magic number is 5974037)\nAnswer:\n5974037\nPassage:\nThe 2",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "7522914",
+    "ok": false,
+    "out": "(Example: 12345)\nAnswer:\n12345\nPassage:\nThe Magic Number\nThe",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "7854786",
+    "ok": true,
+    "out": "The magic number is 7854786. \n\nWhat is the name of the first",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "5727980",
+    "ok": false,
+    "out": "What is the magic number mentioned in the passage? Answer wi",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 35,
+    "needle": "5310697",
+    "ok": false,
+    "out": "1940\nPassage:\nThe Magic Number\nThe Magic Number is the numbe",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 35,
+    "needle": "3843799",
+    "ok": false,
+    "out": "Answer:\n123456789\nPassage:\nThe magic number is 123456789.\nQu",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "8621768",
+    "ok": true,
+    "out": "8621768\n\nWhat is the name of the organization that is respon",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "7022201",
+    "ok": false,
+    "out": "1500\n\nThe magic number is 1500.\n\nThe magic number is 1500.\n\n",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 55,
+    "needle": "4370643",
+    "ok": false,
+    "out": "What is the name of the program that is in the process of re",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 55,
+    "needle": "9529991",
+    "ok": false,
+    "out": "1228\nPassage:\nThe Magic Number\nThe Magic Number is a number ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "4071405",
+    "ok": true,
+    "out": "The magic number is 4071405.\nBased on the passage, what is t",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "2043816",
+    "ok": true,
+    "out": "One important piece of information is that the magic number ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 75,
+    "needle": "7326185",
+    "ok": true,
+    "out": "The magic number is 7326185.\nAnswer:\n7326185\nPassage:\nThe Ma",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 75,
+    "needle": "8620738",
+    "ok": true,
+    "out": "1234567890\nAnswer:\n8620738\nPassage:\nThe Magic Number\nThe Mag",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 85,
+    "needle": "3225147",
+    "ok": true,
+    "out": "Do not include any other text.\nAnswer:\n3225147\nPassage 11:\nT",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 85,
+    "needle": "4976964",
+    "ok": false,
+    "out": "What is the name of the football club that Graham Farmer pla",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "7300681",
+    "ok": true,
+    "out": "Answer:\n7300681\nPassage:\nThe Magic Number\nThe Magic Number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "6108112",
+    "ok": true,
+    "out": "The magic number is 6108112.\nPassage:\nThe 2018–2019 NCAA Div",
+    "prompt_tokens": 32041
+   }
+  ]
+ },
+ "niah_tli_far128": {
+  "score": 0.55,
+  "n": 20,
+  "gen_s": 992.0,
+  "samples": [
+   {
+    "depth": 5,
+    "needle": "7117010",
+    "ok": false,
+    "out": "Answer:\n74\nPassage:\nMars\nMars is the fourth planet from the ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 5,
+    "needle": "8165220",
+    "ok": true,
+    "out": "Answer:\n8165220\nPassage:\nThe Magic Number\nThe Magic Number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "5974037",
+    "ok": true,
+    "out": "The magic number is 5974037.\nPassage:\nLate string quartets (",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "7522914",
+    "ok": false,
+    "out": "Answer:\n12\nPassage:\n12\nThe magic number mentioned in the pas",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "7854786",
+    "ok": false,
+    "out": "What is the name of the model that was adapted to the biomed",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "5727980",
+    "ok": false,
+    "out": "The number is the same as the number of the first paragraph ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 35,
+    "needle": "5310697",
+    "ok": false,
+    "out": "1940\nPassage:\n1940\nThe 1940s were a time of great change in ",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 35,
+    "needle": "3843799",
+    "ok": false,
+    "out": "Answer:\n3843\nPassage:\nThe magic number is 3843. This is the ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "8621768",
+    "ok": true,
+    "out": "8621768\n\nWhat is the magic number mentioned in the passage? ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "7022201",
+    "ok": false,
+    "out": "1500\n\nWhat is the magic number mentioned in the passage? Ans",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 55,
+    "needle": "4370643",
+    "ok": true,
+    "out": "4370643\n\nWhat is the name of the program that is mentioned i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 55,
+    "needle": "9529991",
+    "ok": false,
+    "out": "Answer: 100\nPassage:\nThe Magic Number\nThe Magic Number is 10",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "4071405",
+    "ok": true,
+    "out": "The magic number is 4071405.\nBased on the passage, what is t",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "2043816",
+    "ok": true,
+    "out": "The magic number is 2043816.\nPassage:\nThe 1688 Revolution, a",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 75,
+    "needle": "7326185",
+    "ok": true,
+    "out": "The magic number is 7326185.\nPassage:\nThe Magic Number\nThe M",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 75,
+    "needle": "8620738",
+    "ok": true,
+    "out": "Answer:  8620738\nPassage:\nThe Magic Number\nThe Magic Number ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 85,
+    "needle": "3225147",
+    "ok": true,
+    "out": "(Example: 3225147)\nAnswer:\n3225147\nPassage 11:\nEldfisk",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 85,
+    "needle": "4976964",
+    "ok": false,
+    "out": "What is the name of the football club that Graham Farmer pla",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "7300681",
+    "ok": true,
+    "out": "Answer:\n7300681\nPassage:\nThe Magic Number\nThe magic number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "6108112",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 6108112.\nThe ma",
+    "prompt_tokens": 32041
+   }
+  ]
+ }
+}

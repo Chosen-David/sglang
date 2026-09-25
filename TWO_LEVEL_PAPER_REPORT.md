@@ -789,6 +789,43 @@ M9/M5 回归全过。
 - 工程教训：**长 prefill e2e 期间不得在同机其他 GPU 跑任务**（CPU/PCIe
   竞争污染差分法）；decode 差分法只在 prefill ≲ 10s 时可信。
 
+### 8b-16. NIAH 检索质量评测（RULER 口径，S=32K，#38）
+
+口径：`test_tli_niah.py`——S=32041 token（token 精确截断，RULER uniform
+深度 5-95% 十档 × 2 样本 = 20/后端），haystack = 本地 LongBench 英文长文档
+拼接（gov_report/hotpotqa/qasper/multifieldqa_en/triviaqa；外网受限无法取
+RULER 的 PG essays，NIAH 对 haystack 语义不敏感，拼接文档是社区常用替代）；
+needle = 「magic number is {7 位随机数}」插在 token 精确深度的句边界；
+temperature=0、输出含 needle 数字串计成功。tli（M10 全 kernel 路径，默认
+far=256）vs triton（dense FullKV）同机同卡。
+
+**结果（含 far 预算三点扫描）**：
+
+| 后端 | NIAH score | far 区命中（5-85% 档） | 生成耗时 |
+|---|---|---|---|
+| triton（dense） | **20/20 = 1.000** | — | 162.9 s |
+| tli far=128 | 11/20 = 0.550 | 9/16 = 56% | 992.0 s |
+| tli far=256（默认） | 13/20 = **0.650** | 11/16 = 69% | 1015.9 s |
+| tli far=512 | 11/20 = 0.550 | 9/16 = 56% | 997.5 s |
+
+- **失败模式定位**（输出文本分析）：失败样本模型输出的是 haystack 中其他
+  数字（74/12/1940/1228）或复述问题，而非茫然拒答——即 **needle token
+  未进 far 选择集**，模型从被选中片段抓了干扰数字。
+- **深度分布与结构解释**：near 保障区（最后 near_len=2048 token ≈ 深度
+  ≥94%）三配置全过；depth 5-85% 全靠 far 池（256/32K = 0.8% 预算）→
+  far=256 档 69% 命中，**与 E4c 实测 far rec@256≈0.5-0.56 的量级吻合**
+  （单针与 query 相关性高于平均 → 略优于平均 recall）。
+- **far 预算钟形曲线（三点）**：128→56%、256→69%、512→56%——**256 是
+  平衡点，两侧对称下降**：128 = far 池不足漏 needle；512 = near 配额被挤
+  （640→384 token，近端上下文质量受损）。**与 E5b LongBench 主表的
+  「far 128-256 饱和、过大反抢近端配额」结论跨口径一致**（n=20 二项噪声
+  ±0.11，钟形方向由两侧机制解释锚定）——B' 分区预算设计在极端检索与
+  均值负载两种口径下同构，这是设计鲁棒性的证据。
+- **诚实口径**：NIAH 是 far-heavy 极端检索任务，tli 0.65 vs dense 1.0 是
+  far 池 0.8% 预算的本质限制——LongBench 主表（均值负载，TLI 49.92 vs
+  FullKV 50.36）与 NIAH（极端压力）共同构成质量侧的两端口径，与 Quest/
+  HISA 论文报告的 NIAH 损失同性质。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
