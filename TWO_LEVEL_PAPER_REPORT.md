@@ -738,6 +738,53 @@ watchdog 1800（30K 稀疏 prefill 数百秒）。显存账：KV=144KB/token →
   快路径替代全宽 einsum+反量化表；②fine 矩阵改紧凑候选池（Tc 宽）避免
   [n,Hkv,S] 物化；③kq_f 反量化表跨 chunk 复用（当前每 chunk 重建）。
 
+### 8b-15. M10：prefill select_batched 慢路径 kernel 化（#37）
+
+**归因（bench_m10_prefill.py + kernel 级 profiler）**：30K 尺度慢路径的根源
+是 **M7 快路径失效边界**——快路径（L1 块并集==因果区）只在
+nblk ≤ K1×Hkv 时成立；S=30K 时 nblk=480 ≫ K1=128，每 head 仅选 ~25%
+块、并集覆盖 <100%，**128/128 行全走慢路径**（真实 narrativeqa K 实测）。
+eager 慢路径成本 = [n,Hkv,S] masked_fill 链（elementwise 434ms）+ 随机行
+gather 135ms + gemv 90ms + topk 机器 160ms（末 chunk 单调用 979ms；
+4 chunks × 36 层 ≈ 141s/req，完美解释 e2e prefill）。**phase 插桩再次
+骗人**：手动分解合计 ~200ms vs 实际 979ms——归因必须 kernel 级复核。
+
+**实现（indexer.py select_batched）**：M8 decode 侧全套移植——
+`tli_compact` 候选压实（L1 并集 onehot → 紧凑 token 数组，替代 scatter
+到 [n,Hkv,S] 全宽）+ `tli_l2_score_batched_dual` 双池直写（far/near -inf
+烘进打分 kernel 写出，寄存器内 dequant 不物化 kq_c fp32）+ host 常量宽度
+配额 topk（W_far+W_near+W_forced=token_budget，无 CUDA graph 约束不必
+静态上界）+ 哨兵转 0（下游 `_sparse_extend_one` 无 valid 掩码约定）。
+**row_chunk 显存约束解耦**：kernel 路径不物化 kq_c → row_chunk 64→512
+摊销 launch/topk 固定项。
+
+**微基准（S=30720/NQ=8192，tli_m10_bench.json）**：末 chunk（慢路径主导）
+983.8→140.0ms（**7.0×**）；首 chunk（快路径+empty 行）243.4→167.8ms（1.45×）。
+对拍 test_tli_m10.py：双口径（合成 K + 真实 narrativeqa L03 K）候选充足行
+对称差 ≤2（GEMV 归约序 tie 翻转 2.4e-07，M8 同款判据）、短行有效集一致；
+M9/M5 回归全过。
+
+**e2e 兑现（30K token，同 §8b-14 口径）**：
+
+| bs | M8 prefill | **M10 prefill** | 加速 |
+|---|---|---|---|
+| 8 | 786.8 s | **373.0 s** | 2.11× |
+| 16 | 1564.9 s | **741.4 s** | 2.11× |
+
+- **两档加速比完全一致（2.11×）**——慢路径成本 ∝ bs×S 的线性项被消除，
+  剩余为结构性 topk + 不可压的模型本体前向。
+- **诚实口径 3（decode 差分法失效）**：N=64 时 decode 信号仅 3-4s，而数百
+  秒 prefill 的段间波动（~1%）即 4-8s，**信噪比 <1**——M10 复跑两档 decode
+  差分均为负值（−0.15/−3.06s），M8 版的正差分（66.1/47.7）同样不可信。
+  M10 未触碰 decode 代码路径（select_decode_batched 原样），decode 数字
+  引用 §8b-13 的 9.9K 口径（prefill 短、差分信噪比健康）+ N=256 复测。
+- **剩余瓶颈（结构性）**：kernel 化后 topk radix 机器 ~112ms/67%（far
+  k=256 + near k=768 over Tc≈33K 候选）；对比 triton prefill 58-115s 仍慢
+  ~6.5×，其中模型本体前向占非 select 部分大头——select 侧继续压缩需
+  topk 算法级替换（近似选择），暂不做。
+- 工程教训：**长 prefill e2e 期间不得在同机其他 GPU 跑任务**（CPU/PCIe
+  竞争污染差分法）；decode 差分法只在 prefill ≲ 10s 时可信。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）

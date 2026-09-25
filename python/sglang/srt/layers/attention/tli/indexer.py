@@ -450,6 +450,18 @@ class TLIIndexer:
         Nq, H, D = q.shape
         G = H // Hkv
         device = q.device
+        # M10：kernel 慢路径不物化 kq_c（寄存器内 dequant）→ row_chunk 的
+        # 显存约束解除，放大到 512 摊销 launch/topk 固定项（247.5→145.8ms
+        # 实测@30K 末chunk）。eager 回退罕见（Hkv 非二次幂/不连续）不保护
+        rc = row_chunk
+        if (
+            getattr(p, "use_prefill_kernel", False)
+            and not self.skip_far
+            and Nq >= 2
+            and (Hkv & (Hkv - 1)) == 0
+            and (self.nd2 & (self.nd2 - 1)) == 0
+        ):
+            rc = max(row_chunk, 512)
         kmin, kmax = index["kmin"], index["kmax"]
         nblk = index["nblk"]
         kmin, kmax = kmin[:nblk], kmax[:nblk]  # 容量 padding 垃圾行切除
@@ -462,8 +474,8 @@ class TLIIndexer:
         # M7：共享反量化表（快路径直接 einsum；慢路径 gather 打分也用）
         kq_f = kq_unpack(kq[:S], index["kq_sc"][:S], index["kq_mn"][:S])
         out = []
-        for r0 in range(0, Nq, row_chunk):
-            r1 = min(r0 + row_chunk, Nq)
+        for r0 in range(0, Nq, rc):
+            r1 = min(r0 + rc, Nq)
             q_c = q[r0:r1]
             t_c = t_arr[r0:r1]
             n = r1 - r0
@@ -497,12 +509,101 @@ class TLIIndexer:
             onehot.scatter_(1, f_blk, True)
             sel_mask = onehot.repeat_interleave(bs, dim=1)[:, :S]  # [n, S]
             q2 = self._q_refine(q_c).reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
+            far_lo_k = p.sink_blocks * bs  # M10 慢路径 kernel 分支提前用（原版在 B' 段定义）
             # M7 快路径判定：池 ⊇ 因果区（池 ⊆ 因果区恒成立 → 即 ==）。
-            # 真实数据 S ≲ K1*bs*Hkv 量级时并集全选，Tc==S，scatter 是纯绕路
-            if bool((sel_mask.sum(1) >= t_c + 1).all()):
+            # 真实数据 S ≲ K1*bs*Hkv 量级时并集全选，Tc==S，scatter 是纯绕路。
+            # M10 修正认知：nblk > K1（S ≳ 8K×Hkv/K1…即 S>~32K/Hkv 边界附近）
+            # 后每 head 仅选 nblk 的 K1/nblk 比例块，并集 < 100% → 慢路径
+            # 必然触发（30K 实测末 chunk 128/128 慢路径，q 是否真实无关）
+            fast_path = bool((sel_mask.sum(1) >= t_c + 1).all())
+            if fast_path:
                 fine = torch.einsum("ahd,shd->ahs", q2, kq_f)  # [n, Hkv, S]
                 causal_full = pos.view(1, S) <= t_c.view(-1, 1)  # [n, S]
                 fine = fine.masked_fill(~causal_full.unsqueeze(1), float("-inf"))
+            elif (
+                getattr(p, "use_prefill_kernel", False)
+                and not self.skip_far
+                and n >= 2
+                and (Hkv & (Hkv - 1)) == 0
+                and (nd2 & (nd2 - 1)) == 0
+                and index["kq_q"].is_contiguous()
+            ):
+                # M10：慢路径 kernel 化（M8 decode 侧全套移植，t_t → per-row
+                # t_c，pool 以 [1,...] 视图 + rows=0 寻址）。消除三处 eager 大头：
+                # ①seq_m where [n,S] + topk 全排序 → tli_compact 块展开；
+                # ②kq_f[tok_c] gather + einsum → KernelC fused gather+dequant+GEMV
+                #   双池直写；③fine [n,Hkv,S] 物化 + masked_fill 链 → 池表
+                # [n,Hkv,Tc]。输出哨兵=S 统一转 0（下游 _sparse_extend_one 无
+                # valid 掩码约定；原版 -inf 垃圾位 ≈ 未覆盖位置起，行为近似；
+                # empty 行（far 区空）走原版整体 topk 特判保语义）
+                from sglang.srt.layers.attention.tli.kernels import (
+                    tli_compact,
+                    tli_l2_score_batched_dual,
+                )
+
+                Tc_k = min((K1 * Hkv + p.sliding_blocks) * bs, nblk * bs, S)
+                S_t_r = t_c + 1  # [n] per-row 因果长度
+                tok = tli_compact(onehot, S_t_r, bs, S, Tc_k)  # [n, Tc_k] 哨兵=S
+                tok_ck = tok.clamp(max=S - 1)
+                far_hi_t = (t_c + 1 - p.near_len).clamp(min=far_lo_k)
+                sw_lo_t = (t_c - p.sliding_window + 1).clamp(min=0)
+                rows0 = torch.zeros(n, dtype=torch.long, device=device)
+                far_sc, near_sc = tli_l2_score_batched_dual(
+                    q2,
+                    index["kq_q"][:S].unsqueeze(0),
+                    index["kq_sc"][:S].unsqueeze(0),
+                    index["kq_mn"][:S].unsqueeze(0),
+                    rows0,
+                    tok_ck,
+                    far_lo_k,
+                    far_hi_t,
+                    sw_lo_t,
+                )
+                # B'：host 常量宽度（prefill 无 CUDA graph 约束，对齐原版输出
+                # K2 = token_budget：far k2_far + near (k2_near-F) + forced F；
+                # 原版 near topk k2_near 席含滑窗 +inf 位 → 近端实选 k2_near-F，
+                # kernel 版显式 forced 段补 F —— 预算分配等价）
+                near_floor = p.sliding_window + far_lo_k
+                far_cap = max(0, p.token_budget - near_floor)
+                W_far = min(p.far_tokens, far_cap)
+                W_forced = p.sliding_window
+                W_near = max(0, p.token_budget - W_far - W_forced)
+                F_t = (t_c + 1 - sw_lo_t).clamp(min=0)
+                SENT = S
+                tok_e = tok_ck.unsqueeze(1).expand(n, Hkv, Tc_k)
+                parts = []
+                if W_far > 0:
+                    i_f = torch.topk(far_sc, W_far, dim=-1).indices
+                    sc_f = torch.gather(far_sc, 2, i_f)
+                    sel_f = torch.gather(tok_e, 2, i_f)
+                    keep_f = sc_f != float("-inf")  # 池不足槽位 → 哨兵 → 0
+                    parts.append(torch.where(~keep_f, torch.zeros_like(sel_f), sel_f))
+                if W_near > 0:
+                    i_n = torch.topk(near_sc, W_near, dim=-1).indices
+                    sc_n = torch.gather(near_sc, 2, i_n)
+                    sel_n = torch.gather(tok_e, 2, i_n)
+                    keep_n = sc_n != float("-inf")
+                    parts.append(torch.where(~keep_n, torch.zeros_like(sel_n), sel_n))
+                if W_forced > 0:
+                    f_pos = sw_lo_t.view(-1, 1) + torch.arange(W_forced, device=device)
+                    f_pad = torch.arange(W_forced, device=device).view(1, -1) >= F_t.view(-1, 1)
+                    forced = torch.where(f_pad, torch.zeros_like(f_pos), f_pos)
+                    parts.append(forced.unsqueeze(1).expand(n, Hkv, -1))
+                res_k = torch.cat(parts, dim=-1)  # [n, Hkv, K2]（哨兵已转 0）
+                # empty 行（far 区空）：走原版整体 topk 口径（对拍锚定）。
+                # fine 需按行构造——仅 empty 行子集（首 chunk 早段行）计算
+                empty = far_hi_t <= far_lo_k  # [n] device
+                if bool(empty.any()):
+                    fine_e = torch.einsum("ahd,shd->ahs", q2, kq_f)
+                    causal_full = pos.view(1, S) <= t_c.view(-1, 1)
+                    fine_e = fine_e.masked_fill(~causal_full.unsqueeze(1), float("-inf"))
+                    sw_off = torch.arange(p.sliding_window, device=device)
+                    f_sw = (t_c.view(-1, 1) - sw_off).clamp(min=0)
+                    fine_e.scatter_(2, f_sw.unsqueeze(1).expand(n, Hkv, -1), float("inf"))
+                    i_g = torch.topk(fine_e, min(p.token_budget, S), dim=-1).indices
+                    res_k = torch.where(empty.view(n, 1, 1), i_g, res_k)
+                out.append(res_k)
+                continue
             else:
                 # 掩码位置 → 定长候选张量（topk 最小值技巧：哨兵 S 排最后补 pad）
                 seq = pos.view(1, S).expand(n, S)

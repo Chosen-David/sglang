@@ -39,7 +39,7 @@ DATA = "/home/wangyuanshuo02/datasets/LongBench/data/vcsum.jsonl"
 # 会让 150K chars 文档达 47896 token 超模型上限 40960——首次运行实测失败教训）
 TARGET_TOKENS = int(os.environ.get("LONG_TOKENS", 30000))
 BATCHES = [int(x) for x in os.environ.get("LONG_BATCHES", "8,16").split(",")]
-N_DECODE = 64
+N_DECODE = int(os.environ.get("LONG_N_DECODE", 64))
 OUT_JSON = "/home/wangyuanshuo02/sglang/tli_m8_e2e_long_results.json"
 GRAPH_CFG = {"decode": {"backend": "full", "bs": BATCHES}, "prefill": {"backend": "disabled"}}
 
@@ -93,6 +93,8 @@ def main():
     backend = sys.argv[1] if len(sys.argv) > 1 else "tli"
     use_graph = sys.argv[2] if len(sys.argv) > 2 else "1"
     tag = f"m8_long_{backend}_graph{use_graph}"
+    if N_DECODE != 64:
+        tag += f"_n{N_DECODE}"  # N≠64 不覆盖历史键（decode 信噪比复测变体）
 
     kwargs = dict(
         model_path=MODEL,

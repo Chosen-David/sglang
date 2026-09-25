@@ -1,0 +1,23 @@
+{
+  "date": "2026-09-25",
+  "bench": "bench_m10_prefill.py (S=30720, NQ=8192, Hkv=8, D=128, G=4, row_chunk rc)",
+  "note": "M10 select_batched 慢路径 kernel 化（M8 全套移植：tli_compact + tli_l2_score_batched_dual 双池直写 + host 常量宽度配额 topk + row_chunk 64→512 摊销）；合成 K 仅归因用，对拍见 test_tli_m10.py",
+  "eager": {
+    "last_chunk_ms": 983.8,
+    "first_chunk_ms": 243.4
+  },
+  "kernel": {
+    "last_chunk_ms": 140.0,
+    "first_chunk_ms": 167.8
+  },
+  "speedup": {
+    "last_chunk": 7.03,
+    "first_chunk": 1.45
+  },
+  "attribution": {
+    "slow_path_trigger": "S=30K 时 nblk=480 > K1*Hkv 上界覆盖 → 快路径失效，128/128 行走慢路径（真实 K 实测）",
+    "eager_剩余": "topk radix 机器 ~112ms/67% 结构性（far k=256 + near k=768 over Tc≈33K 候选）",
+    "kernel_机制": "不物化 kq_c fp32（寄存器内 dequant）→ row_chunk 可放大 512 摊销 launch/topk 固定项"
+  },
+  "gpu": "H20-3e (GPU0), torch 2.8.0+cu128"
+}

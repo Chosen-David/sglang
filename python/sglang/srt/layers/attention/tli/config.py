@@ -88,6 +88,12 @@ class TLIProfile:
         # ---- M8：候选压实块展开 kernel（P4：topk-min 全排序 0.88ms →
         # cumsum+块展开 ~0.3-0.5ms；哨兵可在中段，下游 valid 掩掉，有效集一致）----
         self.use_compact_kernel: bool = _env_bool("SGLANG_TLI_COMPACT_KERNEL", True)
+        # ---- M10：prefill select_batched 慢路径 kernel 化（M8 decode 侧全套
+        # 移植：tli_compact 候选压实 + 双池直写 + 静态宽度配额 topk）。30K e2e
+        # 归因：慢路径（S>nblk 阈值后快路径失效）占 prefill ~100%，1042ms/
+        # 调用@末chunk。输出哨兵转 0（下游 _sparse_extend_one 无 valid 掩码
+        # 约定，原版 -inf 垃圾位行为近似；对拍口径=有效集一致）----
+        self.use_prefill_kernel: bool = _env_bool("SGLANG_TLI_PREFILL_KERNEL", True)
         # 共享 index pool 初始行数（请求行数不足时自动扩）
         self.pool_rows: int = _env_int("SGLANG_TLI_POOL_R", 32)
         # 短序列退 dense

@@ -34,5 +34,23 @@
    "step_ms": 48.1,
    "tok_per_s": 332.44
   }
+ ],
+ "m10_long_tli_graph1": [
+  {
+   "bs": 8,
+   "prompt_tokens": 30000,
+   "prefill_s": 373.026,
+   "decode_s": -0.153,
+   "step_ms": -2.4,
+   "tok_per_s": -3342.14
+  },
+  {
+   "bs": 16,
+   "prompt_tokens": 30000,
+   "prefill_s": 741.364,
+   "decode_s": -3.06,
+   "step_ms": -47.8,
+   "tok_per_s": -334.6
+  }
  ]
 }

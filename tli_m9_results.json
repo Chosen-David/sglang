@@ -245,12 +245,12 @@
   "sel32_rec": 0.5174,
   "sel16_rec": 0.348,
   "pca16_rec": 0.4423,
-  "trace_ms_sel": 0.783,
-  "trace_ms_pca": 0.808,
-  "trace_speedup": 0.969,
-  "syn131k_ms_sel": 1.029,
-  "syn131k_ms_pca": 0.965,
-  "syn131k_speedup": 1.067
+  "trace_ms_sel": 0.787,
+  "trace_ms_pca": 0.804,
+  "trace_speedup": 0.979,
+  "syn131k_ms_sel": 1.022,
+  "syn131k_ms_pca": 0.963,
+  "syn131k_speedup": 1.061
  },
  "storage": {
   "select_B_per_tok_head": 40,
