@@ -1,0 +1,24 @@
+{
+ "shape": {
+  "bs": 32,
+  "S": 131072,
+  "K2": 1024
+ },
+ "bytes_kv": 134217728,
+ "A_gpu_ms": 0.6294,
+ "A_GBps": 213.2,
+ "C_D2H_GBps": 54.7,
+ "C_H2D_GBps": 55.1,
+ "B_roundtrip_ms": 35.765,
+ "B_vs_A": 56.8,
+ "B2_host_mirror_ms": 36.894,
+ "B2_vs_A": 58.6,
+ "D_gemm_ms": 7.955,
+ "D_serial_ms": 10.672,
+ "D_overlap_ms": 7.981,
+ "verdict": {
+  "gpu_gather_share_pct": 12.01,
+  "cpu_roundtrip_penalty": "57x (B), 59x (B2)",
+  "pcie_vs_hbm": "gather \u6709\u6548 213GB/s vs PCIe 55GB/s"
+ }
+}

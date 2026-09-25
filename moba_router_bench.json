@@ -1,0 +1,36 @@
+{
+ "config": {
+  "H": 32,
+  "D": 128,
+  "chunk": 512,
+  "topk": 2,
+  "budget_tokens": 1024,
+  "synthetic": true
+ },
+ "rows": [
+  {
+   "S": 10000,
+   "build_ms": 0.148,
+   "decode_router_ms": 0.0559,
+   "decode_maintain_ms": 0.0467,
+   "prefill_router_ms": 1.227,
+   "storage_B_per_tok": 16.4
+  },
+  {
+   "S": 40000,
+   "build_ms": 0.505,
+   "decode_router_ms": 0.0557,
+   "decode_maintain_ms": 0.048,
+   "prefill_router_ms": 10.99,
+   "storage_B_per_tok": 16.2
+  },
+  {
+   "S": 131072,
+   "build_ms": 0.297,
+   "decode_router_ms": 0.057,
+   "decode_maintain_ms": 0.0477,
+   "prefill_router_ms": 89.169,
+   "storage_B_per_tok": 16.0
+  }
+ ]
+}

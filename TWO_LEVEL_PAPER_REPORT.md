@@ -472,6 +472,62 @@ global = L1/L2 均全局（TIA 语义）/ late = 当前 B'（L1 全局 + L2 分�
 （debug 脚本逐环节二分定位：隔离 fp32 ✓ → 4bit ✓ → _k_refine 逐位 ✓ → _q_refine
 max diff 42.5 ✗）。
 
+### 8b-9. MoBA indexer 级同机对比（2026-09-25，#30 完成）
+
+官方 `MoonshotAI/MoBA`（moba_naive.py）的 router（gating）是**纯 PyTorch**（块均值 +
+q·mean einsum + topk），不依赖 flash-attn——indexer 级对比可以同机原样接入（S9 口径
+一致）；attention 主体（gated block attention CUTLASS kernel，moba_efficient）硬依赖
+flash-attn 2.6.3（本机装不上，与 flashinfer 同类环境问题），按降级预案引用论文数字。
+`bench_moba_router.py`（合成张量 microbench，已标注）：
+
+| router（decode 单 token） | S=10K | S=40K | S=131K | 存储 B/tok | 训练 |
+|---|---|---|---|---|---|
+| MoBA（chunk512×topk2=1024 tok） | 0.056 | 0.056 | 0.057 ms | 16 | **需从头训** |
+| Quest（官方，对照） | 0.066 | 0.077 | 0.107 | ~1K | 免训 |
+| DSA（官方，对照） | 0.476 | 0.490 | 0.503 | ~132 | 需 warm-up |
+| TLI eager / fusedL1 | 0.736/0.604 | 0.780/0.658 | 0.853/0.787 | ~224（M9 后） | 免训 |
+
+- **decode indexer 成本排序：MoBA < Quest < DSA < TLI**——MoBA router 最便宜的原因是
+  语义上做得最少：chunk=512 块粒度、无 token 级细筛/滑窗/分区（这些功能在 TLI 的
+  0.85ms 里，在 MoBA 里被折叠进 gated flash-attn 主体）；TLI 的额外成本买到
+  token 级 1024-of-S 精度 + 免训质量（LB 49.92，MoBA 需从头训练才能拿质量）；
+- **prefill router eager 89.2 ms/层 @131K**（gate [H,S,N] 全矩阵 + topk，O(S²/chunk)）
+  ——官方生产版靠 fused kernel 消化（README：efficient vs naive 40×@32K）；
+  TLI select_batched（M7 后）@10K 同口径 ~160ms/层（含 4bit gather+反量化+两级），
+  两者 eager 都不是最终形态，如实报告；
+- **存储口径**：MoBA 块均值 16B/token vs TLI ~224B（kq 24×8 + 块界 32）vs Quest ~1KB
+  ——MoBA 最省但粒度最粗；论文引用其 CUTLASS kernel 数字时标注「tech report 图表，
+  未同机复测」。
+
+### 8b-10. far token 捞取 CPU 化 overlap 提议的定量分析（2026-09-25，用户提议，No-Go）
+
+用户提议「远邻 token 的捞取放 CPU 上做，overlap 进 GPU 计算」。同机实测
+（`bench_cpu_gather_overlap.py`，bs=32 × S=131K × K2=1024，KV 选中集 134MB/层/步）：
+
+| 路径 | 延迟 | 相对 GPU gather |
+|---|---|---|
+| [A] GPU gather（当前路径，高级索引） | 0.63 ms（213 GB/s 有效） | 1× |
+| [B] GPU 预 gather → D2H → CPU 整理 → H2D | 35.8 ms | **57×** |
+| [B2] host 镜像池（17GB RAM）→ CPU gather → H2D | 36.9 ms | **59×** |
+
+PCIe pinned 实测 55 GB/s（D2H/H2D）。**No-Go，三面墙**：
+
+1. **带宽墙**：捞取本体是 HBM→SM 的读（GPU 侧 0.63ms）；走 CPU 必须经 PCIe 两次
+   （55GB/s），比 HBM 慢两个数量级——即使 CPU 端零开销、overlap 完美，57× 的
+   传输时间也无法被 5.2ms/层的计算隐藏；
+2. **依赖墙**：far token 选择依赖**当前层**的 q（自回归因果链 L→L+1），无法提前
+   一步知道要捞什么；投机预取（用上一步选择集，E5 实测 decode churn 22%）命中率
+   ~78% 且改变算法语义——不值得为 0.63ms 的项冒语义风险；
+3. **占比墙**：gather 仅占层时间 12%（0.63/5.24ms），当前真瓶颈是 select 的
+   launch/批量计算（M3-b 归因），M8 TMA gather（213GB/s→~2TB/s，10× 该项）才是
+   正道。
+
+**[D] 关键发现（提议的正确内核）**：传输与计算的 overlap **不需要 CPU**——copy
+engine 与 SM 独立，GEMM 7.95ms + 128MB D2H 串行 10.67ms → 并发 7.98ms（完全隐藏）。
+即：若未来确需搬数据（如 CPU 侧 radix cache），GPU 侧双流/事件即可 overlap；
+「捞取更快」的正确路径 = M8 TMA/异步拷贝在 kernel 内消化（而非搬到 CPU）。
+附带可行动作：near 窗 token 在池内天然连续，可免 gather 直读（M8 顺手项）。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
