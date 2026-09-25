@@ -47,17 +47,56 @@ TLI 三创新点（A 非对称压缩 / B' 分区预算 / D' 层跳过）→ 三�
 
 ## 2. Background & Related Work（1 页）
 
-- **稀疏注意力三代**：static/window（StreamingLLM sink 现象）→ KV 压缩/eviction
-  （H2O/SnapKV，训练时超参敏感）→ 索引检索式（Quest/TIA/MoBA/DSA）。
-- **DSA**【素材：INDEXER_RESEARCH.md】：I=Σ w·ReLU(q·k)，64head FP8，top-2048，
-  需训练。定位=外部主 baseline。
-- **Quest**：page min/max 上界 + 按页选择，token 粒度粗。
-- **TIA（同门第一代）**：块 min/max + 4bit 部分维——TLI 是其直接后继，
-  创新点必须以增量叙事（§3 关键叙事修正）。
-- **HISA (COLM 2026)**：block-coarse+token-refine 已有——「two-level」本身非
-  novelty；TLI 增量=子空间选择依据/分区预算/层自适应。
-- **MoBA**：gating 需从头训练；chunk512×topk2 最省但语义最少。
-- 差异化声明表（每行一个维度：训练需求/索引存储/token 粒度/滑窗/分区/层自适应）。
+### 2.1 稀疏注意力三代【正文 v1】
+
+**第一代：静态/窗口式稀疏**。StreamingLLM 观察到 sink 现象——少量初始
+token 的 attention mass 恒定偏高——并据此保留 sink+滑窗的固定窗口。
+此类方法零索引成本，但对 far 区检索完全无能力（§3 的 NIAH 极端口径
+正是其对压力面）。TLI 继承 sink+滑窗作为**强制保留段**（不占竞争配额，
+§4.2）。
+
+**第二代：KV 压缩/eviction**。H2O、SnapKV 等在（预）填充阶段按累计
+分数驱逐 KV 条目，把存储压缩为常数。其代价是驱逐不可逆 + 超参（预算、
+分组）对任务敏感、训练期调优常见——与 training-free 的部署诉求相悖。
+TLI 不驱逐任何 KV：索引只决定「每步读哪些」，缓存本身完整。
+
+**第三代：索引检索式稀疏**（TLI 所属）。为每步 query 在线构建轻量
+索引、检索 top-K token，代表工作：
+
+- **DSA**（DeepSeek V3.2）：可训练 indexer，I=Σ w·ReLU(q·k)，64 head
+  ×128 维 FP8，top-2048。kernel 级生产实现（tilelang，0.5ms/层与 S
+  无关），但需 1000 步 / 2.1B token warm-up 训练——**本文外部主
+  baseline**（同机 kernel 对比见 §6.3）。
+- **Quest**：page 级 min/max 上界 + 按页选择。索引最快（µs 级
+  GEMV+radix select），但 fp16 全 head 上界索引 ~1KB/token（3× TLI）、
+  page 粒度粗（16 token/页），LongBench −2.2 分（§6.2 主表）。
+- **TIA（同门第一代）**：块 min/max 上界 + 4bit 量化部分维 token 级
+  精筛，全局 top-K2 语义。**TLI 是其直接后继**——本文所有创新点以
+  相对 TIA 的增量叙事展开：A = L1 子空间选择的理论化与机制分离；
+  B' = 全局名额竞争改分区预算（§3.2 的噪声驱动动机）；D' = 层自适应
+  跳过。
+- **HISA**（COLM 2026）：block-coarse + token-refine 两级结构已有——
+  「two-level」本身**不是**本文 novelty；TLI 的增量在两级之间的三个
+  自由度：子空间选择依据（position-stable vs 任意）、L2 预算分区
+  （far/near）、层自适应（offline 校准跳层）。
+- **MoBA**：gating 网络从头训练，chunk512×top2 最省索引但语义最少；
+  训练需求与 DSA 同类。
+
+### 2.2 差异化声明表【正文 v1】
+
+| 维度 | Quest | DSA | MoBA | TIA | **TLI** |
+|---|---|---|---|---|---|
+| 训练需求 | 无 | 2.1B token warm-up | 从头训练 | 无 | **无**（离线校准 2048 token） |
+| 索引存储/token | ~1KB | ~132B | gating 参数 | ~40B | **40B（PCA 24B）** |
+| 选择粒度 | page（16 tok） | token | chunk（512 tok） | token | **块 L1 + token L2** |
+| far/near 预算分区 | 无 | 无 | 无 | 无（全局竞争） | **有（B'）** |
+| 层自适应 | 无 | 无 | 无 | 无 | **有（D'，跳 13/36 层）** |
+| 每 token 索引 MAC | ~64（1 page/head） | 8192 | ~2 chunk | ~258 | **~258（DSA 的 1/32）** |
+
+TLI 的定位：**在 training-free 约束下同时推进存储（vs Quest）、粒度
+（vs page/chunk）、名额语义（vs 全局竞争）与层冗余（全体对手均无）四个
+轴**——每个轴的推进都有 §4 的机制实验与 §6 的实测数字背书，negative
+results（聚类代表、L1 分区、在线 gate）同步划界。
 
 ## 3. Motivation: The Three-Layer Structure of Attention Mass（1 页）
 
