@@ -1,0 +1,62 @@
+{
+ "m8_tli_graph1": [
+  {
+   "bs": 1,
+   "prefill_s": 18.141,
+   "decode_s": 2.45,
+   "step_ms": 38.3,
+   "tok_per_s": 26.13
+  },
+  {
+   "bs": 8,
+   "prefill_s": 125.466,
+   "decode_s": 2.775,
+   "step_ms": 43.4,
+   "tok_per_s": 184.5
+  },
+  {
+   "bs": 16,
+   "prefill_s": 235.669,
+   "decode_s": 4.14,
+   "step_ms": 64.7,
+   "tok_per_s": 247.33
+  },
+  {
+   "bs": 32,
+   "prefill_s": 426.864,
+   "decode_s": 6.338,
+   "step_ms": 99.0,
+   "tok_per_s": 323.14
+  }
+ ],
+ "m8_triton_graph1": [
+  {
+   "bs": 1,
+   "prefill_s": 1.456,
+   "decode_s": 0.569,
+   "step_ms": 8.9,
+   "tok_per_s": 112.55
+  },
+  {
+   "bs": 8,
+   "prefill_s": 9.949,
+   "decode_s": 0.818,
+   "step_ms": 12.8,
+   "tok_per_s": 625.86
+  },
+  {
+   "bs": 16,
+   "prefill_s": 18.859,
+   "decode_s": 1.193,
+   "step_ms": 18.6,
+   "tok_per_s": 858.63
+  },
+  {
+   "bs": 32,
+   "prefill_s": 34.636,
+   "decode_s": 1.987,
+   "step_ms": 31.0,
+   "tok_per_s": 1030.77
+  }
+ ]
+}

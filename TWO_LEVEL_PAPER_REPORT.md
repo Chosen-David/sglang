@@ -672,7 +672,71 @@ torch.equal、full vs C 逐元素差 0（三重验证）。
 ~170μs，50%）+ dual kernel 0.43 + compact 0.07 + gather/einsum 杂项 ~0.3。
 topk 宽度受 CUDA graph 静态形状约束（Tc=65984），near 池实际候选数远小于
 宽度但无静态上界可压——**结构性剩余，非实现低效**；进一步压缩需接受语义
-近似（over-select）或破坏图形状静态性，暂不做。
+近似（over-select）或破坏图形状静态性，暂不做。（`sorted=False` 微基准仅省
+~5% 且 tie 语义变化，不值。）
+
+**同机对比摊销口径更新（§8b-6 表的批量侧注脚）**：full 1.80ms@bs=32 →
+**0.056 ms/req/layer**——追平 MoBA（0.056，语义最少的下界）、2× 优于 Quest
+单请求（0.107）、9× 优于 DSA（0.5）。TLI 在「比 Quest/MoBA 多出 token 级
+精筛 + far/near 分区 + 滑窗」的语义下达到 MoBA 级成本——速度主叙事的直接
+数字支撑（口径诚实标注：TLI 为 bs=32 批量摊销，Quest/DSA/MoBA 为单请求
+kernel 微基准；两者的单请求对单请求口径见 §8b-6）。
+
+**M8 e2e 系统级兑现（test_tli_m8_e2e.py，9.9K narrativeqa、graph decode full、
+N=64、与 M5 完全同曲线同口径）**：
+
+| bs | M5+M6 graph（历史） | **M8 graph** | 改善 | triton 图基线 |
+|---|---|---|---|---|
+| 1 | 17.7–36.8 | 38.3 ms/step | n==1 恒走 per-request 路径（M8 批量 kernel 不适用），历史波动区间内 | 8.9 |
+| 8 | 70.3–86.5 | **43.4** | 1.6–2.0× | 12.8 |
+| 16 | 87.5–115.2 | **64.7** | 1.4–1.8× | 18.6 |
+| 32 | 188.6 | **99.0** | **1.9×** | 31.0 |
+
+- bs=32 全轨迹累计：M3-c 原型 1236.8 → M5 graph 188.6 → **M8 99.0 ms/step
+  （12.5×）**，tok/s 26 → **323**。
+- 诚实口径：9.9K 下 tli 仍慢于 triton 基线 ~3×——与 M3 归因一致（bs≤32、
+  S=10K 时 KV 流量仅 ~30MB/层/步，稀疏收益小于 select 索引成本；单请求
+  decode 被 MLP/GEMM 主导）。**M8 kernel 的收益展示位在长 S**（KV 流量
+  ∝ S，1024-of-S 选择把 gather 流量除以 S/1024）——长上下文高并发主表见
+  §8b-14（bs=8/16 × S≈30K，Qwen3-8B context 上限 40960 内的最大可行档）。
+
+### 8b-14. 长上下文高并发 e2e（bs=8/16 × S≈30K，#36 进行中）
+
+口径：`test_tli_m8_e2e_long.py`，vcsum 中文长文档（LongBench 唯一 ≥100K chars
+文档 20 个全在 vcsum；中文 chars/token 文档间 3.1-5:1 波动 → **必须 offset_mapping
+精确 token 截断**，chars 截断首跑实测 150K chars=47896 token 直接超模型上限），
+prompt 精确 30K token、graph decode full + prefill disabled、N=64、POOL_S_CAP=40K、
+watchdog 1800（30K 稀疏 prefill 数百秒）。显存账：KV=144KB/token → bs=16×30K
+≈95GB（mem_frac 0.7）；bs=32×30K 需 155GB 超卡且唯一长文档不足 32 个——
+**bs=16 × 30K 即 Qwen3-8B context 上限内的最大可行并发档**。
+
+**完整结果（30K token，graph decode full，N=64）**：
+
+| bs | tli prefill | **tli decode** | tli tok/s | triton prefill | triton decode | triton tok/s |
+|---|---|---|---|---|---|---|
+| 8 | 786.8 s | 66.1 ms/step | 121.0 | 58.1 s | 25.4 ms/step | 315.6 |
+| 16 | 1564.9 s | **47.7 ms/step** | **335.3** | 114.9 s | **48.1 ms/step** | 332.4 |
+
+- **headline：bs=16 × 30K 下 tli decode 与 dense triton 图基线打平**
+  （47.7 vs 48.1 ms/step；335.3 vs 332.4 tok/s，tli 略胜）——**长上下文
+  高并发是 TLI 收益展示位**的首次系统级实证，与 M8 microbench（12.9×）
+  的口径互补。
+- **趋势结构性利好 tli**：bs 8→16 时 triton decode 线性翻倍（25.4→48.1，
+  attention 流量 ∝ bs×S），tli 反而下降（66.1→47.7——select 池/launch
+  成本被 batch 摊销，attention 流量恒定 ∝ bs×K2=1024）。外推：bs 更大或
+  S 更长（H100/128K 主表口径）时 tli 显著反超；本机 30K×bs16 恰为平衡点
+  附近（H20 算力仅 H100 15%，MLP 项占比更大压低了相对差距）。
+- **诚实口径 1**：每配置单次测量（M5 经验：波动大须多轮中位数，bs=8 的
+  66.1 与 bs=16 的 47.7 反常关系可能含波动成分——但方向性结论由 triton
+  的线性翻倍对照锚定）。
+- **诚实口径 2（prefill 短板）**：tli prefill 787-1565s vs triton 58-115s
+  = **13.6× 慢**——`select_batched` 仍是全 eager（M8 四 kernel 只接了
+  decode 侧 `select_decode_batched`），且慢于 9.9K→30K 线性外推（126.6s×3
+  =380s）约 2×，M7 快路径在全宽 einsum 与 fine [n,Hkv,S] 物化的 O(Nq×S)
+  成本在 30K 尺度显性化。**prefill kernel 化 = 下一个里程碑靶点（M10）**：
+  候选方向 ①把 KernelA（gather+dequant+GEMV fused）接入 select_batched
+  快路径替代全宽 einsum+反量化表；②fine 矩阵改紧凑候选池（Tc 宽）避免
+  [n,Hkv,S] 物化；③kq_f 反量化表跨 chunk 复用（当前每 chunk 重建）。
 
 ## 9. 待办（优先级序）
 
