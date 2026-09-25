@@ -981,6 +981,39 @@ GPU1）确认 headline：bs=32 **102.0 ms/step / 313.9 tok/s**（vs 原 99.0/323
 （405MB，8KB 段间跳）+ 混合流惩罚，已达结构上限；进一步优化只有 far_sc
 物化消除（打分+topk fused radix-select，算法级）——维持划界。
 
+### 8b-21. RULER 多任务质量评测（2026-09-26，#52——Quest/HISA 论文口径对齐）
+
+**动机**：H100 阻塞项盘点时发现 RULER 全量本质是**质量评测，不依赖机器型号**——
+NIAH 单针双 seed（§8b-16）的基建可直接扩展。补 RULER 官方模板四任务
+（`test_tli_ruler.py`：niah_multikey 4 针异 key / niah_multivalue 同 key 5 值
+列举 / niah_multiquery 4 针 4 问 / variable_tracking 5 值×3 链），S=32K、
+n=20/任务、双方法（sglang Engine 同机同权重）、评分=答案值全命中
+（RULER multivalue/multiquery 官方全中口径）、max_new_tokens=160
+（初版 64 截断思考链，dry run 发现后修正——工具层 bug 当场修）。
+
+**结果（`tli_ruler_results.json`，seed=1234，单 seed n=20 口径如实标注）**：
+
+| RULER 任务 | FullKV | TLI@1024 | gap |
+|---|---|---|---|
+| niah_multikey | 0.95 | 0.70 | −0.25 |
+| niah_multivalue | 0.70 | 0.55 | −0.15 |
+| niah_multiquery | 0.85 | 0.70 | −0.15 |
+| variable_tracking | 0.70 | 0.40 | −0.30 |
+| **均值** | **0.80** | **0.588** | **−0.21** |
+
+**失败模式诊断（逐例）**：①VT 失败 12 例 = 输出 VAR 变量名而非数值
+（「VAR 83B169」而非 837696）——检索到链中段但丢失赋值源头，链上多针
+全部落在 far 区时 0.8% far 预算的物理上限；②multikey 失败 = 抓到其他
+key 的干扰数字（与单针 NIAH 同机制）；③gap（−0.21）小于单针 NIAH
+（−0.375）：多针任务部分命中率高（针多冗余）。与 Quest/HISA 论文报告的
+同预算 RULER 损失同性质（Quest@1024 RULER needle 类同样显著掉分）。
+
+**诚实口径**：①单 seed n=20（与 NIAH 单 seed 案例二的教训一致，双 seed
+复测列为 H100 项合并跑）；②FullKV 在 multiquery/multivalue 也非满分
+（0.85/0.70）——Qwen3-8B 本身的列举能力上限，gap 才是稀疏损失；
+③TLI 生成 1045s vs triton 173s/任务 = 稀疏 prefill 慢路径 6×（M10 已修
+但 32K prefill 仍 ~2× 于 dense + 索引构建），质量评测不计入速度口径。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）

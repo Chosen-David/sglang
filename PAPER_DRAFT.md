@@ -76,9 +76,10 @@ TLI 以 sglang attention backend 形式全链路集成：4bit 三张量索引逐
    工程化的 A/B'/D' 三组件设计（§4）；
 2. **系统**：生产级集成——4bit 索引存储、批量 kernel 组合、CUDA graph
    三方法契约，每步配逐位/格点级对拍（§5）；
-3. **双口径诚实评估**：LongBench 均值（49.92 vs FullKV 50.36）+ NIAH
-   极端（0.625）两端；kernel microbench（同机三方，Quest/DSA 官方
-   kernel 原样接入）+ e2e 吞吐两层都测（§6）；
+3. **双口径诚实评估**：LongBench 均值（49.92 vs FullKV 50.36）+ RULER 多任务
+   （NIAH 单针双 seed 0.625、multikey/multivalue/multiquery/VT 均值 0.588 vs
+   0.80）两端；kernel microbench（同机三方，Quest/DSA 官方 kernel 原样接入）
+   + e2e 吞吐两层都测（§6）；
 4. **negative results 护城河**：12 项 No-Go 假设（聚类代表、L1 分区、
    在线 gate、跨层共享 PCA 基、CPU 捞取……）逐项映射到 design
    decisions（§4/§7），加三例测量方法案例（两例主动复测撤回 headline、
@@ -473,6 +474,23 @@ qasper 44.03 / multifieldqa_en 52.98——qasper 与 TIA 精确同值）。诊�
 「钟形」（0.550/0.650/0.550）被 seed2 反转、合并后持平——单 seed 差分结论
 必须复测（§7 方法论案例二）。
 
+**RULER 多任务扩展（Quest/HISA 论文口径对齐）**：NIAH 之外补 RULER 官方
+模板四任务（S=32K、n=20/任务、同机同权重双方法、评分=答案值全命中）：
+
+| RULER 任务 | FullKV | TLI@1024 | gap | 失败模式 |
+|---|---|---|---|---|
+| niah_multikey（4 针异 key） | 0.95 | 0.70 | −0.25 | 抓到干扰 key 的数字（同单针机制） |
+| niah_multivalue（同 key 5 值列举） | 0.70 | 0.55 | −0.15 | 部分值丢失（针多冗余缓冲） |
+| niah_multiquery（4 针 4 问） | 0.85 | 0.70 | −0.15 | 同上 |
+| variable_tracking（5 值×3 链） | 0.70 | 0.40 | −0.30 | 检索到链中段 VAR 名而非赋值源头 |
+| **均值** | **0.80** | **0.588** | **−0.21** | — |
+
+三点诚实读法：①多任务均值 gap（−0.21）**小于**单针极端 gap（−0.375）——
+多针自带冗余，单针是稀疏检索的 worst case；②VT 掉分最大（−0.30）——
+链上针全落 far 区时 0.8% far 预算的物理上限与 NIAH 诊断同构，FullKV 基线
+本身也仅 0.70（Qwen3-8B 链式追踪能力上限）；③单 seed n=20 口径（与
+NIAH 案例二教训一致标注，双 seed 复测与 H100 主表合并跑）。
+
 **逐层质量**：36/36 层 mass 覆盖 diff<0.001，far-heavy 层（L03/L05）反超
 TIA（0.9995 vs 0.9990 / 0.9997 vs 0.9929）——B' 近端名额保障的直接逐层
 证据（fig6）。Qwen3-32B 复验：子空间选择 entry recall 差距 ≤0.08、
@@ -637,7 +655,7 @@ kernel 级；④**microbench 的输入形态必须取自真实管线**——合�
 1. 【缺】H100 主表（S=131K×bs16/32）——§6.4 headline（机器申请中）
 2. ~~held-out gate 验证~~ ✅（E6b LOO 16 trace：TH=0.01 prec mean 0.990，
    narrativeqa 单点 0.923 + 误跳 far 占 0.29% + e2e 不掉分交叉验证——§4.3 已回填）
-3. 【缺】RULER 全量（若 H100 短缺，NIAH 双口径可先行撑住质量叙事）
+3. 【部分完成】RULER 多任务（multikey/multivalue/multiquery/VT 四任务双方法，§6.2 表）+ NIAH 双 seed——剩余 RULER 任务（CWE/FWE/QA 类）与双 seed 复测视主表需求
 4. ~~图表升级 fig9/fig10~~ ✅（make_fig9.py：S 收窄链 + M10 prefill 双档 + 44–51K 翻转点外推；make_fig10.py：kernel 阶梯 + 三方微基准 + decode 轨迹）
 5. 多 seed 置信区间（主表 200 样本已有；NIAH 双 seed 已测；e2e 曲线单次——按测量学 §7 原则标注）
 6. ~~正文八节+摘要~~ ✅ 全部【正文 v1】（2026-09-26，b3c10336a→b5c228f75）
