@@ -861,6 +861,39 @@ far 轮廓口径与 E6 完全一致（pm 平均 + far=pm[64:t-2048]，GPU 重算
 e2e 不掉分交叉验证」呈现，如实报告未达「min ≥0.98」的原始硬阈值
 （min 由单一重复 trace 决定）——测量学口径与 §7 一致。
 
+### 8b-18. M8-TC：L1 打分 TC 化（tl.dot）实验——No-Go（2026-09-26，#49）
+
+动机：#28 M8 遗留「P2 L1 einsum 0.37ms 是 TC 化靶点（ρ>0.5 tile 占 0.767
+→ 全块打分=高利用率 dense GEMM → tl.dot 上 TC）」。脚本
+`sglang/bench_m8_l1_tc.py`（合成 microbench，bs=32 × S=131K，对拍=sc1
+allclose + topk 块集合一致率；结果 `tli_l1_tc_bench.json`）：
+
+| 变体 | ms | vs eager | 对拍 |
+|---|---|---|---|
+| eager P1+P2（行 gather + einsum） | 0.475 | 1× | 基准 |
+| **KernelD（生产现役）** | **0.039** | **12.15×** | allclose ✓ 集合 1.0000 |
+| 方案 A：合并访存重排（[MBLK2,Hkv,DP] 连续 tile） | 0.040 | 11.9× | allclose ✓ 集合 1.0000 |
+| 方案 B：tl.dot ieee（FMA 路径） | 0.284 | 1.67× | ✓ |
+| 方案 B：tl.dot tf32（真 TC） | 0.101 | 4.71× | **块集合一致率仅 0.9336（精度不过关）** |
+
+三条结论（negative result 入论文 §5/§8b）：
+
+1. **L1 打分已是带宽饱和 kernel**：KernelD 0.039ms 读 134MB（32 行 ×
+   2048 块 × 8 head × 32 维 × min/max）→ 有效带宽 ~3.4TB/s ≈ H20 HBM
+   峰值（4TB/s）的 86%。ρ>0.5 的「dense GEMM 机会」**已被带宽饱和的
+   fused gather kernel 完全兑现**——TC 无余量可图，带宽是硬上界；
+2. **tf32 精度破坏块选择对拍**（10-bit 尾数使近 tie 分数翻转，集合
+   一致率 0.9336）；ieee dot 走 FMA 反慢 7×（块对角 W 的 K=256 仅 1/8
+   有效列）——tl.dot 两个口径均 No-Go；
+3. 方案 A 证伪了「KernelD tile 访存 12.5% 合并效率」的直觉诊断
+   （Triton tile 展平后 warp 内实际合并）——**select 剩余瓶颈不在 L1
+   打分，在 topk**（P7 partition topk 1.01ms + P4 压实 topk-min
+   0.88ms = 3.38ms 的 56%）。
+
+工程含义：M8 后续优化方向收敛到 topk 侧（算法级近似选择或 radix kernel
+化），L1/L2 打分双 kernel 均已带宽饱和——「级联 kernel 化到哪一级为止」
+（§4.4 原则 1）的又一实证。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）

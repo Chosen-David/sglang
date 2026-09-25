@@ -1,0 +1,9 @@
+{
+ "eager P1+P2": 0.4749,
+ "KernelD (\u751f\u4ea7)": 0.0391,
+ "\u65b9\u6848A \u5408\u5e76\u8bbf\u5b58 MBLK2=16": 0.04,
+ "\u65b9\u6848A \u5408\u5e76\u8bbf\u5b58 MBLK2=32": 0.0416,
+ "\u65b9\u6848A \u5408\u5e76\u8bbf\u5b58 MBLK2=64": 0.0443,
+ "\u65b9\u6848B tl.dot ieee(FMA)": 0.2839,
+ "\u65b9\u6848B tl.dot tf32(TC)": 0.1008
+}
