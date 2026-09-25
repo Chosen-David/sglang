@@ -528,6 +528,152 @@ engine 与 SM 独立，GEMM 7.95ms + 128MB D2H 串行 10.67ms → 并发 7.98ms�
 「捞取更快」的正确路径 = M8 TMA/异步拷贝在 kernel 内消化（而非搬到 CPU）。
 附带可行动作：near 窗 token 在池内天然连续，可免 gather 直读（M8 顺手项）。
 
+### 8b-11. 心方案 H2-B：真实 trace 候选复用偏斜统计（2026-09-25，任务 #35 完成）
+
+用户心方案（`CPU+TC+CC.txt`，Near=GPU 规则路径 ‖ Far=CPU 语义 cluster 路径 + GPU 内
+TC/CC 混合打分）的**前提假设 H2-B**：「candidate page reuse is highly skewed——
+少量 page 被反复选中（hot few + cold many），可用复用密度把工作分流到 TC GEMM /
+CC GEMV」。Go 条件（心方案文件自定）：明显长尾 + 20% page 承载 ~70% q-k pairs。
+
+**实验**（`test_tli_reuse_stats.py`，3 任务真实 trace × 5 层 = 15 行）：对每个 (task,
+layer) 取全部真实 q（位置 >4096，Nq=262-270），逐 q 跑生产版 L1 块选择（子空间区间
+算术 + 因果 mask + top-K1=128 + 滑窗强制块），得 Q×K 01 矩阵 [Nq, nblk]，统计 f_j
+激活频率、16×16 tile density ρ、work concentration 曲线、near/far 拆分。输出
+`figures_m8/fig_reuse_matrix_*.png`（01 位图）+ `fig_reuse_freq_*.png` +
+`tli_reuse_stats.json`。
+
+**结果（均值 / 范围，15 行）**：
+
+| 指标 | 数值 | 判读 |
+|---|---|---|
+| f_j > 8 的 page 占比 | 0.898（0.51–1.00） | **不是长尾，是「多数 page 都热」** |
+| ρ > 0.5 的 16×16 tile 占比 | 0.767（0.32–0.98） | 01 矩阵在 tile 级**大体稠密** |
+| top-20% page 承载 q-k pairs | 0.295（0.22–0.47） | 均匀基线 0.2，浓缩比仅 1.1–2.35×（目标 ~3.5×） |
+| far 区同口径 | 0.306 | far ≈ 全体——**far 语义复用并未更高**（心方案 §16 预期未证实） |
+| f_j 均值 / 最大 | 110–185 / 270 | 滑窗+近端块被全部 q 选中（f_j=Nq），拉高均值 |
+
+层间模式：语义选择层 L05/L10 浓缩最高（0.47，2.35×），L03/L20/L33 近稠密
+（0.29）；但均远低于「20% page 承载 70% work」的漂亮故事线。
+
+**结构性根因**：单请求连续 t 的 q 共享因果历史——滑窗/近端块天然被所有 q 选中
+（f_j=Nq）；且 K1=128 在 S≤32K 时占总块数 32–61%，选择密度过高使「复用偏斜」没有
+发挥空间（131K 时密度降至 ~8% 才可能出现真偏斜，但本机无 131K 真实 trace，LongBench
+截断上限 32K——如实标注为口径局限；跨请求 shared-prefix 批量复用是另一口径未覆盖）。
+
+**判定（按心方案文件 §19 自定规则）**：
+- H2-B **No-Go**：无明显 hot/cold 偏斜 → TC/CC 混合分区（#34 的 crossover 成本模型）
+  按「没有偏斜就砍掉」规则不建——分区/packing 的开销换不来偏斜收益；
+- **正向副产品（馈赠 M8）**：01 矩阵 tile 级稠密（ρ>0.5 占 77%）意味着**全块 L1 打分
+  本身就是一个高利用率 dense GEMM**——M8 的 L1 kernel 应直接上 Tensor Core
+  （`tl.dot` 打 kmin/kmax × q 的批量矩阵乘），无需 hot/cold 分区packing。ρ 数据是
+  M8 dense-TC 设计的直接依据；
+- **cluster+avg far 路径双重 No-Go**：质量侧 E4c 已证聚类块代表最差（0.09–0.39 vs
+  TIA token 精筛 ≈ oracle）；延迟侧 H2-A 撞 §8b-10 三面墙（CPU 检索延迟 vs 隐藏窗
+  + 当前层 q 依赖 + gather 占比仅 12%）。CPU 侧仅存角色 = 后台维护（build/update），
+  在线索引查询留在 GPU——与 MoBA/Quest 同构结论一致。
+
+### 8b-12. M8-KernelA：批量 L2 fused gather+dequant+GEMV（2026-09-25，#28）
+
+**阶段分解归因**（`bench_m8_phase.py`，插桩副本与真实函数逐位对拍 PASS；合成池
+生产形状 n=32 × S_cap=131072 × Hkv=8 × d'=32 × K1=128，合成数据已标注）：
+
+| phase | 中位 ms | 占比 | 内容 |
+|---|---|---|---|
+| P1 kmin/kmax gather | 0.085 | 0.4% | rows 物化 268MB |
+| P2 L1 einsum | 0.369 | 1.6% | 区间算术批量 GEMM |
+| P3 topk K1 + onehot | 0.118 | 0.5% | [32,8,2048] k=128 |
+| P4 候选压实 topk-min | 0.883 | 3.8% | [32,131072] k=65728 |
+| **P5 L2 gather+deq+einsum** | **20.24** | **87.6%** | kq_c fp32 物化 2.1GB×2 + 逐元素 flat gather ~240GB/s |
+| P6 misc mask | 0.406 | 1.8% | |
+| P7 partition topk | 1.014 | 4.4% | far/near topk + gather |
+
+**KernelA**（`kernels.py: tli_l2_score_batched`，`SGLANG_TLI_L2B_KERNEL=1` 默认开）：
+grid (n, Tc/512)，每 program 对 512 个候选 token 直接从 pool uint8 gather（每 token
+HKV×ND2=256B 连续段）→ 寄存器内反量化（grid×sc+mn 同运算序，格点级逐位）→ GEMV
+打分 → 转置写 s2——**消除全部中间物化**。
+
+| 指标 | eager | kernel | 加速 |
+|---|---|---|---|
+| P5 段（独立微基准） | 20.5 ms | **0.48 ms** | **43×**（有效带宽 1.55TB/s） |
+| P4 段（独立微基准，块数打满口径） | 3.23 ms | **0.80 ms** | **4.06×** |
+| select_decode_batched 全函数（A） | 31.4 ms | 4.66 ms | 6.7× |
+| select_decode_batched 全函数（A+B） | 31.4 ms | **3.82 ms** | **8.2×** |
+
+调参教训：CHUNK 必须 ≤512——1024 时 tile fp32 化 262144 元素寄存器溢出到 local
+memory，反而 3.2ms（6.7× 慢）；512/8warps 达理论带宽。
+
+**对拍**：s2 max diff 2.4e-07（归约顺序级）；最终选择**有效集 jaccard 1.0000**
+（256/256 行×head，仅并列元素排序与哨兵 lane 位置不同——语义等价）；M9 回归
+test_tli_m9.py ALL PASS（PCA nd2=16 模式同过）；n==1 自动回退 eager（保留
+per-request L1/L2 kernel 路径）。形状静态（Tc 常量）可进 CUDA graph。
+
+调试插曲（诚实记录）：初版对拍差 0.58 疑似 kernel bug，逐环节二分后定位为
+**benchmark 脚本抄生产代码时丢了 `h_off * nd2`（头偏移应乘维数）**——kernel 与
+生产代码均正确。跨函数抄索引算术必须逐项核对偏移乘子。
+
+**KernelB**（`kernels.py: tli_compact`，`SGLANG_TLI_COMPACT_KERNEL=1` 默认开）：P4
+候选压实从 topk-min 全排序（[n,131072] 取 k=65728）换为 cumsum 前缀 + 块展开
+kernel（块升序天然保持位置序，非因果尾 token 写哨兵可落中段——下游
+valid = tok < S_cap 掩掉，有效集逐行一致；槽位带防御性上界）。独立微基准
+4.06×；全函数再省 0.84ms。**A+B 合计 31.4→3.82ms（8.2×）**；有效集 jaccard
+1.0000（uniform 与混合 S 行均 256/256）；M9 回归 ALL PASS（双 kernel 均过
+nd2=16/32 两模式）。摊销口径：bs=32 时 0.119ms/req/token——已低于 Quest
+单请求 0.107-0.107ms 同量级、远低于 DSA 0.5ms（高并发批量路径成为速度
+主叙事的直接支撑）。
+
+**剩余瓶颈**（3.82ms 组成）：P7 partition topk 1.01 + P2 L1 einsum 0.37 + P6
+0.41 + KernelA 0.48 + KernelB ~0.15 + 其他——下一靶点为 P7/P6 的分区融合进
+KernelA（参照 n=1 L2 kernel 的 far/near 双池直写）与 L1 einsum 的 TC 化（ρ
+数据 §8b-11 支持 dense GEMM 直接走 tensor core，tf32/bf16 精度 L2 可吸收）。
+
+### 8b-13. M8-KernelC/D + profiler 二次归因（2026-09-25 晚，#28）
+
+**torch profiler 归因**（CUDA kernel 级，A+B 后 2.4ms/调用）揭穿两个隐藏大头：
+①双 131μs elementwise = `kmin_pool[rows]`/`kmax_pool[rows]` 的 P1 行 gather
+（各 67MB clone，此前 phase 分解误记 0.085ms——插桩打点在 gather 完成后，
+clone 时间被并入了后续 phase）；②`aten::einsum` 346μs 中 gemv 仅 75μs，其余
+是 permute 连续化拷贝（einsum 需要 bmm 布局）。**P1+P2 真实合计 ~0.6ms**。
+
+**KernelC（双池直写）**（`tli_l2_score_batched_dual`，`SGLANG_TLI_L2D_KERNEL=1`
+默认开）：far/near 池的 -inf 掩码烘进 KernelA 写出口径，一次扫描写两张池表
+（far_sc/near_sc [n,Hkv,Tc]），消除 P6 masked_fill 链与 P7 的池表物化。关键
+语义论证：**池边界即因果边界**（far_hi ≤ t+1-near_len、sw_lo ≤ t），tok 数组
+取值仅为 [0,S_t) 实位置或哨兵，均天然落两池之外 → 与 eager 的
+`池界 & valid & causal` 掩码逐位等价（topk 输入逐位一致 → 输出 torch.equal，
+uniform/mixed S 双场景 PASS）。
+
+**寄存器压力调参（CHUNK 二次扫描）**：双输出 tile 使寄存器压力比单输出版更早
+触顶——CHUNK=512 时 dual kernel 1.06ms（溢出 local memory），**CHUNK=128 达
+0.43ms**（比单输出 KernelA@512 的 0.49ms 还快）；顺带发现单输出 KernelA 也应
+降 CHUNK（512→128：0.49→0.35ms）。**tile 元素数上限的经验值：CHUNK×Hkv×ND2
+fp32 ≤ ~65K 元素/program（8 warps）**。
+
+**KernelD（批量 L1 fused gather+GEMV）**（`tli_l1_score_batched`，
+`SGLANG_TLI_L1B_KERNEL=1` 默认开）：grid (n×Hkv, NBLK/256)，rows 行间接寻址
+直读 kmin/kmax pool（读 128MB 写 0.5MB），归约分组与 eager einsum 相同（先
+G-sum 后点积）→ **P1+P2（gather 262μs + einsum permute 346μs）整体消除**；
+垃圾块 -inf 在 kernel 内烘焙（skip_far 层的 near_keep 掩码语义走 eager 分支）。
+实测与 C 档**逐元素差 0**（归约分组对齐后连 1e-7 都没有）。
+
+| 配置 | select_decode_batched 全函数（bs=32/131K） | vs eager |
+|---|---|---|
+| 全 eager（P1-P7） | 23.25 ms | 1× |
+| B 档（KernelA+B，CHUNK=128 + 惰性掩码） | 2.11 ms | 11.0× |
+| C 档（+双池直写） | 2.15 ms | 10.8×（与 B 持平——双倍转置写 ≈ masked_fill 消除，价值在 launch 数↓与 C+D 组合） |
+| **full（A+B+C+D）** | **1.80 ms** | **12.9×** |
+
+诚实口径：C 档单独看是平手（2.15 vs 2.11ms）——双池直写的收益被第二张表的
+转置写吃掉；保留默认开的原因是 launch 数减少（低 bs 时 launch 主导）与语义
+更干净（-inf 单一来源）。有效集对拍：full vs eager jaccard 1.0、C vs B
+torch.equal、full vs C 逐元素差 0（三重验证）。
+
+**剩余瓶颈**（1.80ms 组成，profiler 实测）：far/near/K1 三个 topk 的 radix
+机器 ~0.9ms（radixFindKthValues 487μs + gatherTopK 249μs + counts/sort
+~170μs，50%）+ dual kernel 0.43 + compact 0.07 + gather/einsum 杂项 ~0.3。
+topk 宽度受 CUDA graph 静态形状约束（Tc=65984），near 池实际候选数远小于
+宽度但无静态上界可压——**结构性剩余，非实现低效**；进一步压缩需接受语义
+近似（over-select）或破坏图形状静态性，暂不做。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）

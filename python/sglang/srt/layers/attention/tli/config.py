@@ -72,6 +72,22 @@ class TLIProfile:
         # （关闭可回退 per-request 路径做 A/B 对拍；n==1 恒走 per-request
         #   以保留 L1/L2 fused kernel 的 bs=1 延迟优势）
         self.use_batch_select: bool = _env_bool("SGLANG_TLI_BATCH_SELECT", True)
+        # ---- M8：批量 L2 fused gather+dequant+GEMV（select_decode_batched 的
+        # P5 瓶颈，87.6%@bs32/131K：eager 物化 kq_c fp32 2.1GB×2 + 逐元素 flat
+        # gather ~240GB/s → kernel 寄存器内反量化+每 token 256B 连续段 gather，
+        # 20.5→0.48ms（43×，有效带宽 1.55TB/s）；CHUNK>1024 会寄存器溢出反而
+        # 变慢（CHUNK=1024 实测 3.2ms），对拍 s2 max diff 2.4e-07）----
+        self.use_l2_batched_kernel: bool = _env_bool("SGLANG_TLI_L2B_KERNEL", True)
+        # ---- M8-KernelD：批量 L1 fused gather+GEMV（P1 行 gather 262μs +
+        # P2 einsum permute 拷贝 ~346μs → 单 kernel 直读 pool）----
+        self.use_l1_batched_kernel: bool = _env_bool("SGLANG_TLI_L1B_KERNEL", True)
+        # ---- M8-KernelC：双池直写（far/near -inf 烘进 KernelA 写出口径，
+        # 消除 P6 masked_fill 链与 P7 的 far_sc/near_sc 物化；关闭可回退
+        #   s2 单输出路径做 A/B 对拍）----
+        self.use_l2_dual_kernel: bool = _env_bool("SGLANG_TLI_L2D_KERNEL", True)
+        # ---- M8：候选压实块展开 kernel（P4：topk-min 全排序 0.88ms →
+        # cumsum+块展开 ~0.3-0.5ms；哨兵可在中段，下游 valid 掩掉，有效集一致）----
+        self.use_compact_kernel: bool = _env_bool("SGLANG_TLI_COMPACT_KERNEL", True)
         # 共享 index pool 初始行数（请求行数不足时自动扩）
         self.pool_rows: int = _env_int("SGLANG_TLI_POOL_R", 32)
         # 短序列退 dense

@@ -704,15 +704,11 @@ class TLIIndexer:
         # （下方既有机制），语义不变
         K1 = min(p.k1_blocks, NBLK_CAP)
 
-        # ---- L1: 子空间块上界（批量 einsum；a=请求行 / m=块）----
-        kmin_b = kmin_pool[rows]  # [n, NBLK_CAP, Hkv, d']（容量行含垃圾，靠掩码）
-        kmax_b = kmax_pool[rows]
-        qs = q[..., self.idx1]  # [n, H, d']
-        qg = qs.clamp(min=0).reshape(n, Hkv, G, p.coarse_dim)
-        qn = qs.clamp(max=0).reshape(n, Hkv, G, p.coarse_dim)
-        sc1 = torch.einsum("ahgd,amhd->ahm", qg, kmax_b) + torch.einsum(
-            "ahgd,amhd->ahm", qn, kmin_b
-        )  # [n, Hkv, NBLK_CAP]
+        # ---- L1: 子空间块上界（a=请求行 / m=块）----
+        # M8-KernelD：非 skip_far 层走 fused gather+GEMV（rows 行间接直读 pool，
+        # 消除 P1 行 gather 262μs + P2 einsum permute 拷贝 ~346μs@bs32/131K；
+        # 归约同 eager 分组，数值 1e-7 级）
+        rows_l = rows.to(torch.long)
         blk_id = torch.arange(NBLK_CAP, device=device)
         blk_end = (blk_id + 1) * bs - 1
         valid_blk = (blk_id.view(1, -1) < nblk_t.view(-1, 1)) & (
@@ -723,7 +719,31 @@ class TLIIndexer:
             keep = blk_id.view(1, -1) >= near_blks.view(-1, 1)
             keep[:, : min(2, NBLK_CAP)] = True
             valid_blk = valid_blk & keep
-        sc1 = sc1.masked_fill(~valid_blk.unsqueeze(1), float("-inf"))
+        if (
+            getattr(p, "use_l1_batched_kernel", False)
+            and not self.skip_far
+            and n >= 2
+            and (Hkv & (Hkv - 1)) == 0
+            and (p.coarse_dim & (p.coarse_dim - 1)) == 0
+            and q.is_contiguous()
+        ):
+            from sglang.srt.layers.attention.tli.kernels import (
+                tli_l1_score_batched,
+            )
+
+            sc1 = tli_l1_score_batched(
+                q, self.idx1, kmin_pool, kmax_pool, rows_l, nblk_t, t_t, bs
+            )  # 垃圾块 -inf 已在 kernel 内烘焙（skip_far 的 keep 掩码走 eager）
+        else:
+            kmin_b = kmin_pool[rows]  # [n, NBLK_CAP, Hkv, d']（容量行含垃圾，靠掩码）
+            kmax_b = kmax_pool[rows]
+            qs = q[..., self.idx1]  # [n, H, d']
+            qg = qs.clamp(min=0).reshape(n, Hkv, G, p.coarse_dim)
+            qn = qs.clamp(max=0).reshape(n, Hkv, G, p.coarse_dim)
+            sc1 = torch.einsum("ahgd,amhd->ahm", qg, kmax_b) + torch.einsum(
+                "ahgd,amhd->ahm", qn, kmin_b
+            )  # [n, Hkv, NBLK_CAP]
+            sc1 = sc1.masked_fill(~valid_blk.unsqueeze(1), float("-inf"))
         cand_blk = torch.topk(sc1, K1, dim=-1).indices  # [n, Hkv, K1]
         onehot = torch.zeros(n, NBLK_CAP, dtype=torch.bool, device=device)
         # 越界 / 非因果 / D' 掩蔽的垃圾块选择剔除在 scatter 源上完成——
@@ -739,53 +759,99 @@ class TLIIndexer:
         onehot.scatter_(1, f_blk, True)
 
         # ---- 候选 token 位置（并集块展开 + pos < S 截断，topk-min 压实）----
-        sel_mask = onehot.repeat_interleave(bs, dim=1)[:, :S_cap]  # [n, S_cap]
-        pos = torch.arange(S_cap, device=device)
-        cand = sel_mask & (pos.view(1, S_cap) < S_t.view(-1, 1))
+        # M8：kernel 版 = cumsum 前缀 + 块展开（消除 [n,S_cap] int64 物化与
+        # topk-min 全排序；哨兵可在中段——下游 valid 掩掉，有效集逐行一致）
         Tc = min((K1 * Hkv + p.sliding_blocks) * bs, NBLK_CAP * bs, S_cap)
-        seq_m = torch.where(cand, pos.view(1, S_cap), torch.full_like(pos, S_cap))
-        tok = torch.topk(seq_m, Tc, dim=-1, largest=False).values  # [n, Tc] 升序
-        valid = tok < S_cap
+        if (
+            getattr(p, "use_compact_kernel", False)
+            and n >= 2
+            and onehot.is_contiguous()
+        ):
+            from sglang.srt.layers.attention.tli.kernels import tli_compact
+
+            tok = tli_compact(onehot, S_t, bs, S_cap, Tc)  # [n, Tc] 块升序
+        else:
+            sel_mask = onehot.repeat_interleave(bs, dim=1)[:, :S_cap]  # [n, S_cap]
+            pos = torch.arange(S_cap, device=device)
+            cand = sel_mask & (pos.view(1, S_cap) < S_t.view(-1, 1))
+            seq_m = torch.where(cand, pos.view(1, S_cap), torch.full_like(pos, S_cap))
+            tok = torch.topk(seq_m, Tc, dim=-1, largest=False).values  # [n, Tc] 升序
+        # valid/causal 掩码惰性计算：KernelC 双池直写路径池界即因果界，
+        # 无需 [n,Tc] int64 逐元素掩码（省 2 个 ~130μs op@bs32/131K）
         tok_c = tok.clamp(max=S_cap - 1)
+
+        # ---- B' 边界（per-row device 张量，静态形状；双池 kernel 与
+        # skip_far / eager 掩码路径共用；提前到 L2 之前供 kernel 直写）----
+        far_lo = p.sink_blocks * bs
+        far_hi_t = (t_t + 1 - p.near_len).clamp(min=far_lo)
+        sw_lo_t = (t_t - p.sliding_window + 1).clamp(min=0)
 
         # ---- L2: 4bit 精筛打分（M6：uint8 格点 + scale 的 flat gather + 重建）----
         # 重建 kq_c = grid*sc+mn 与 fp32 存储版逐位一致（IEEE 同运算序），
         # 打分数值零漂移；pool 常驻显存 128→40 B/token-head
+        # M8：n≥2 走 fused 批量 kernel（P5 瓶颈 87.6%@bs32/131K，
+        # 20.5→0.48ms 43×，s2 对拍 2.4e-07；哨兵位置垃圾分数同 eager 语义）
+        # M8-KernelC：非 skip_far 层走双池直写（far/near -inf 烘进写出口径，
+        # 消除 P6 masked_fill 链——池边界即因果边界，topk 输入逐位一致）
         q2 = self._q_refine(q).reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
-        s2 = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=device)
-        rows_l = rows.to(torch.long)
-        d_off = torch.arange(nd2, device=device)
-        h_off = torch.arange(Hkv, device=device).view(1, Hkv, 1) * nd2
-        h_off_s = torch.arange(Hkv, device=device)
-        chunk = max(1, row_chunk_bytes // max(Tc * Hkv * nd2 * 4, 1))
-        for r0 in range(0, n, chunk):
-            r1 = min(r0 + chunk, n)
-            m = r1 - r0
-            # 槽位 s、kv head h、维 d → r*S_cap*Hkv*nd2 + s*Hkv*nd2 + h*nd2 + d
-            flat = (
-                rows_l[r0:r1].view(m, 1, 1, 1) * (S_cap * Hkv * nd2)
-                + tok_c[r0:r1].view(m, Tc, 1, 1) * (Hkv * nd2)
-                + h_off.view(1, Hkv, 1)
-                + d_off.view(1, 1, nd2)
-            )
-            # scale/mn：r*S_cap*Hkv + s*Hkv + h（无维偏移）
-            flat_s = (
-                rows_l[r0:r1].view(m, 1, 1) * (S_cap * Hkv)
-                + tok_c[r0:r1].view(m, Tc, 1) * Hkv
-                + h_off_s.view(1, 1, Hkv)
-            )
-            grid_c = kq_pool.reshape(-1)[flat.view(-1)].view(m, Tc, Hkv, nd2)
-            sc_c = kq_sc_pool.reshape(-1)[flat_s.view(-1)].view(m, Tc, Hkv)
-            mn_c = kq_mn_pool.reshape(-1)[flat_s.view(-1)].view(m, Tc, Hkv)
-            kq_c = grid_c.float() * sc_c.unsqueeze(-1) + mn_c.unsqueeze(-1)
-            s2[r0:r1] = torch.einsum("ahd,athd->aht", q2[r0:r1], kq_c)
+        far_sc = near_sc = None
+        if (
+            getattr(p, "use_l2_batched_kernel", False)
+            and n >= 2
+            and (Hkv & (Hkv - 1)) == 0
+            and (nd2 & (nd2 - 1)) == 0
+            and tok_c.is_contiguous()
+        ):
+            if not self.skip_far and getattr(p, "use_l2_dual_kernel", False):
+                from sglang.srt.layers.attention.tli.kernels import (
+                    tli_l2_score_batched_dual,
+                )
 
-        causal = tok <= t_t.view(-1, 1)
+                far_sc, near_sc = tli_l2_score_batched_dual(
+                    q2, kq_pool, kq_sc_pool, kq_mn_pool, rows_l, tok_c,
+                    far_lo, far_hi_t, sw_lo_t,
+                )
+            else:
+                from sglang.srt.layers.attention.tli.kernels import (
+                    tli_l2_score_batched,
+                )
+
+                s2 = tli_l2_score_batched(q2, kq_pool, kq_sc_pool, kq_mn_pool,
+                                          rows_l, tok_c)
+        else:
+            s2 = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=device)
+            d_off = torch.arange(nd2, device=device)
+            h_off = torch.arange(Hkv, device=device).view(1, Hkv, 1) * nd2
+            h_off_s = torch.arange(Hkv, device=device)
+            chunk = max(1, row_chunk_bytes // max(Tc * Hkv * nd2 * 4, 1))
+            for r0 in range(0, n, chunk):
+                r1 = min(r0 + chunk, n)
+                m = r1 - r0
+                # 槽位 s、kv head h、维 d → r*S_cap*Hkv*nd2 + s*Hkv*nd2 + h*nd2 + d
+                flat = (
+                    rows_l[r0:r1].view(m, 1, 1, 1) * (S_cap * Hkv * nd2)
+                    + tok_c[r0:r1].view(m, Tc, 1, 1) * (Hkv * nd2)
+                    + h_off.view(1, Hkv, 1)
+                    + d_off.view(1, 1, nd2)
+                )
+                # scale/mn：r*S_cap*Hkv + s*Hkv + h（无维偏移）
+                flat_s = (
+                    rows_l[r0:r1].view(m, 1, 1) * (S_cap * Hkv)
+                    + tok_c[r0:r1].view(m, Tc, 1) * Hkv
+                    + h_off_s.view(1, 1, Hkv)
+                )
+                grid_c = kq_pool.reshape(-1)[flat.view(-1)].view(m, Tc, Hkv, nd2)
+                sc_c = kq_sc_pool.reshape(-1)[flat_s.view(-1)].view(m, Tc, Hkv)
+                mn_c = kq_mn_pool.reshape(-1)[flat_s.view(-1)].view(m, Tc, Hkv)
+                kq_c = grid_c.float() * sc_c.unsqueeze(-1) + mn_c.unsqueeze(-1)
+                s2[r0:r1] = torch.einsum("ahd,athd->aht", q2[r0:r1], kq_c)
+
         SENT = S_cap
 
         if self.skip_far:
             # 单池口径（= per-request eager 的整体 topk + 滑窗 +inf）
-            sw_lo_t = (t_t - p.sliding_window + 1).clamp(min=0)
+            causal = tok <= t_t.view(-1, 1)
+            valid = tok < S_cap
             sc = s2.masked_fill(~(valid & causal).unsqueeze(1), float("-inf"))
             sc = sc.masked_fill((tok >= sw_lo_t.view(-1, 1)).unsqueeze(1), float("inf"))
             k = min(p.token_budget, Tc)
@@ -797,9 +863,6 @@ class TLIIndexer:
             )  # [n, Hkv, budget]
 
         # ---- B'：far/near 分区（L2-kernel 路径口径；M5 全程 device 张量 + 静态宽度）----
-        far_lo = p.sink_blocks * bs
-        far_hi_t = (t_t + 1 - p.near_len).clamp(min=far_lo)
-        sw_lo_t = (t_t - p.sliding_window + 1).clamp(min=0)
         near_floor = p.sliding_window + far_lo
         far_cap = max(0, p.token_budget - near_floor)
         # per-row 配额（随 S 值变化但形状静态 [n]）：
@@ -818,10 +881,15 @@ class TLIIndexer:
         W_near = min(p.token_budget, Tc)
         W_forced = min(p.sliding_window, Tc)
 
-        in_far = (tok >= far_lo) & (tok < far_hi_t.view(-1, 1)) & valid & causal
-        in_near = valid & causal & ~in_far & (tok < sw_lo_t.view(-1, 1))
-        far_sc = s2.masked_fill(~in_far.unsqueeze(1), float("-inf"))
-        near_sc = s2.masked_fill(~in_near.unsqueeze(1), float("-inf"))
+        if far_sc is None:
+            # eager / s2-kernel 路径：此处物化双池掩码表
+            # （KernelC 直写路径已带 -inf，池界等价于 valid & causal 掩码）
+            causal = tok <= t_t.view(-1, 1)
+            valid = tok < S_cap
+            in_far = (tok >= far_lo) & (tok < far_hi_t.view(-1, 1)) & valid & causal
+            in_near = valid & causal & ~in_far & (tok < sw_lo_t.view(-1, 1))
+            far_sc = s2.masked_fill(~in_far.unsqueeze(1), float("-inf"))
+            near_sc = s2.masked_fill(~in_near.unsqueeze(1), float("-inf"))
         tok_e = tok_c.unsqueeze(1).expand(n, Hkv, Tc)
         parts = []
         if W_far > 0:
