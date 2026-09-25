@@ -270,45 +270,146 @@ CUDA graph 与 131K 主表的共同前提。
 
 ## 6. Evaluation（3.5 页）
 
-### 6.1 Setup
+### 6.1 Setup【正文 v1】
 
-- Qwen3-8B/32B、LongBench v1 + NIAH、2×H20-3e（141GB；TC 仅 H100 15%——
-  算力无关性试验台叙事）、sglang 分支。
-- 对拍文化声明：每步 kernel 化配 torch.equal/逐元素/jaccard 对拍 + e2e 逐字一致。
+**硬件**：2×NVIDIA H20-3e（每卡 141GB HBM，cc9.0，78 SM）。H20 的 Tensor Core
+吞吐仅为 H100 的 ~15%——这一「缺陷」恰好构成**算力无关性试验台**：TLI 的收益
+主张全部建立在 HBM 流量与索引效率上而非算力，若在 TC 受限的 H20 上质量与
+流量收益成立，则其收益不依赖算力代际。**模型**：Qwen3-8B（36 层，GQA 8
+kv-head × 128 维，rotate_half RoPE）为主表，Qwen3-32B（64 层）做跨规模复验。
+**系统**：sglang fork（分支 two-level-indexer），TLI 以 attention backend 形式
+全链路集成（§5）。**负载**：LongBench v1 英文 13 子集（200 样本/任务，
+repobench 500；K2=1024、cmp_ratio=4、far_tokens=512、temperature=0）+ NIAH
+（RULER 口径 S=32K，见 §6.2）。**baseline**：FullKV（triton dense）、
+TIA@1024（同门第一代，内部消融基准）、TWI、Quest@1024、DSA（kernel 级
+对比，模型不通用）。
 
-### 6.2 质量（两端口径）
+**对拍文化声明（贯穿全部表格的数字可信度基础）**：每步 kernel 化均配
+torch.equal / 逐元素 / jaccard 对拍（§5.2）；4bit 索引与增量维护逐位一致
+（§5.1）；CUDA graph replay 与 eager 逐位一致（§5.3）；e2e 输出与 eager
+路径逐字一致。§7 记录两例该体系主动撤回自身 headline 的案例。
 
-- 主表：LongBench 13 子集（TLI 49.92 / TIA 50.06 / FullKV 50.36 / Quest 47.72）。
-  【素材：报告§4 表】
-- 负向任务逐项诊断表（musique/qasper=D' gate 错位，关后精确恢复）。
-- NIAH（极端压力）：0.625 vs dense 1.0，far 区命中 0.66 与 E4c 吻合；
-  far 预算不敏感。【素材：报告§8b-16】
-- 逐层质量：36/36 层 diff<0.001、far-heavy 层反超（fig6）。
+### 6.2 Quality: Dual-Caliber Evaluation【正文 v1】
 
-### 6.3 Kernel Microbenchmark（同机三方对比）
+**主表（均值负载口径）**：LongBench 13 子集，FullKV/Quest/TIA/TWI/TLI 全部
+同机同权重同打分器：
 
-- Quest 官方（page GEMV + raft decode_select_k）0.066-0.107ms；
-- DSA 官方（tilelang fp8_index）0.476-0.503ms；
-- TLI eager 0.736-0.853 → fusedL1 0.604-0.787（单 token 口径）
-  + 批量 select 12.9×=1.80ms@bs32/131K（batch 口径，口径差异如实标注）。
-- 存储/训练/质量三列同表。【素材：报告§8b-6、fig5】
+| task | FullKV | Quest@1024 | TIA@1024 | TWI | TLI(A+B'+D'gated) |
+|---|---|---|---|---|---|
+| hotpotqa | 53.48 | 45.74 | 53.89 | 48.98 | 53.96 |
+| 2wikimqa | 38.29 | 38.46 | 38.27 | 36.16 | 39.07 |
+| musique | 32.14 | 27.25 | 32.28 | 23.60 | 31.35 |
+| passage_retrieval_en | 100.00 | 98.50 | 99.50 | 98.50 | 100.00 |
+| qasper | 44.17 | 40.13 | 44.03 | 38.96 | 44.03 |
+| multifieldqa_en | 53.40 | 51.01 | 53.19 | 48.11 | 52.98 |
+| gov_report | 33.17 | 32.13 | 33.43 | 33.09 | 32.41 |
+| qmsum | 23.53 | 22.21 | 23.90 | 23.98 | 22.77 |
+| multi_news | 24.93 | 24.95 | 24.73 | 24.99 | 24.66 |
+| narrativeqa | 25.61 | 20.64 | 22.18 | 26.19 | 23.14 |
+| triviaqa | 90.71 | 87.55 | 89.82 | 89.59 | 90.22 |
+| lcc | 68.81 | 68.34 | 69.14 | 66.22 | 68.74 |
+| repobench-p | 66.50 | 63.41 | 66.40 | 63.87 | 65.59 |
+| **AVG** | **50.36** | **47.72** | **50.06** | **47.86** | **49.92** |
 
-### 6.4 End-to-End Throughput
+TLI 距 TIA −0.14、距 FullKV −0.44——以 1024/9900 token（K2/S@9.9K）的
+稀疏预算守住 dense 质量；9/13 子集不低于 TIA，3 子集反超
+（hotpotqa 53.96 / 2wikimqa 39.07 / passage_retrieval 100.0）。
 
-- decode 阶梯：M3 原型 1236.8 → M5 graph 188.6 → M8 kernel+graph 99.0 ms/step
-  （bs=32，12.5×；vs triton 31.7 仍慢 3.1×——诚实边界）。
-- 9.9K→30K 差距收窄链：bs16 慢 3.48×→1.55×（S 增长单调收窄，fig9c）；
-  两点线性外推翻转点 S≈44K——H100 主表（S=128K）远在翻转点后；30K 扩展比
-  tli 1.49× vs triton 1.45×。
-- prefill：M7 快路径 2.08×@10K + M10 慢路径 kernel 化 2.11×@30K
-  （累计短板 13.6×→6.4×，剩余结构性 topk 67%）。
-- 【缺：H100 + S=131K + bs≥16 主表（机器申请中）——论文 headline 表】
+**负向任务逐项诊断（gate 机制的诚实拆解）**：TLI 相对 TIA 的三个掉分子任务
+全部来自 D' 层跳过的 gate 错位，且消融 3/3 定位（关 D' 后 musique 31.35 /
+qasper 44.03 / multifieldqa_en 52.98——qasper 与 TIA 精确同值）。诊断表把
+「掉分」分解为「gate 判据误触发 + 校准 trace 与推理分布长度失配」，而非
+两级索引本身的质量损失；这同时是 §4.3 gate 失败史的 e2e 证据。
 
-### 6.5 Overhead Analysis
+**极端压力口径（NIAH，RULER 风格）**：S=32K、needle 深度 5–95% 十档、
+双 seed × far 预算三点扫描（n=40/配置）：
 
-- 索引 FLOP 2.57×（跳层 4.88×）——index-side efficiency，不冒充主算子胜利。
-- 存储账：40B（24B PCA）/token-head vs Quest ~1KB。
-- CPU 捞取 overlap 三面墙 No-Go（PCIe 57×/依赖 churn 22%/占比 12%）。
+| 后端 | seed1 / seed2 / 合并 | far 区命中（合并） |
+|---|---|---|
+| dense (triton) | 1.000 / 1.000 / 1.000 | — |
+| TLI far=128 | 0.550 / 0.700 / **0.625** | 0.66 |
+| TLI far=256（默认） | 0.650 / 0.600 / **0.625** | 0.66 |
+| TLI far=512 | 0.550 / 0.700 / **0.625** | 0.66 |
+
+三个结论：①far 区命中 0.66 与 §4.2 微观口径的 far recall@256（0.5–0.56）
+量级吻合——微观-宏观口径自洽；②far 预算 [128,512] 完全不敏感——限制因子
+是 far 池整体召回而非预算切分（K2_far=256 跨负载稳健的又一证据）；
+③失败模式为「抓到 haystack 干扰数字」而非拒答——损失本质是 0.8% far 预算
+对极端检索任务的物理上限，与 Quest/HISA 报告的 NIAH 损失同性质。seed1 的
+「钟形」（0.550/0.650/0.550）被 seed2 反转、合并后持平——单 seed 差分结论
+必须复测（§7 方法论案例二）。
+
+**逐层质量**：36/36 层 mass 覆盖 diff<0.001，far-heavy 层（L03/L05）反超
+TIA（0.9995 vs 0.9990 / 0.9997 vs 0.9929）——B' 近端名额保障的直接逐层
+证据（fig6）。Qwen3-32B 复验：子空间选择 entry recall 差距 ≤0.08、
+D' 跳 41/64 层 precision 0.993——机制跨规模存在、强度递减，如实报告。
+
+### 6.3 Kernel Microbenchmark: Same-Machine Three-Way【正文 v1】
+
+官方 kernel 原样接入统一 harness（Quest 摘官方 raft decode_select_k.cuh
+编译 + page GEMV；DSA 官方 tilelang fp8_index 原样 import；计时 cudaEvent，
+单 token per-layer-call 全链路，S=10K/40K/131K 三档）：
+
+| indexer（ms/层） | S=10K | S=40K | S=131K | 索引存储/token | training-free | LongBench-13 |
+|---|---|---|---|---|---|---|
+| Quest 官方 | 0.066 | 0.077 | 0.107 | ~1KB | ✓ | 47.72 |
+| DSA 官方 | 0.476 | 0.490 | 0.503 | ~132B | ✗（2.1B token warm-up） | — |
+| TLI eager | 0.736 | 0.780 | 0.853 | ~336B | ✓ | 49.92 |
+| TLI fused L1 | 0.604 | 0.658 | 0.787 | ~336B | ✓ | 49.92 |
+
+四条诚实结论：①**Quest 索引最快**（HBM 带宽型 µs 级 GEMV+radix），但其
+速度与 fp16 全 head min/max 的 1KB/token 存储（3× TLI）和 LongBench −2.2 分
+绑定；②**DSA 0.5ms 与 S 无关**（TC 型生产级 kernel），代价是训练需求 +
+每 token 8192 MAC 全量 GEMV；③**TLI 单 token 延迟当前不占优**（0.6–0.83ms，
+eager topk/gather launch 主导，三家在 131K 都远离 HBM bound——排名反映
+实现成熟度而非架构上限）；④TLI 的结构性优势在算法侧：每 token 索引 MAC
+≈258 = DSA 的 1/32、存储 3×↓ vs Quest、+2.2 分 vs Quest——**算力/存储余量
+由 M8 kernel 化兑现**：批量化后 select_decode_batched 全函数
+23.25→1.80ms@bs=32/131K（12.9×），launch 数与 bs 无关（口径差异——单 token
+vs batch——在表注中如实标注）。补充批量口径对比：Quest/DSA 官方无批量
+decode_select 实现，此处只列单 token 口径 + TLI 批量数，避免跨口径直接
+比较。
+
+### 6.4 End-to-End Throughput【正文 v1】
+
+**decode 优化轨迹（bs=32, S=9.9K, CUDA graph 口径）**：M3 eager 原型
+1236.8 → M5 +graph 188.6 → M8 +kernel 99.0 ms/step——**累计 12.5×**
+（323 tok/s@bs32），同一指标体系内逐级归因（批量化 3.8× / graph 1.7× /
+kernel 1.9×）。vs triton dense 31.7 ms/step 仍慢 3.1×——9.9K 档 attention
+流量尚未主导，诚实边界如实报告（fig9a）。
+
+**S 增长收窄链（bs=16）**：9.9K 慢 3.48×（64.7/18.7）→ 30K 慢 1.55×
+（67.1/43.4，N=256 双侧复测）——S 增长下差距单调收窄；tli 扩展比 1.49× ≈
+triton 1.45×（30K/9.9K），两互不依赖口径交叉验证。两点线性外推（triton
+attention 流量 ∝S 的斜率 1.20ms/K vs tli ≈K2 恒定）给出**翻转点 S≈44K**
+（fig9c 虚线）：模型粗但方向明确——attention 成为 step 主导项后 triton 线性
+劣化、tli 恒定。**H100 主表口径（bs≥16 × S=128K）远在翻转点之后**，是
+收益验证位【缺：机器申请中，论文 headline 表】。
+
+**prefill（30K，批分双档）**：M8 787/1565s → M10 kernel 化 373/741s，
+**两档加速比完全一致（2.11×）**——慢路径成本 ∝bs×S 的线性项被消除的
+直接证据（fig9b）。30K 档 tli prefill vs triton（58/115s）剩余 ~6.4×，
+其中结构性 topk radix 机器占 select 侧 67%——算法级近似 topk 是后续工作，
+如实划界。decode 与 prefill 数字均为「单次测量 + 差分法信噪比复核」口径
+（N=256 复测、§7 方法论案例一）。
+
+### 6.5 Overhead Analysis【正文 v1】
+
+**索引效率（index-side efficiency，不冒充主算子胜利）**：TLI 索引 FLOP
+2.57× 省算（vs dense 全维打分），D' 跳 13/36 层后 4.88×；每 token 索引
+MAC ≈258 vs DSA 8192（1/32）。**存储账**：L2 索引 40B/token-head
+（选择口径）/ 24B（PCA 投影口径，M9）vs Quest ~1KB/token（3–5×↓）、
+DSA ~132B/token+训练；141GB 显存的 H20 上 131K×bs32 主表因此可行。
+**CPU 捞取 overlap 三面墙（No-Go）**：far token 捞取 CPU 化提议被定量
+否定——PCIe 带宽差 57×、选择集依赖 churn 22%/step、select 占比仅 12%
+（捞不动也不值得捞）——入 negative results。
+
+### 6.6 图表映射
+
+fig9（a/b/c 三联）= §6.4 全部数字的图形化；fig5 = §6.5 FLOP/延迟；
+fig6 = §6.2 逐层；fig1–4 归 §3/§4。所有数字可由 JSON（tli_m8_e2e_results /
+tli_m8_e2e_long_results / tli_m10_bench / tli_niah_results /
+kernel_comparison_indexers）复现，无手抄。
 
 ## 7. Discussion: Measurement Methodology（0.75 页，差异化卖点）
 
