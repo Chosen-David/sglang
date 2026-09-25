@@ -586,5 +586,446 @@
     "prompt_tokens": 32041
    }
   ]
+ },
+ "niah_tli_far256_seed2": {
+  "score": 0.6,
+  "n": 20,
+  "gen_s": 1011.1,
+  "samples": [
+   {
+    "depth": 5,
+    "needle": "6063410",
+    "ok": false,
+    "out": "What is the name of the first ship in the Gerald R. Ford cla",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 5,
+    "needle": "5679950",
+    "ok": true,
+    "out": "The magic number is 5679950.\nThe magic number is 5679950.\nOk",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 15,
+    "needle": "8007673",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 8007673.\nThe ma",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "7307033",
+    "ok": false,
+    "out": "(Example: 123456789)\nAnswer:\n123456789\nPassage:\nThe Magic Nu",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 25,
+    "needle": "7614631",
+    "ok": false,
+    "out": "(1)\nAnswer:\n(1)\nPassage:\nThe world's first computer, the Man",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "9869577",
+    "ok": false,
+    "out": "Passage 2:\nBajura District\nBajura District (Nepali: बाजुरा ज",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 35,
+    "needle": "1396500",
+    "ok": false,
+    "out": "What is the magic number mentioned in the passage? Answer wi",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 35,
+    "needle": "9699669",
+    "ok": false,
+    "out": "What is the name of the city that is the county seat of Fult",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "1459115",
+    "ok": false,
+    "out": "The first sub-problem is to extract the clinical concept men",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 45,
+    "needle": "3464422",
+    "ok": true,
+    "out": "The number is 3464422.\n\nWhat is the total amount requested f",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 55,
+    "needle": "7142287",
+    "ok": true,
+    "out": "7142287\n\nWhat is the name of the organization that is respon",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 55,
+    "needle": "4332759",
+    "ok": false,
+    "out": "(1000)\n(1000)\n(1000)\n(1000)\n(1000)\n(1",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "4886634",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 4886634.\nOkay, ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "6625156",
+    "ok": true,
+    "out": "The magic number is 6625156.\nPassage:\nThe magic number is 66",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 75,
+    "needle": "2100295",
+    "ok": true,
+    "out": "Answer:\n2100295\nPassage:\nThe Magic Number\nThe magic number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 75,
+    "needle": "8027301",
+    "ok": true,
+    "out": "1234567890\nPassage:\nThe magic number is 8027301.\nPassage:\nTh",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 85,
+    "needle": "4782929",
+    "ok": true,
+    "out": "Answer:\nAnswer:\n4782929\nPassage:\nThe United States has a lon",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 85,
+    "needle": "8794397",
+    "ok": true,
+    "out": "Answer:\n8794397\nPassage:\nThe Magic Number\nThe magic number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "8308609",
+    "ok": true,
+    "out": "The magic number is 8308609. \n\nThe magic number is 8308609. ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "7862691",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 7862691. \n\nThe ",
+    "prompt_tokens": 32041
+   }
+  ]
+ },
+ "niah_tli_far128_seed2": {
+  "score": 0.7,
+  "n": 20,
+  "gen_s": 991.7,
+  "samples": [
+   {
+    "depth": 5,
+    "needle": "6063410",
+    "ok": false,
+    "out": "What is the name of the first ship in the Gerald R. Ford cla",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 5,
+    "needle": "5679950",
+    "ok": true,
+    "out": "The magic number is 5679950.\nThe magic number is 5679950.\nTh",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 15,
+    "needle": "8007673",
+    "ok": true,
+    "out": "The magic number is 8007673.\nThe magic number is 8007673.\nTh",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "7307033",
+    "ok": false,
+    "out": "(0.00 / 0 votes)Rate this definition:\nTripe\nPassage:\nThe Mag",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 25,
+    "needle": "7614631",
+    "ok": false,
+    "out": "(123456789)\nAnswer:\n1234\nPassage:\nThe world's first and only",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "9869577",
+    "ok": true,
+    "out": "Passage 2:\nThe magic number is 9869577.\n\nPassage 3:\nThe magi",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 35,
+    "needle": "1396500",
+    "ok": false,
+    "out": "What is the magic number mentioned in the passage? Answer wi",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 35,
+    "needle": "9699669",
+    "ok": true,
+    "out": "The magic number is 9699669.\n\nThe magic number is 9699669.\n\n",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "1459115",
+    "ok": false,
+    "out": "The first sub-problem is to extract the clinical concept men",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 45,
+    "needle": "3464422",
+    "ok": true,
+    "out": "The number is 3464422.\n\nWhat is the magic number mentioned i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 55,
+    "needle": "7142287",
+    "ok": true,
+    "out": "7142287\n\nWhat is the name of the organization that is respon",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 55,
+    "needle": "4332759",
+    "ok": true,
+    "out": "(Example: 4332759)\nWhat is the name of the character who is ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "4886634",
+    "ok": true,
+    "out": "The magic number is 4886634.\nOkay, let me try to figure out ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "6625156",
+    "ok": true,
+    "out": "The magic number is 6625156.\nPassage:\nThe magic number is 66",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 75,
+    "needle": "2100295",
+    "ok": true,
+    "out": "Answer:\n2100295\nPassage:\nThe Magic Number\nThe magic number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 75,
+    "needle": "8027301",
+    "ok": true,
+    "out": "1234567890\nPassage:\nThe magic number is 8027301.\nQuestion:\nW",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 85,
+    "needle": "4782929",
+    "ok": false,
+    "out": "Answer:\nAnswer:\nAnswer:\nAnswer:\nAnswer:\nAnswer:\nAnswer:\nAnsw",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 85,
+    "needle": "8794397",
+    "ok": true,
+    "out": "(Example: 8794397)\nAnswer:\n8794397\nPassage:\nThe Magic Number",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "8308609",
+    "ok": true,
+    "out": "The magic number is 8308609. \n\nThe magic number is 8308609. ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "7862691",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 7862691. \n\nThe ",
+    "prompt_tokens": 32041
+   }
+  ]
+ },
+ "niah_tli_far512_seed2": {
+  "score": 0.7,
+  "n": 20,
+  "gen_s": 997.2,
+  "samples": [
+   {
+    "depth": 5,
+    "needle": "6063410",
+    "ok": true,
+    "out": "6063410\n\nThe magic number is 6063410.\n\nThe magic number is 6",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 5,
+    "needle": "5679950",
+    "ok": true,
+    "out": "The magic number is 5679950.\nPassage:\nHigh School Confidenti",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 15,
+    "needle": "8007673",
+    "ok": true,
+    "out": "The magic number is 8007673.\nThe magic number is 8007673.\nTh",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 15,
+    "needle": "7307033",
+    "ok": false,
+    "out": "(Example: 123456789)\nAnswer:\n123456789\nPassage:\nThe Magic Nu",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 25,
+    "needle": "7614631",
+    "ok": false,
+    "out": "(1)\nAnswer:\n(1)\nPassage:\nThe world's first computer, the Man",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 25,
+    "needle": "9869577",
+    "ok": true,
+    "out": "(1) 9869577 (2) 9869577 (3) 986957",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 35,
+    "needle": "1396500",
+    "ok": false,
+    "out": "What is the magic number mentioned in the passage? Answer wi",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 35,
+    "needle": "9699669",
+    "ok": true,
+    "out": "The magic number is 9699669.\n\nThe magic number is 9699669.\n\n",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 45,
+    "needle": "1459115",
+    "ok": false,
+    "out": "The passage discusses the challenges of medical search engin",
+    "prompt_tokens": 32040
+   },
+   {
+    "depth": 45,
+    "needle": "3464422",
+    "ok": true,
+    "out": "The number is 3464422.\n\nWhat is the total amount requested f",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 55,
+    "needle": "7142287",
+    "ok": true,
+    "out": "7142287\n\nWhat is the name of the organization that is respon",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 55,
+    "needle": "4332759",
+    "ok": false,
+    "out": "(1 point)\nWhat is the name of the character who is the femal",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "4886634",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 4886634.\nOkay, ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 65,
+    "needle": "6625156",
+    "ok": true,
+    "out": "The magic number is 6625156.\nPassage:\nThe magic number is 66",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 75,
+    "needle": "2100295",
+    "ok": true,
+    "out": "Answer:\n2100295\nPassage:\nThe Magic Number\nThe magic number i",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 75,
+    "needle": "8027301",
+    "ok": false,
+    "out": "1234567890\nPassage:\nThe Magic Number\nThe Magic Number is a n",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 85,
+    "needle": "4782929",
+    "ok": true,
+    "out": "(Answer: 4782929)\nAnswer:\n4782929\nPassage:\nThe Department of",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 85,
+    "needle": "8794397",
+    "ok": true,
+    "out": "(Example: 8794397)\nAnswer:\n8794397\nPassage:\nThe Magic Number",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "8308609",
+    "ok": true,
+    "out": "The magic number is 8308609. \n\nThe magic number is 8308609. ",
+    "prompt_tokens": 32041
+   },
+   {
+    "depth": 95,
+    "needle": "7862691",
+    "ok": true,
+    "out": "The magic number mentioned in the passage is 7862691. \n\nThe ",
+    "prompt_tokens": 32041
+   }
+  ]
  }
 }

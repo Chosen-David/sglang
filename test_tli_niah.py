@@ -110,7 +110,7 @@ def main():
     tag = f"niah_{backend}"
     if os.environ.get("NIAH_TAG"):  # 变体（如 far 预算扫描）不覆盖默认键
         tag = os.environ["NIAH_TAG"]
-    rng = random.Random(1234)
+    rng = random.Random(int(os.environ.get("NIAH_SEED", 1234)))
 
     from transformers import AutoTokenizer
 
