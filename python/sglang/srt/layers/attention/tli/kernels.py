@@ -340,10 +340,11 @@ def tli_l1_score_batched(
 @triton.jit
 def _tli_l2_score_batched_dual_kernel(
     q2_ptr, kq_ptr, sc_ptr, mn_ptr, rows_ptr, tok_ptr,
-    far_ptr, near_ptr, far_hi_ptr, sw_lo_ptr,
+    far_ptr, near_ptr, near_tok_ptr, far_hi_ptr, sw_lo_ptr, ps_ptr, pf_ptr,
     HKV: tl.constexpr, ND2: tl.constexpr,
     TC: tl.constexpr,
     S_CAP, FAR_LO, CHUNK: tl.constexpr,
+    NEARC: tl.constexpr, WNCAP: tl.constexpr,
 ):
     a = tl.program_id(0)
     c0 = tl.program_id(1) * CHUNK
@@ -369,10 +370,29 @@ def _tli_l2_score_batched_dual_kernel(
     in_far = (pos >= FAR_LO) & (pos < far_hi)  # [CHUNK]
     in_near = (pos < sw_lo) & (~in_far)
     far_v = tl.where(in_far[:, None], s, float("-inf"))  # [CHUNK, HKV]
-    near_v = tl.where(in_near[:, None], s, float("-inf"))
     o_off = a * HKV * TC + offs_h[None, :] * TC + offs_c[:, None]
     tl.store(far_ptr + o_off, far_v, mask=cm[:, None])
-    tl.store(near_ptr + o_off, near_v, mask=cm[:, None])
+    if NEARC:
+        # near 池压缩直写（M8-topk）：near 有限项 = tok_c 升序下的
+        # 前缀 [0, ps)（sink）∪ 后缀 [pf, pn)（far_hi..sw_lo 带）。
+        # slot 确定性：前缀 slot = c；后缀 slot = ps + (c - pf)。
+        # 上界 WNCAP = far_lo + (near_len - sliding_window)，静态形状进图。
+        ps = tl.load(ps_ptr + a)
+        pf = tl.load(pf_ptr + a)
+        slot = tl.where(pos < FAR_LO, offs_c, ps + (offs_c - pf))
+        nm = in_near & cm
+        # near 分数 [CHUNK, HKV] → [n, Hkv, WNCAP]
+        near_v = tl.where(in_near[:, None], s, float("-inf"))
+        tl.store(
+            near_ptr + a * HKV * WNCAP + offs_h[None, :] * WNCAP + slot[:, None],
+            near_v,
+            mask=nm[:, None],
+        )
+        # near token 位置（每行一份；pad 值 S_cap 哨兵由 full 初始化兜底）
+        tl.store(near_tok_ptr + a * WNCAP + slot, pos, mask=nm)
+    else:
+        near_v = tl.where(in_near[:, None], s, float("-inf"))
+        tl.store(near_ptr + o_off, near_v, mask=cm[:, None])
 
 
 def tli_l2_score_batched_dual(
@@ -386,22 +406,48 @@ def tli_l2_score_batched_dual(
     far_hi: torch.Tensor, # [n] int64 far 池上界（per-row device）
     sw_lo: torch.Tensor,  # [n] int64 滑窗下界（per-row device）
     chunk: int = 128,
+    near_compact: bool = False,
+    wncap: int = 0,       # near 压缩静态宽度（= far_lo + near_len - sliding_window）
+    sent: int = 0,        # near_tok pad 哨兵（= S_cap）
 ):
-    """返回 (far_sc, near_sc) [n, Hkv, Tc] fp32（池外 -inf，与 eager 的
-    s2.masked_fill(~in_far/~in_near) 逐位一致；topk 输入等价 → 输出 torch.equal）。
+    """返回 (far_sc, near_sc)。默认 near_sc [n, Hkv, Tc]（池外 -inf，与 eager
+    逐位一致）。near_compact=True 时返回 (far_sc [n,Hkv,Tc],
+    near_sc_c [n,Hkv,wncap], near_tok_c [n,wncap])——near 有限项以确定性
+    slot 压缩（前缀 sink + 后缀近带），pad 为 -inf / sent；topk 在 wncap
+    宽度上进行（near 池静态上界 2048 vs Tc 66K，省 near topk ~30×）。
     CHUNK=128 实测最优（0.43ms vs 512 的 1.06ms）：双输出 tile 使寄存器
     压力比单输出版更早触顶，512 即溢出到 local memory。"""
     n, Hkv, nd2 = q2.shape
     Tc = tok_c.shape[1]
     far_sc = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=q2.device)
+    if near_compact:
+        near_sc = torch.full((n, Hkv, wncap), float("-inf"),
+                             dtype=torch.float32, device=q2.device)
+        near_tok = torch.full((n, wncap), sent, dtype=torch.int64, device=q2.device)
+        # ps/pf：tok_c 升序下的前缀计数（sink 数 / far 池外下界计数）
+        ps = (tok_c < far_lo).sum(dim=-1)
+        pf = (tok_c < far_hi.view(-1, 1)).sum(dim=-1)
+        grid = (n, triton.cdiv(Tc, chunk))
+        _tli_l2_score_batched_dual_kernel[grid](
+            q2, kq_q, kq_sc, kq_mn, rows, tok_c,
+            far_sc, near_sc, near_tok,
+            far_hi.to(torch.long).contiguous(),
+            sw_lo.to(torch.long).contiguous(),
+            ps.to(torch.int32).contiguous(), pf.to(torch.int32).contiguous(),
+            HKV=Hkv, ND2=nd2, TC=Tc, S_CAP=kq_q.shape[1], FAR_LO=far_lo,
+            CHUNK=chunk, NEARC=True, WNCAP=wncap, num_warps=8,
+        )
+        return far_sc, near_sc, near_tok
     near_sc = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=q2.device)
     grid = (n, triton.cdiv(Tc, chunk))
     _tli_l2_score_batched_dual_kernel[grid](
         q2, kq_q, kq_sc, kq_mn, rows, tok_c,
-        far_sc, near_sc, far_hi.to(torch.long).contiguous(),
+        far_sc, near_sc, near_sc,  # near_tok 占位（NEARC=0 不写）
+        far_hi.to(torch.long).contiguous(),
         sw_lo.to(torch.long).contiguous(),
+        rows, rows,  # ps/pf 占位（NEARC=0 不读）
         HKV=Hkv, ND2=nd2, TC=Tc, S_CAP=kq_q.shape[1], FAR_LO=far_lo,
-        CHUNK=chunk, num_warps=8,
+        CHUNK=chunk, NEARC=False, WNCAP=wncap or 16, num_warps=8,
     )
     return far_sc, near_sc
 

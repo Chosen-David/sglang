@@ -894,8 +894,14 @@ class TLIIndexer:
         # 20.5→0.48ms 43×，s2 对拍 2.4e-07；哨兵位置垃圾分数同 eager 语义）
         # M8-KernelC：非 skip_far 层走双池直写（far/near -inf 烘进写出口径，
         # 消除 P6 masked_fill 链——池边界即因果边界，topk 输入逐位一致）
+        # M8-topk：near 池压缩直写（near 有限项仅 ~920/65728——near topk 98.6%
+        # 在扫 -inf；静态上界 WNCAP = sink + (near_len - sliding_window) = 2048，
+        # topk 宽度 30×↓；slot 确定性（前缀 sink slot=c / 后缀近带 slot=ps+c-pf）
+        # 保持 CUDA graph replay 逐位一致）
         q2 = self._q_refine(q).reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
         far_sc = near_sc = None
+        near_tok_c = None
+        WNCAP = far_lo + max(0, p.near_len - p.sliding_window)
         if (
             getattr(p, "use_l2_batched_kernel", False)
             and n >= 2
@@ -908,10 +914,22 @@ class TLIIndexer:
                     tli_l2_score_batched_dual,
                 )
 
-                far_sc, near_sc = tli_l2_score_batched_dual(
-                    q2, kq_pool, kq_sc_pool, kq_mn_pool, rows_l, tok_c,
-                    far_lo, far_hi_t, sw_lo_t,
+                use_nc = (
+                    getattr(p, "use_near_compact", False)
+                    and WNCAP > 0
+                    and WNCAP < Tc
                 )
+                if use_nc:
+                    far_sc, near_sc, near_tok_c = tli_l2_score_batched_dual(
+                        q2, kq_pool, kq_sc_pool, kq_mn_pool, rows_l, tok_c,
+                        far_lo, far_hi_t, sw_lo_t,
+                        near_compact=True, wncap=WNCAP, sent=S_cap,
+                    )
+                else:
+                    far_sc, near_sc = tli_l2_score_batched_dual(
+                        q2, kq_pool, kq_sc_pool, kq_mn_pool, rows_l, tok_c,
+                        far_lo, far_hi_t, sw_lo_t,
+                    )
             else:
                 from sglang.srt.layers.attention.tli.kernels import (
                     tli_l2_score_batched,
@@ -979,7 +997,9 @@ class TLIIndexer:
         #   W_forced ≤ sliding_window
         # 被裁剪的 lane 落哨兵，softmax 前由消费方屏蔽
         W_far = min(p.far_tokens, far_cap, Tc)
-        W_near = min(p.token_budget, Tc)
+        # near 压缩路径：topk 宽度 = 静态压缩宽（≤ WNCAP），输出拼接宽度
+        # 与压缩路径绑定（CUDA graph 捕获时固定）
+        W_near = min(p.token_budget, WNCAP if near_tok_c is not None else Tc)
         W_forced = min(p.sliding_window, Tc)
 
         if far_sc is None:
@@ -991,7 +1011,12 @@ class TLIIndexer:
             in_near = valid & causal & ~in_far & (tok < sw_lo_t.view(-1, 1))
             far_sc = s2.masked_fill(~in_far.unsqueeze(1), float("-inf"))
             near_sc = s2.masked_fill(~in_near.unsqueeze(1), float("-inf"))
-        tok_e = tok_c.unsqueeze(1).expand(n, Hkv, Tc)
+        tok_e = tok_c.unsqueeze(1).expand(n, Hkv, Tc)  # far 分支 gather 源
+        near_tok_e = (
+            near_tok_c.unsqueeze(1).expand(n, Hkv, WNCAP)
+            if near_tok_c is not None
+            else tok_e
+        )
         parts = []
         if W_far > 0:
             i_f = torch.topk(far_sc, W_far, dim=-1).indices
@@ -1008,7 +1033,9 @@ class TLIIndexer:
         if W_near > 0:
             i_n = torch.topk(near_sc, W_near, dim=-1).indices
             sc_n = torch.gather(near_sc, 2, i_n)
-            sel_n = torch.gather(tok_e, 2, i_n)
+            # near 压缩路径：gather 源 = near_tok_c（静态宽 WNCAP）；
+            # 否则 tok_c（宽 Tc）。topk 索引域与 gather 源宽度一致
+            sel_n = torch.gather(near_tok_e, 2, i_n)
             rank_n = torch.arange(W_near, device=device).view(1, 1, -1) < k2n_t.view(
                 -1, 1, 1
             )

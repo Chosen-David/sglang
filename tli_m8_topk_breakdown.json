@@ -1,0 +1,13 @@
+{
+ "full_ms": 1.8081,
+ "l1_kernel_ms": 0.0634,
+ "l1_block_topk_ms": 0.0732,
+ "compact_ms": 0.0503,
+ "dual_kernel_ms": 0.3854,
+ "far_topk_ms": 0.4674,
+ "near_topk_ms": 0.4606,
+ "dual_topk_nosort_ms": 0.8697,
+ "tail_ms": 1.0244,
+ "far_finite_frac": 0.7939,
+ "near_finite_frac": 0.0136
+}

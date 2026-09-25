@@ -85,6 +85,10 @@ class TLIProfile:
         # 消除 P6 masked_fill 链与 P7 的 far_sc/near_sc 物化；关闭可回退
         #   s2 单输出路径做 A/B 对拍）----
         self.use_l2_dual_kernel: bool = _env_bool("SGLANG_TLI_L2D_KERNEL", True)
+        # ---- M8-topk：near 池压缩直写（near topk 输入 98.6% 为 -inf——
+        # near 有限项仅 ~920/65728；静态上界 WNCAP=sink+(near_len-sw)=2048，
+        # topk 宽度 30×↓；slot 确定性保 CUDA graph 逐位一致）----
+        self.use_near_compact: bool = _env_bool("SGLANG_TLI_NEAR_COMPACT", True)
         # ---- M8：候选压实块展开 kernel（P4：topk-min 全排序 0.88ms →
         # cumsum+块展开 ~0.3-0.5ms；哨兵可在中段，下游 valid 掩掉，有效集一致）----
         self.use_compact_kernel: bool = _env_bool("SGLANG_TLI_COMPACT_KERNEL", True)

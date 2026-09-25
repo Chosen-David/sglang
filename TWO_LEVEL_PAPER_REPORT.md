@@ -894,6 +894,41 @@ allclose + topk 块集合一致率；结果 `tli_l1_tc_bench.json`）：
 化），L1/L2 打分双 kernel 均已带宽饱和——「级联 kernel 化到哪一级为止」
 （§4.4 原则 1）的又一实证。
 
+### 8b-19. M8-topk：near 池压缩直写——P7 瓶颈腰斩（2026-09-26，#50）
+
+归因（`bench_m8_topk.py`，生产形状 bs32/131K，`tli_m8_topk_breakdown.json`）：
+select_decode_batched 全函数 1.808ms 中两个分区 topk 占 0.93ms（51%）；
+**near topk 输入 98.6% 是 -inf**（near 池有限项仅 ~920/65728——sink 128 +
+近带候选），torch.topk 对全宽 65728 列做 radix 选择纯属浪费；far 池 79%
+有限（连续 band [128, 52287]）无此问题。
+
+**实现（near 池压缩直写，`SGLANG_TLI_NEAR_COMPACT=1` 默认开）**：
+KernelC dual 加 NEARC constexpr 分支——near 有限项 = tok_c 升序下的前缀
+[0, ps)（sink）∪ 后缀 [pf, pn)（far_hi..sw_lo 带），slot 确定性（前缀
+slot=c / 后缀 slot=ps+c−pf，ps/pf 由两个 torch sum 前缀计数算出）；
+直写静态宽 **WNCAP = far_lo + (near_len − sliding_window) = 2048** 的
+near_sc_c [n,Hkv,2048] + near_tok_c [n,2048]（-inf/哨兵 pad）。near topk
+在 2048 宽上进行（30× 宽度削减）；输出拼接宽度不变（CUDA graph 静态形状
+保持）。
+
+**结果**：
+
+| 指标 | off | on |
+|---|---|---|
+| select_decode_batched 全函数 | 1.799 | **1.458 ms（1.23×）** |
+| 对拍（uniform 131K / mixed 3K-131K / short 3K-6K） | — | **三场景全部 torch.equal 精确一致**（tie 顺序都保持——near 压缩保序） |
+
+回归：M9（PCA pipeline，含 select 集合一致）/ M10（prefill 双口径对拍）/
+M5 smoke（CUDA graph 捕获+replay）全过。e2e 影响上界 = select 占 decode
+step 比例（9.9K 档 1.8ms/99ms ≈ 1.8%）→ 节省 0.35ms < 单次测量噪声，
+**e2e 主表不重跑**（测量学原则：不为噪声级差异重跑 headline，§8b-14 教训）。
+
+**剩余瓶颈（结构性，划界）**：far topk 0.467ms（k=256 over ~52K 有限项，
+radix 机器多 pass）+ KernelC dual 0.385ms（135MB 写 + 270MB 读 = 1.05TB/s，
+转置写 stride 264KB 限制）+ L1 块 topk 0.073ms。far topk 的进一步压缩需
+自定义 radix-select kernel（算法级，~0.3ms 上限收益）——与 prefill topk
+同性质，暂不做，如实划界。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
