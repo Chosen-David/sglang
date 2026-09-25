@@ -27,23 +27,55 @@ TLI 三创新点（A 非对称压缩 / B' 分区预算 / D' 层跳过）→ 三�
 自身 headline（测量学贡献）。
 【素材：报告§1、§8b-12/13/15/16】
 
-## 1. Introduction（1.5 页）
+## 1. Introduction（1.5 页）【正文 v1】
 
-叙事链：
-1. **问题**：长上下文 LLM decode 中 KV cache 读流量 ∝ S，HBM 带宽成为第一瓶颈
-   （bs=32×131K 时 triton ~620GB/步纯 HBM）。【素材：报告§8b-14 翻转点分析】
-2. **现有路径及其代价**：(a) 训练型 indexer（DSA）需 2.1B token warm-up，部署成本高；
-   (b) training-free（Quest/TIA）在 token 级精筛开销或质量上受限。
-   【素材：报告§8b-6 三方对比表——Quest 索引最快但 1KB/token 存储 + LB −2.2 分；
-   DSA 0.5ms 需训练；TLI 每 token MAC 32×↓ 免训】
-3. **核心洞察（H1）**：注意力质量的真实形态是 sink/near/far 三层分解（0.37-0.71 /
-   0.16-0.29 / 0.02-0.29），dense top-1024 的 mass 覆盖恒为 1.0000——「覆盖率」
-   口径本身是陷阱，竞争区仅占总 mass 0.515。【素材：报告§3 修正②、fig1】
-4. **本文贡献**（四条，对应 §4/§5/§6/§7）：
-   - 非对称压缩定律 + 两级预算选择设计（A/B'/D'）
-   - 生产级系统实现（sglang 全链路：4bit 索引、批量 kernel 组合、CUDA graph）
-   - 双口径诚实评估（kernel microbench + e2e；LongBench 均值 + NIAH 极端）
-   - 12 项 negative results → design decisions 映射（护城河）
+长上下文 LLM 的 decode 阶段，每生成一个 token 都要读全部 KV cache：读流量
+∝ S（上下文长度），HBM 带宽取代算力成为第一瓶颈——bs=32 × S=131K 时，
+一个 dense decode step 的纯 KV 读流量约 620GB。稀疏注意力索引（每步只检索
+top-K 个 token）是公认解法，但现有工作在部署现实面前各自让渡了关键性质：
+**训练型 indexer**（DSA）质量最好，却需要 2.1B token 的 warm-up 训练；
+**training-free indexer**（Quest）索引最快（µs 级），代价是 ~1KB/token 的
+索引存储（3× TLI）与 page 粒度带来的 −2.2 分 LongBench 损失；
+**同门第一代 TIA** 免训且 token 粒度，但全局名额竞争使选择集被分数噪声
+驱动（§3.2）。
+
+本文的出发点是一个测量学发现：**「注意力覆盖率」这个被广泛使用的评估
+口径本身是陷阱**。对 10 条真实 trace 的位置分解显示（fig1），attention
+mass 呈 sink（0.37–0.71）/ near（0.16–0.29）/ far（0.02–0.29）三层结构；
+在此结构下 dense top-1024 的 mass 覆盖恒为 1.0000——任何保留 sink+滑窗
+的方法在该口径下都与 dense 无法区分，竞争区（占总 mass 仅 0.515）才是
+选择质量的战场。基于修正后的口径，我们系统测得注意力对降维的容忍度在
+两级选择间**非对称**：L1 粗筛可压到 32→16 维不掉点，L2 细筛的选择口径
+8 维即崩溃（−32%）、投影口径却可半维同质——信息瓶颈在表示方式而非维数。
+
+**TLI** 把上述规律工程化为 training-free 的两级索引器：L1 用
+position-stable 低频尾维子空间做块级上界粗筛（免校准），L2 用 PCA 投影
+4bit 做 token 级精筛（校准成本 2048 token）；far/near 分区预算（B'）
+把名额分配从分数噪声驱动改为预算驱动；离线校准的层跳过（D'）免去
+far-empty 层的全部远端检索（跳 13/36 层，索引 FLOP 4.88×）。系统侧，
+TLI 以 sglang attention backend 形式全链路集成：4bit 三张量索引逐位
+一致、四 kernel 批量组合（select 12.9×）、CUDA graph 兼容——decode
+原型→生产级累计 12.5×（323 tok/s@bs32）。
+
+**贡献**（四条，对应 §4–§7）：
+
+1. **设计**：非对称压缩定律（两级对降维/表示的容忍度分离）+ 由其直接
+   工程化的 A/B'/D' 三组件设计（§4）；
+2. **系统**：生产级集成——4bit 索引存储、批量 kernel 组合、CUDA graph
+   三方法契约，每步配逐位/格点级对拍（§5）；
+3. **双口径诚实评估**：LongBench 均值（49.92 vs FullKV 50.36）+ NIAH
+   极端（0.625）两端；kernel microbench（同机三方，Quest/DSA 官方
+   kernel 原样接入）+ e2e 吞吐两层都测（§6）；
+4. **negative results 护城河**：12 项 No-Go 假设（聚类代表、L1 分区、
+   在线 gate、跨层共享 PCA 基、CPU 捞取……）逐项映射到 design
+   decisions（§4/§7），加两例主动复测撤回自身 headline 的测量学案例
+   （§7）。
+
+全部结论建立在 30+ 个实测假设之上——每个设计决策都可追溯到一次
+带对拍的实验，每个被否决的方向都有数字。TLI 的诚实边界同样明确：
+10K/30K 档 decode 尚未跑赢 dense（慢 3.1×/1.5×），收益位在 S≥44K
+翻转点之后的长上下文大 batch 区间（fig9c），以及 training-free + 低索引
+存储的部署约束区间。
 
 ## 2. Background & Related Work（1 页）
 
