@@ -605,17 +605,19 @@ kernel 级。
 | §3 Motivation | §3/§8b-7 | fig1、E4c |
 | §4.1 A | §8b-7/E3/E3b/32B§8 | fig2 |
 | §4.2 B' | §8b-7/E4c/§8b-16 | fig3、tli_niah_results.json |
-| §4.3 D' | §8/E6/gate 失败史 | fig4 |
+| §4.3 D' | §8/E6/E6b/gate 失败史 | fig4、e6b_heldout_gate.json |
 | §5 Impl | §8b-2~5/8b-8/8b-12/8b-13/8b-15 | — |
 | §6.2 质量 | §4 主表/§8b-16 | fig6、tli_niah_results.json |
 | §6.3 kernel | §8b-6 | kernel_comparison_indexers.json |
 | §6.4 e2e | §8b-13/8b-14/8b-15 | fig9、tli_m8_e2e_results.json、tli_m10_bench.json、tli_m8_e2e_long_results.json |
-| §7 测量学 | §8b-14 修正段/§8b-16 修正段 | — |
+| §7 测量学 | §8b-14 修正段/§8b-16 修正段/§8b-17 | — |
 
 ## 写作待办（并入任务链）
 
-1. 【缺】H100 主表（S=131K×bs16/32）——§6.4 headline
-2. 【缺】held-out gate 验证——§4.3 审稿防御
+1. 【缺】H100 主表（S=131K×bs16/32）——§6.4 headline（机器申请中）
+2. ~~held-out gate 验证~~ ✅（E6b LOO 16 trace：TH=0.01 prec mean 0.990，
+   narrativeqa 单点 0.923 + 误跳 far 占 0.29% + e2e 不掉分交叉验证——§4.3 已回填）
 3. 【缺】RULER 全量（若 H100 短缺，NIAH 双口径可先行撑住质量叙事）
 4. ~~图表升级 fig9~~ ✅（make_fig9.py：M3→M8 轨迹 + M10 prefill 双档 + S 收窄链含 44K 翻转点外推）
-5. 多 seed 置信区间（主表 200 样本已有；e2e 曲线单次——按测量学 §7 原则标注）
+5. 多 seed 置信区间（主表 200 样本已有；NIAH 双 seed 已测；e2e 曲线单次——按测量学 §7 原则标注）
+6. ~~正文八节+摘要~~ ✅ 全部【正文 v1】（2026-09-26，b3c10336a→b5c228f75）
