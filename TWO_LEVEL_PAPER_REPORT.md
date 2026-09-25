@@ -710,33 +710,34 @@ watchdog 1800（30K 稀疏 prefill 数百秒）。显存账：KV=144KB/token →
 ≈95GB（mem_frac 0.7）；bs=32×30K 需 155GB 超卡且唯一长文档不足 32 个——
 **bs=16 × 30K 即 Qwen3-8B context 上限内的最大可行并发档**。
 
-**完整结果（30K token，graph decode full，N=64）**：
+**完整结果（30K token，graph decode full，双侧 N=256 复测口径）**：
 
-| bs | tli prefill | **tli decode** | tli tok/s | triton prefill | triton decode | triton tok/s |
-|---|---|---|---|---|---|---|
-| 8 | 786.8 s | 66.1 ms/step | 121.0 | 58.1 s | 25.4 ms/step | 315.6 |
-| 16 | 1564.9 s | **47.7 ms/step** | **335.3** | 114.9 s | **48.1 ms/step** | 332.4 |
+| bs | tli prefill (M8→M10) | tli decode | triton prefill | triton decode | tli/triton decode |
+|---|---|---|---|---|---|
+| 8 | 786.8 → **373.0 s** | 45.1 ms/step | 57.7 s | 30.0 ms/step | 1.50× |
+| 16 | 1564.9 → **741.4 s** | 67.1 ms/step | 114.9 s | 43.4 ms/step | 1.55× |
 
-- **headline：bs=16 × 30K 下 tli decode 与 dense triton 图基线打平**
-  （47.7 vs 48.1 ms/step；335.3 vs 332.4 tok/s，tli 略胜）——**长上下文
-  高并发是 TLI 收益展示位**的首次系统级实证，与 M8 microbench（12.9×）
-  的口径互补。
-- **趋势结构性利好 tli**：bs 8→16 时 triton decode 线性翻倍（25.4→48.1，
-  attention 流量 ∝ bs×S），tli 反而下降（66.1→47.7——select 池/launch
-  成本被 batch 摊销，attention 流量恒定 ∝ bs×K2=1024）。外推：bs 更大或
-  S 更长（H100/128K 主表口径）时 tli 显著反超；本机 30K×bs16 恰为平衡点
-  附近（H20 算力仅 H100 15%，MLP 项占比更大压低了相对差距）。
-- **诚实口径 1**：每配置单次测量（M5 经验：波动大须多轮中位数，bs=8 的
-  66.1 与 bs=16 的 47.7 反常关系可能含波动成分——但方向性结论由 triton
-  的线性翻倍对照锚定）。
-- **诚实口径 2（prefill 短板）**：tli prefill 787-1565s vs triton 58-115s
-  = **13.6× 慢**——`select_batched` 仍是全 eager（M8 四 kernel 只接了
-  decode 侧 `select_decode_batched`），且慢于 9.9K→30K 线性外推（126.6s×3
-  =380s）约 2×，M7 快路径在全宽 einsum 与 fine [n,Hkv,S] 物化的 O(Nq×S)
-  成本在 30K 尺度显性化。**prefill kernel 化 = 下一个里程碑靶点（M10）**：
-  候选方向 ①把 KernelA（gather+dequant+GEMV fused）接入 select_batched
-  快路径替代全宽 einsum+反量化表；②fine 矩阵改紧凑候选池（Tc 宽）避免
-  [n,Hkv,S] 物化；③kq_f 反量化表跨 chunk 复用（当前每 chunk 重建）。
+- **测量学修正（重要，诚实口径）**：本节初版（N=64 差分法）曾报
+  「bs=16 tli decode 47.7 ≈ triton 48.1 打平」——**该结论被 N=256 双侧
+  复测撤回**。差分法（decode = 完整跑总时长 − 单独 prefill）在数百秒
+  prefill 下信噪比 <1：decode 信号仅 3-4s，prefill 段间波动（~1%）即
+  4-8s。N=256 复测（decode 信号 8-17s，信噪比 ~3）双侧结果：tli 45.1/
+  67.1、triton 30.0/43.4 ms/step——tli bs 扩展比 1.49× 与 9.9K 口径
+  （43.4→64.7 = 1.49×）完全一致，交叉验证可信；初版 tli「66.1→47.7
+  反降」与 triton「25.4→48.1 线性翻倍」均为噪声假象（复测 triton 扩展
+  比 1.45×，非 1.89×）。
+- **真实图景：30K 下 tli decode 稳定慢于 dense triton 基线 ~1.5×，未打平**。
+  扩展比 tli 1.49× ≈ triton 1.45×——30K/bs16 档两者 decode step 均被
+  MLP 前向主导，attention 流量差异（tli ∝K2=1024 恒定 vs triton ∝bs×S）
+  被稀释；与 9.9K 口径（bs16 慢 ~5×）构成「S 增长差距收窄 5×→1.5×」的
+  单调链。**理论翻转点在 S≈128K（attention 成 step 主导项后 triton 流量
+  ∝S 显性化，tli 恒定）**——H100 主表口径（bs≥16 × S=128K）是收益验证位。
+- **诚实口径 1**：每配置单次测量（M5 经验：波动大须多轮中位数）；
+  prefill 数字双侧两版一致（57.7/114.9 vs 58.1/114.9，<1%）。
+- **诚实口径 2（prefill 短板 → M10 已修）**：tli prefill 787-1565s vs
+  triton 58-115s = 13.6× 慢——`select_batched` 全 eager + M7 快路径在
+  30K 失效（见 §8b-15 归因）。**M10 kernel 化后双档 2.11×（373/741s），
+  短板收窄至 ~6.4×**，剩余为结构性 topk（~67%）+ 模型本体前向。
 
 ### 8b-15. M10：prefill select_batched 慢路径 kernel 化（#37）
 
@@ -766,18 +767,21 @@ M9/M5 回归全过。
 
 **e2e 兑现（30K token，同 §8b-14 口径）**：
 
-| bs | M8 prefill | **M10 prefill** | 加速 |
-|---|---|---|---|
-| 8 | 786.8 s | **373.0 s** | 2.11× |
-| 16 | 1564.9 s | **741.4 s** | 2.11× |
+| bs | M8 prefill | **M10 prefill** | 加速 | decode（N=256，未改路径） |
+|---|---|---|---|---|
+| 8 | 786.8 s | **373.0 s** | 2.11× | 45.1 ms/step |
+| 16 | 1564.9 s | **741.4 s** | 2.11× | 67.1 ms/step |
 
 - **两档加速比完全一致（2.11×）**——慢路径成本 ∝ bs×S 的线性项被消除，
   剩余为结构性 topk + 不可压的模型本体前向。
-- **诚实口径 3（decode 差分法失效）**：N=64 时 decode 信号仅 3-4s，而数百
-  秒 prefill 的段间波动（~1%）即 4-8s，**信噪比 <1**——M10 复跑两档 decode
-  差分均为负值（−0.15/−3.06s），M8 版的正差分（66.1/47.7）同样不可信。
-  M10 未触碰 decode 代码路径（select_decode_batched 原样），decode 数字
-  引用 §8b-13 的 9.9K 口径（prefill 短、差分信噪比健康）+ N=256 复测。
+- **诚实口径 3（decode 差分法失效 → N=256 复测修正）**：N=64 时 decode
+  信号仅 3-4s，而数百秒 prefill 的段间波动（~1%）即 4-8s，**信噪比 <1**
+  ——M10 复跑两档 decode 差分均为负值（−0.15/−3.06s），M8 版的正差分
+  （66.1/47.7）同样不可信。N=256 复测（`LONG_N_DECODE=256`，信噪比 ~3）
+  双侧：**tli 45.1/67.1、triton 30.0/43.4 ms/step**——tli bs 扩展比
+  1.49× 与 9.9K 口径完全一致，交叉验证可信；§8b-14 的「打平」headline
+  已据此撤回（见该节测量学修正段）。M10 未触碰 decode 代码路径，
+  45.1/67.1 同时是 M8 版 30K decode 的可信替换值。
 - **剩余瓶颈（结构性）**：kernel 化后 topk radix 机器 ~112ms/67%（far
   k=256 + near k=768 over Tc≈33K 候选）；对比 triton prefill 58-115s 仍慢
   ~6.5×，其中模型本体前向占非 select 部分大头——select 侧继续压缩需
@@ -801,6 +805,9 @@ M9/M5 回归全过。
    _sparse_extend_one 随机行 gather 576GB/s→HBM 打满）+ 141GB 大显存专属实验轴
    （bs=64×S=131K 只有此卡放得下）+ cluster/L2 residency 探索，microbench 前后对比；
    **M8 的打分 kernel 现在有 r=16 投影口径可用（M9），打分 GEMV FLOP 减半待此兑现**
+7b. ~~M10 prefill kernel 化~~ ✅（§8b-15：快路径失效边界归因 + M8 全套移植，
+   微基准 7.0× / e2e prefill 双档 2.11×；decode 差分法失效教训 → N=256 双侧
+   复测修正 §8b-14 结论——30K decode 稳定慢 ~1.5× 未打平，翻转点 S≈128K）
 8. H100 吞吐主表（机器申请中；H20 层已备好算力无关性论证：H20 TC 仅 H100 15% 仍拿到质量/流量收益）+ RULER/NIAH 补评测（对齐 Quest/SnapKV/HISA 论文数据集口径）
 9. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
 10. ~~Qwen3-32B 泛化复验~~ ✅（§8：A Go/D' Go 且更强/gate 判据修正为 negative result）+ 论文写作（骨架已定，主表已齐）

@@ -52,5 +52,41 @@
    "step_ms": -47.8,
    "tok_per_s": -334.6
   }
+ ],
+ "m8_long_tli_graph1_n256": [
+  {
+   "bs": 8,
+   "prompt_tokens": 30000,
+   "prefill_s": 370.235,
+   "decode_s": 11.557,
+   "step_ms": 45.1,
+   "tok_per_s": 177.21
+  },
+  {
+   "bs": 16,
+   "prompt_tokens": 30000,
+   "prefill_s": 734.317,
+   "decode_s": 17.186,
+   "step_ms": 67.1,
+   "tok_per_s": 238.33
+  }
+ ],
+ "m8_long_triton_graph1_n256": [
+  {
+   "bs": 8,
+   "prompt_tokens": 30000,
+   "prefill_s": 57.729,
+   "decode_s": 7.691,
+   "step_ms": 30.0,
+   "tok_per_s": 266.3
+  },
+  {
+   "bs": 16,
+   "prompt_tokens": 30000,
+   "prefill_s": 114.891,
+   "decode_s": 11.116,
+   "step_ms": 43.4,
+   "tok_per_s": 368.48
+  }
  ]
 }
