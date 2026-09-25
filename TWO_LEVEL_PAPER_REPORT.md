@@ -930,6 +930,52 @@ radix 机器多 pass）+ KernelC dual 0.385ms（135MB 写 + 270MB 读 = 1.05TB/s
 自定义 radix-select kernel（算法级，~0.3ms 上限收益）——与 prefill topk
 同性质，暂不做，如实划界。
 
+### 8b-20. M8-2b：KernelC dual 转置写 TMA/布局实验——写侧假设证伪 + CHUNK 形态调优 22%（2026-09-26，#51）
+
+§8b-19 划界时把 dual kernel 0.385ms 归因为「转置写 stride 264KB 限制」。
+本轮做完整证伪链（`bench_m8_tma.py` / `bench_m8_tma2.py` / `bench_m8_nw_ab.py`，
+结果 `tli_m8_tma_breakdown.json` / `tli_m8_tma_variants.json` / `tli_m8_nw_ab.json`）：
+
+**(a) 带宽分解证伪「写带宽」假设**：nostore（读+算）0.077ms + noload（写 only）
+0.107ms < full 0.359ms——写侧单独 70MB@0.65TB/s 并不慢；full 的超额时间 =
+**读写混合流 MC 排队惩罚**（写流与稀疏 gather 读流互相干扰），不是段粒度问题。
+
+**(b) 三个写优化变体全部 No-Go**（同 tile 地址集合，对拍 torch.equal）：
+
+| 变体 | 耗时 | 结论 |
+|---|---|---|
+| C0 转置写（生产） | 0.279 ms | — |
+| C1 tl.make_block_ptr 写 | 0.271 ms | −3%，噪声级 |
+| C2 TMA descriptor store（Triton 3.4 TensorDescriptor，H20 cc9.0） | 0.280 ms | 0——异步 bulk 不缓解混合流惩罚 |
+| C3 布局改 [n,Tc,Hkv] 连续写 | 0.268 ms | −4%；但 full-chain（+permute.contiguous 回转置）0.346ms 反慢——topk 读侧要求 [n,Hkv,Tc] |
+
+**TMA 方向如实划界 No-Go**：far_sc 写布局不是瓶颈（≤4%），转置写假设证伪。
+
+**(c) CHUNK×num_warps 形态失真教训（本轮最有价值的发现）**：arange 连续 tok_c
+形态的 sweep 选 128/4（0.310ms）；**真实稀疏 tok_c（compact 产物，块段间跳）**
+的 sweep 反转——CHUNK=64/nw=4 = 0.385ms vs 生产 128/8 = 0.493ms（**22%**）。
+机制：CHUNK=64 时每个 program 恰好覆盖一个候选块段（bs=64 → 8KB 连续
+gather），小粒度 program 在段间跳之间保住访存级并行；连续形态会把读侧
+L2 命中高估、误导 sweep。**铁律：kernel 调参 sweep 必须用真实 compact 产物**。
+
+**(d) grid/CHUNK 不同步 bug（无声丢写，对拍才暴露）**：收 CHUNK=64 时 wrapper
+的 grid 仍用 chunk 参数（默认 128）→ grid 只覆盖一半元素（514×64=32896 <
+Tc=65728）→ near band 后缀与半数 far **无声丢失**（far_sc 是 empty 分配，
+未写区域=垃圾分数）。表面症状是三场景有效集对称差 868。修复：near_compact
+分支 grid 独立 `cdiv(Tc, 64)`。教训：**constexpr 改 CHUNK 必须同步 grid**；
+empty+部分写模式下无越界、无 NaN——唯一防线是有效集对拍。
+
+**生产收益（`SGLANG_TLI_NEAR_COMPACT=1` 路径，CHUNK=64/nw=4）**：dual kernel
+0.493→0.385ms（22%）；select_decode_batched @bs32/131K 同轮环境
+1.70→1.545ms。回归：near compact 三场景 torch.equal / M9（131K 1.06×）/
+M10（双口径对拍）/ M5 smoke（CUDA graph）/ M8 e2e 全过。e2e 主表不重跑
+（同 §8b-19 口径：节省 0.11ms < 测量噪声）。
+
+**M8 H 卡优化收官**：TMA 写 No-Go（本轮）+ L1 TC 化 No-Go（§8b-18）+ 唯一
+落地 = CHUNK/warps 形态调优 22%。dual kernel 剩余时间 = 稀疏 gather 读侧
+（405MB，8KB 段间跳）+ 混合流惩罚，已达结构上限；进一步优化只有 far_sc
+物化消除（打分+topk fused radix-select，算法级）——维持划界。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）

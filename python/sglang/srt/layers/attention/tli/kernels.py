@@ -427,7 +427,13 @@ def tli_l2_score_batched_dual(
         # ps/pf：tok_c 升序下的前缀计数（sink 数 / far 池外下界计数）
         ps = (tok_c < far_lo).sum(dim=-1)
         pf = (tok_c < far_hi.view(-1, 1)).sum(dim=-1)
-        grid = (n, triton.cdiv(Tc, chunk))
+        # M8-2b 真实稀疏 tok_c sweep：CHUNK=64/nw=4 = 0.385ms vs 128/8 = 0.493ms
+        # （22%）。机制：每 program 恰覆盖一个块段（bs=64 → 8KB 连续 gather），
+        # 小粒度 program 保住稀疏段跳之间的访存级并行；arange 连续形态的 sweep
+        # 会误选 128/4（形态失真教训：sweep 必须用真实 compact 产物）。
+        # 注意 grid 必须与 CHUNK 同步（曾因 grid 用 chunk=128 而 CHUNK=64 只覆盖
+        # 一半元素 → near band 后缀/far 半区无声丢失，对拍对称差 868 才暴露）。
+        grid = (n, triton.cdiv(Tc, 64))
         _tli_l2_score_batched_dual_kernel[grid](
             q2, kq_q, kq_sc, kq_mn, rows, tok_c,
             far_sc, near_sc, near_tok,
@@ -435,7 +441,7 @@ def tli_l2_score_batched_dual(
             sw_lo.to(torch.long).contiguous(),
             ps.to(torch.int32).contiguous(), pf.to(torch.int32).contiguous(),
             HKV=Hkv, ND2=nd2, TC=Tc, S_CAP=kq_q.shape[1], FAR_LO=far_lo,
-            CHUNK=chunk, NEARC=True, WNCAP=wncap, num_warps=8,
+            CHUNK=64, NEARC=True, WNCAP=wncap, num_warps=4,
         )
         return far_sc, near_sc, near_tok
     near_sc = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=q2.device)

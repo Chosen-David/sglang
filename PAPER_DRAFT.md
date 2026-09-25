@@ -33,7 +33,7 @@ indexer: position-stable low-frequency tail dimensions for block-level upper
 bound filtering, PCA-projected 4-bit token-level refinement, far/near
 partitioned budgets, and offline-calibrated layer skipping. TLI is fully
 integrated into sglang with bit-exact 4-bit indexing, a four-kernel batched
-select (15.9×), and CUDA-graph compatibility—12.5× decode speedup over the
+select (15.0×), and CUDA-graph compatibility—12.5× decode speedup over the
 eager prototype. On LongBench-13, TLI scores 49.92 vs. FullKV 50.36; honest
 boundaries are reported end-to-end (crossover at S≈44K). All conclusions rest
 on 30+ measured hypotheses, each with parity checks, including two headline
@@ -67,7 +67,7 @@ position-stable 低频尾维子空间做块级上界粗筛（免校准），L2 �
 把名额分配从分数噪声驱动改为预算驱动；离线校准的层跳过（D'）免去
 far-empty 层的全部远端检索（跳 13/36 层，索引 FLOP 4.88×）。系统侧，
 TLI 以 sglang attention backend 形式全链路集成：4bit 三张量索引逐位
-一致、五 kernel 组合（select 15.9×，near 池压缩直写）、CUDA graph 兼容——decode
+一致、五 kernel 组合（select 15.0×，near 池压缩直写 + 块段粒度调优）、CUDA graph 兼容——decode
 原型→生产级累计 12.5×（323 tok/s@bs32）。
 
 **贡献**（四条，对应 §4–§7）：
@@ -81,7 +81,8 @@ TLI 以 sglang attention backend 形式全链路集成：4bit 三张量索引逐
    kernel 原样接入）+ e2e 吞吐两层都测（§6）；
 4. **negative results 护城河**：12 项 No-Go 假设（聚类代表、L1 分区、
    在线 gate、跨层共享 PCA 基、CPU 捞取……）逐项映射到 design
-   decisions（§4/§7），加两例主动复测撤回自身 headline 的测量学案例
+   decisions（§4/§7），加三例测量方法案例（两例主动复测撤回 headline、
+   一例 kernel 调参形态失真与无声部分覆盖 bug）
    （§7）。
 
 全部结论建立在 30+ 个实测假设之上——每个设计决策都可追溯到一次
@@ -353,7 +354,8 @@ cat 版每步 4.8GB memcpy（S=131K 实测）。paged 寻址经 req_to_token
 预分配 [R,cap]，R=请求数行池 + 堆行回收），select launch 数与 bs 无关。
 
 **四 kernel 组合**（select_decode_batched，bs=32/131K 全函数
-23.25→1.46ms，15.9×，A-E 五 kernel）：
+23.25→1.46ms，15.9×，A-E 五 kernel；三档同进程自洽复测 23.19→1.55ms =
+15.0×，F 项形态调优后口径）：
 
 | Kernel | 替代的 eager 阶段 | 机制 | 单项收益 |
 |---|---|---|---|
@@ -362,6 +364,7 @@ cat 版每步 4.8GB memcpy（S=131K 实测）。paged 寻址经 req_to_token
 | C | masked_fill 链 + far/near 分数物化 | -inf 烘进打分 kernel 写出口径（双池直写） | 消 P6/P7 链 |
 | D | 行 gather 268MB + permute 连续化拷贝 | rows 行间接直读 pool + GEMV（归约分组对齐 eager） | 消 2×268MB 拷贝 |
 | E | near 池 topk（98.6% -inf 输入，0.46ms） | KernelC 直写静态宽 WNCAP=2048 的压缩 near 表（确定性 slot 保序） | near topk 30× 宽度削减；select 1.80→1.46ms，三场景 torch.equal |
+| F | KernelC 稀疏 gather 读侧（0.49ms） | CHUNK=64/nw=4——每 program 恰覆盖一个候选块段（8KB 连续），小粒度 program 保住段间跳的访存级并行 | dual kernel 0.49→0.39ms（22%） |
 
 **工程经验（写入论文的定量教训）**：寄存器压力断崖——CHUNK×Hkv×nd2
 fp32 元素/program ≤65K（8 warps），超限是 local memory 溢出的非线性
@@ -418,7 +421,7 @@ TIA@1024（同门第一代，内部消融基准）、TWI、Quest@1024、DSA（ke
 **对拍文化声明（贯穿全部表格的数字可信度基础）**：每步 kernel 化均配
 torch.equal / 逐元素 / jaccard 对拍（§5.2）；4bit 索引与增量维护逐位一致
 （§5.1）；CUDA graph replay 与 eager 逐位一致（§5.3）；e2e 输出与 eager
-路径逐字一致。§7 记录两例该体系主动撤回自身 headline 的案例。
+路径逐字一致。§7 记录三例测量方法案例（两例主动撤回 headline、一例调参形态失真）。
 
 ### 6.2 Quality: Dual-Caliber Evaluation【正文 v1】
 
@@ -496,7 +499,7 @@ eager topk/gather launch 主导，三家在 131K 都远离 HBM bound——排名
 实现成熟度而非架构上限）；④TLI 的结构性优势在算法侧：每 token 索引 MAC
 ≈258 = DSA 的 1/32、存储 3×↓ vs Quest、+2.2 分 vs Quest——**算力/存储余量
 由 M8 kernel 化兑现**：批量化后 select_decode_batched 全函数
-23.25→1.46ms@bs=32/131K（15.9×，含 near 池压缩 E），launch 数与 bs 无关（口径差异——单 token
+23.19→1.55ms@bs=32/131K（15.0×，含 near 池压缩 E + 块段粒度调优 F；三档同进程自洽口径），launch 数与 bs 无关（口径差异——单 token
 vs batch——在表注中如实标注）。补充批量口径对比：Quest/DSA 官方无批量
 decode_select 实现，此处只列单 token 口径 + TLI 批量数，避免跨口径直接
 比较。
@@ -544,8 +547,9 @@ kernel_comparison_indexers）复现，无手抄。
 
 ## 7. Discussion: Measurement Methodology（0.75 页，差异化卖点）【正文 v1】
 
-本文在系统贡献之外，把**测量方法本身**作为一个可复用的贡献——两例
-主动复测撤回自身 headline 的案例：
+本文在系统贡献之外，把**测量方法本身**作为一个可复用的贡献——三例
+测量方法案例（前两例为主动复测撤回自身 headline，第三例为 kernel 调参
+形态失真与无声部分覆盖 bug）：
 
 **案例一：decode 差分法信噪比失效**。30K e2e 实验的初版（N=64 差分法：
 decode = 完整跑总时长 − 单独 prefill）曾报告「bs=16 tli decode 47.7 ≈
@@ -559,13 +563,25 @@ triton 48.1 打平」——该结论被 N=256 双侧复测撤回（tli 67.1 / tr
 （0.550/0.650/0.550，n=20/配置）——seed2 反转为 0.700/0.600/0.700，
 合并 n=40 后三预算完全持平 0.625：seed1 钟形是 n=16 far 槽位的二项噪声。
 
-三条提炼出的原则：①**小样本差分的方差被系统性低估**——槽位型二值指标
+**案例三：kernel 调参 sweep 的数据形态失真**。对 L2 打分 kernel 做
+CHUNK×num_warps 扫描时，用连续 `arange` 候选序列（易构造）测得最优
+128/4；换真实 compact 产物（稀疏块段，段间随机跳）复测后排序反转——
+最优为 64/4（22% 差距），且连续形态高估了读侧带宽 6 倍（L2 命中）。
+更隐蔽的是落地产物曾引入一个无声 bug：grid 仍按旧 CHUNK 计算导致
+只覆盖一半元素，empty 输出缓冲下无越界、无 NaN——唯一防线是**有效集
+对拍**（对称差 868 个 token 才暴露）。附带发现：同机跨轮环境漂移达
+±7%，绝对时间不可跨轮比较，headline 必须三档（eager/off/on）同进程
+交替测量自洽报告。
+
+四条提炼出的原则：①**小样本差分的方差被系统性低估**——槽位型二值指标
 （NIAH 命中）与长基线差分（decode 时延）在 n≤20 时都极易产生方向性假象；
 ②**复测不是推翻而是校准**——两例撤回均使结论更可信（前者建立了 S 收窄
 链的交叉验证，后者确立了「限制因子是 far 池召回而非预算」的真结论）；
 ③**phase 插桩会骗人**——两次踩坑（M3 归因、M10 prefill 手动分解合计
 200ms vs 实际 979ms）均由 kernel 级 profiler 复核纠正，归因必须到
-kernel 级。
+kernel 级；④**microbench 的输入形态必须取自真实管线**——合成形态
+（连续/均匀）会在带宽命中与调参排序两处同时失真，且部分覆盖 bug 不
+产生任何运行时错误信号。
 
 对社区的含义：稀疏注意力论文常用的「单 seed × n≤20 差分表」口径，
 在 far 槽位（~32 个）这类低基数指标上置信度不足；本文全部 headline 数字
@@ -582,7 +598,7 @@ kernel 级。
    0.92–1.00，索引 FLOP 4.88×）。12 项 negative results 与 design
    decisions 一一映射。
 2. **系统兑现**：sglang 全链路生产级集成——4bit 三张量索引（逐位一致）、
-   五 kernel 组合（select 15.9×）、CUDA graph 三方法契约；
+   五 kernel 组合（select 15.0×）、CUDA graph 三方法契约；
    decode 原型→生产级 12.5×（323 tok/s@bs32/9.9K），prefill 30K
    kernel 化 2.11×。
 3. **质量-成本**：LongBench 13 子集 49.92（vs FullKV 50.36 / TIA
