@@ -1,0 +1,270 @@
+{
+ "rows": [
+  {
+   "task": "hotpotqa",
+   "layer": 3,
+   "t": 8478,
+   "sel32": 0.4561,
+   "sel16": 0.3154,
+   "pca16": 0.666
+  },
+  {
+   "task": "hotpotqa",
+   "layer": 3,
+   "t": 16956,
+   "sel32": 0.5591,
+   "sel16": 0.3535,
+   "pca16": 0.5952
+  },
+  {
+   "task": "hotpotqa",
+   "layer": 5,
+   "t": 8478,
+   "sel32": 0.4287,
+   "sel16": 0.2939,
+   "pca16": 0.3188
+  },
+  {
+   "task": "hotpotqa",
+   "layer": 5,
+   "t": 16956,
+   "sel32": 0.4575,
+   "sel16": 0.334,
+   "pca16": 0.2422
+  },
+  {
+   "task": "hotpotqa",
+   "layer": 10,
+   "t": 8478,
+   "sel32": 0.3467,
+   "sel16": 0.2959,
+   "pca16": 0.5405
+  },
+  {
+   "task": "hotpotqa",
+   "layer": 10,
+   "t": 16956,
+   "sel32": 0.4434,
+   "sel16": 0.3979,
+   "pca16": 0.6084
+  },
+  {
+   "task": "hotpotqa",
+   "layer": 20,
+   "t": 8478,
+   "sel32": 0.5869,
+   "sel16": 0.3477,
+   "pca16": 0.4844
+  },
+  {
+   "task": "hotpotqa",
+   "layer": 20,
+   "t": 16956,
+   "sel32": 0.7217,
+   "sel16": 0.5625,
+   "pca16": 0.5156
+  },
+  {
+   "task": "hotpotqa",
+   "layer": 33,
+   "t": 8478,
+   "sel32": 0.6035,
+   "sel16": 0.4404,
+   "pca16": 0.5679
+  },
+  {
+   "task": "hotpotqa",
+   "layer": 33,
+   "t": 16956,
+   "sel32": 0.7832,
+   "sel16": 0.6641,
+   "pca16": 0.645
+  },
+  {
+   "task": "musique",
+   "layer": 3,
+   "t": 8366,
+   "sel32": 0.4385,
+   "sel16": 0.3071,
+   "pca16": 0.6138
+  },
+  {
+   "task": "musique",
+   "layer": 3,
+   "t": 16732,
+   "sel32": 0.5449,
+   "sel16": 0.3301,
+   "pca16": 0.5562
+  },
+  {
+   "task": "musique",
+   "layer": 5,
+   "t": 8366,
+   "sel32": 0.4072,
+   "sel16": 0.29,
+   "pca16": 0.3159
+  },
+  {
+   "task": "musique",
+   "layer": 5,
+   "t": 16732,
+   "sel32": 0.4497,
+   "sel16": 0.3027,
+   "pca16": 0.2178
+  },
+  {
+   "task": "musique",
+   "layer": 10,
+   "t": 8366,
+   "sel32": 0.2456,
+   "sel16": 0.186,
+   "pca16": 0.4229
+  },
+  {
+   "task": "musique",
+   "layer": 10,
+   "t": 16732,
+   "sel32": 0.4302,
+   "sel16": 0.3325,
+   "pca16": 0.582
+  },
+  {
+   "task": "musique",
+   "layer": 20,
+   "t": 8366,
+   "sel32": 0.6265,
+   "sel16": 0.2896,
+   "pca16": 0.4287
+  },
+  {
+   "task": "musique",
+   "layer": 20,
+   "t": 16732,
+   "sel32": 0.71,
+   "sel16": 0.5415,
+   "pca16": 0.5034
+  },
+  {
+   "task": "musique",
+   "layer": 33,
+   "t": 8366,
+   "sel32": 0.6641,
+   "sel16": 0.353,
+   "pca16": 0.3892
+  },
+  {
+   "task": "musique",
+   "layer": 33,
+   "t": 16732,
+   "sel32": 0.7212,
+   "sel16": 0.564,
+   "pca16": 0.5552
+  },
+  {
+   "task": "gov_report",
+   "layer": 3,
+   "t": 16384,
+   "sel32": 0.5811,
+   "sel16": 0.3159,
+   "pca16": 0.5337
+  },
+  {
+   "task": "gov_report",
+   "layer": 3,
+   "t": 32767,
+   "sel32": 0.5723,
+   "sel16": 0.3599,
+   "pca16": 0.3389
+  },
+  {
+   "task": "gov_report",
+   "layer": 5,
+   "t": 16384,
+   "sel32": 0.5571,
+   "sel16": 0.2324,
+   "pca16": 0.3164
+  },
+  {
+   "task": "gov_report",
+   "layer": 5,
+   "t": 32767,
+   "sel32": 0.585,
+   "sel16": 0.2969,
+   "pca16": 0.4487
+  },
+  {
+   "task": "gov_report",
+   "layer": 10,
+   "t": 16384,
+   "sel32": 0.2773,
+   "sel16": 0.1689,
+   "pca16": 0.377
+  },
+  {
+   "task": "gov_report",
+   "layer": 10,
+   "t": 32767,
+   "sel32": 0.0811,
+   "sel16": 0.0347,
+   "pca16": 0.0815
+  },
+  {
+   "task": "gov_report",
+   "layer": 20,
+   "t": 16384,
+   "sel32": 0.6074,
+   "sel16": 0.3745,
+   "pca16": 0.4282
+  },
+  {
+   "task": "gov_report",
+   "layer": 20,
+   "t": 32767,
+   "sel32": 0.4697,
+   "sel16": 0.3477,
+   "pca16": 0.2749
+  },
+  {
+   "task": "gov_report",
+   "layer": 33,
+   "t": 16384,
+   "sel32": 0.6323,
+   "sel16": 0.46,
+   "pca16": 0.4165
+  },
+  {
+   "task": "gov_report",
+   "layer": 33,
+   "t": 32767,
+   "sel32": 0.5352,
+   "sel16": 0.3472,
+   "pca16": 0.2842
+  }
+ ],
+ "latency": {
+  "sel32_rec": 0.5174,
+  "sel16_rec": 0.348,
+  "pca16_rec": 0.4423,
+  "trace_ms_sel": 0.791,
+  "trace_ms_pca": 0.813,
+  "trace_speedup": 0.974,
+  "syn131k_ms_sel": 1.019,
+  "syn131k_ms_pca": 0.972,
+  "syn131k_speedup": 1.049
+ },
+ "storage": {
+  "select_B_per_tok_head": 40,
+  "pca_B_per_tok_head": 24,
+  "ratio": 1.667
+ },
+ "e2e_smoke": {
+  "prompt_tokens": "~9.9K narrativeqa",
+  "status": "PCA \u5168\u94fe\u8def\u8fd0\u884c\u65e0\u5d29\u6e83\uff0c\u8f93\u51fa\u8bed\u4e49\u8fde\u8d2f\uff08\u4e0e\u9009\u62e9\u8def\u5f84\u4e0d\u540c=\u9884\u671f\uff0c\u8868\u793a\u6539\u53d8\u975e\u7b49\u4ef7\u53e3\u5f84\uff09"
+ },
+ "gap_decomposition": {
+  "iso_fp32": 0.4843,
+  "iso_4bit": 0.4543,
+  "pipeline": 0.4423,
+  "note": "4bit \u22120.030 + L1 \u22120.012\uff0c\u4e0e\u9694\u79bb\u5b9e\u9a8c\u543b\u5408\uff0c\u96c6\u6210\u96f6\u989d\u5916\u635f\u8017\uff1b\u540c\u7ef4\u5bf9\u7167 sel16=0.3480"
+ }
+}

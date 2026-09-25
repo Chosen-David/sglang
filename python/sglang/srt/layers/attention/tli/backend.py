@@ -120,6 +120,17 @@ class TLISparseAttnBackend(AttentionBackend):
         self._num_layers = n_layers
         if self.profile.layer_skip_path:
             self.layer_skip = self.profile.load_layer_skip(n_layers)
+        # M9：PCA 投影基（离线校准 .pt，[n_layers, Hkv, D, r] fp32；
+        # 同 D' 哲学——校准一次，运行期只读）
+        self.proj_basis = None
+        if self.profile.proj_basis_path:
+            self.proj_basis = torch.load(
+                self.profile.proj_basis_path,
+                map_location=runner.device if self.runner else "cuda",
+            )
+            assert self.proj_basis.shape[:1] == (n_layers,), (
+                f"PCA basis 层数 {self.proj_basis.shape[0]} != 模型 {n_layers}"
+            )
         self.dense_threshold = self.profile.dense_threshold
         # 新版 sglang：pool 挂在 model_runner 上（ForwardBatch 不再携带）
         self.token_to_kv_pool = runner.token_to_kv_pool
@@ -127,7 +138,11 @@ class TLISparseAttnBackend(AttentionBackend):
 
     def _get_indexer(self, layer_id: int) -> TLIIndexer:
         if layer_id not in self.indexers:
-            idx = TLIIndexer(self.profile, head_dim=self.head_dim).to(
+            basis = None
+            if self.proj_basis is not None:
+                li = layer_id - (self._layer_offset or 0)
+                basis = self.proj_basis[li if 0 <= li < self.proj_basis.shape[0] else 0]
+            idx = TLIIndexer(self.profile, head_dim=self.head_dim, basis=basis).to(
                 self.runner.device if self.runner else "cuda"
             )
             if self.layer_skip is not None:
@@ -154,9 +169,10 @@ class TLISparseAttnBackend(AttentionBackend):
             r_cap = max(p.pool_rows, self._pool_r_cap_floor)
             self.index_pools[layer_id] = {
                 # M6：kq 真 4bit 存储（128→40 B/token-head，S=131K 前提）：
-                # uint8 格点 [R,S,Hkv,2δ] + fp32 scale/mn [R,S,Hkv]
+                # uint8 格点 [R,S,Hkv,nd2] + fp32 scale/mn [R,S,Hkv]
                 # （scale 用 fp32：重建 grid*sc+mn 与 fp32 存储版逐位一致）
-                "kq_q": torch.zeros(r_cap, s_cap, Hkv, 2 * p.delta, dtype=torch.uint8, device=dev),
+                # M9：PCA 投影时 nd2 = r（40→r+8 B/token-head）
+                "kq_q": torch.zeros(r_cap, s_cap, Hkv, p.refine_nd(), dtype=torch.uint8, device=dev),
                 "kq_sc": torch.zeros(r_cap, s_cap, Hkv, device=dev),
                 "kq_mn": torch.zeros(r_cap, s_cap, Hkv, device=dev),
                 "kmin": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),

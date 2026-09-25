@@ -60,6 +60,14 @@ class TLIProfile:
         self.use_l1_kernel: bool = _env_bool("SGLANG_TLI_L1_KERNEL", False)
         # ---- L2 级联 fused（M3-b 接入：单 launch/head 分区精筛，原型 1.63×）----
         self.use_l2_kernel: bool = _env_bool("SGLANG_TLI_L2_KERNEL", False)
+        # ---- M9：L2 精筛 PCA 投影降维（离线校准基，替代 refine_idx 维度选择）----
+        # 实验依据（test_tli_proj_sweep/explore，2026-09-25）：PCA16 0.532 ≈
+        # 选择32 0.557（打分维砍半）、4bit 投影仅 −0.022、跨任务基迁移 −0.024、
+        # 2048 token 小校准集=全量同值；随机投影崩溃（JL 不保 GQA 点积排序）
+        # → 必须用 K 协方差（per-layer per-head SVD top-r）。
+        # basis 文件 = .pt，fp32 [n_layers, Hkv, D, r]（离线脚本 calibrate_pca_basis.py）
+        self.proj_basis_path: str | None = os.environ.get("SGLANG_TLI_PROJ_BASIS")
+        self.proj_rank: int = _env_int("SGLANG_TLI_PROJ_R", 16)
         # ---- M4 批量化 decode：n≥2 走共享 pool + 批量 eager select ----
         # （关闭可回退 per-request 路径做 A/B 对拍；n==1 恒走 per-request
         #   以保留 L1/L2 fused kernel 的 bs=1 延迟优势）
@@ -87,6 +95,10 @@ class TLIProfile:
         return list(range(half - self.delta, half)) + list(
             range(head_dim - self.delta, head_dim)
         )
+
+    def refine_nd(self) -> int:
+        """L2 精筛表示维度：投影基存在时 = r（PCA），否则 = 2*delta（选择）。"""
+        return self.proj_rank if self.proj_basis_path else 2 * self.delta
 
     def load_layer_skip(self, n_layers: int) -> list[bool] | None:
         """D' 静态层掩码：JSON 文件 {"skip": [layer_idx,...]}。"""

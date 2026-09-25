@@ -97,7 +97,7 @@ D'-gate 机制（本轮发现并修复）：
 ## 6. 代码资产与提交
 
 - `two-level-attention`（master）：TLIIndexer 全实现 + E1–E8 脚本与结果 + figures（含 v3 的 fig8/make_fig8.py + TLI_progress_v3.pptx 13 页）
-- `sglang`（two-level-indexer 分支，至 commit 5021ef105）：M1 = tli backend 注册 + trace 单测；M2 前半 = B'/D' 算法同步 + Triton fused L1；M2 后半 = paged 寻址 + O(n) 精确增量索引 + 稀疏 prefill；**M3 = decode 归因 + _sparse_attn 向量化（bfe373c18）+ L2 级联 fused kernel 接入 + 增量索引预分配 + 批量 decode 基准（36b6c8a37）+ 设计报告 §5.0/§5.0.1（5021ef105）**。test_tli_m2b.py 全链路对拍在预分配改造后仍全 PASS；分支基于 fork 最新 main（4b186cfea，2026-09-15）
+- `sglang`（two-level-indexer 分支，至 commit 6ef3f7bd4）：M1 = tli backend 注册 + trace 单测；M2 前半 = B'/D' 算法同步 + Triton fused L1；M2 后半 = paged 寻址 + O(n) 精确增量索引 + 稀疏 prefill；M3 = decode 归因 + _sparse_attn 向量化（bfe373c18）+ L2 级联 fused kernel 接入 + 增量索引预分配 + 批量 decode 基准（36b6c8a37）+ 设计报告 §5.0/§5.0.1（5021ef105）；M5 = CUDA graph（210c25755）；M6 = kq 真 4bit 三张量 + 维度压缩边界扫描（7c2a6ba74）；**M7 = prefill select 快路径 + S 梯度（6ef3f7bd4）**。test_tli_m2b.py 全链路对拍在预分配改造后仍全 PASS；分支基于 fork 最新 main（4b186cfea，2026-09-15）
 
 ## 7. 消融表（hotpotqa trace，36 层 mass 覆盖口径）
 
@@ -273,6 +273,205 @@ disabled（默认 BREAKABLE 依赖 sgl_kernel.weak_ref_tensor，0.3.16.post6 无
 ③graph 池显存口径：S_cap 按 req_to_token 全宽预分配会爆（32K×33 行×36 层≈40GB），
 `SGLANG_TLI_POOL_S_CAP` 显式封顶。
 
+### 8b-5. M7 prefill 加速（2026-09-24，任务 #27 完成，commit 6ef3f7bd4）
+
+**归因修正**（test_tli_prefill_prof.py）：prefill 瓶颈**不是**索引 build（0.3ms@10K，
+可忽略——「每 chunk 全量 rebuild O(S²/chunk)」的设计担忧实测不成立），而是
+`select_batched`：K1=128 块 × Hkv 个 head 的**候选池并集**在 S ≲ 64K 量级时覆盖全部
+因果 token（实测 S=10K 时 Tc==S=10000），此时逐 64 行 chunk 的「掩码→topk 提取候选
+→gather→反量化→scatter 回 S 宽度」全部是绕路——kq_unpack 每 chunk 物化 655MB fp32
+（3.5ms）+ 全池 einsum（1.6ms）× 157 chunks ≈ 865ms/层（与 e2e prefill 27.7s 吻合）。
+
+**快路径**：逐行判定池==因果区（`sel_mask.sum(1) == t+1`）时直接对**共享反量化表**
+`[S,Hkv,nd2]`（每次调用建一张、全部 chunk 共享，S=10K 仅 10MB）做全宽 einsum 一次得
+fine 矩阵；慢路径（S≥~20K 并集不再全覆盖）改从共享表 gather 打分（省逐 chunk 反量化
+算术）。语义**逐位等价**：m2b [2] 8/8 行位置集合一致、prefill mass cov 0.98964 与改前
+同值；e2e smoke graph vs eager 逐字一致。
+
+| 口径（select_batched 微基准） | 旧 | 新 | 加速 |
+|---|---|---|---|
+| S=10K, nq=10K（整段一次性 prefill） | 862.5 | 166.6 | **5.2×** |
+| S=10K, nq=2048（chunked） | 187.7 | 46.7 | 4.0× |
+| S=40K, nq=2048 | 482.3 | 247.2 | 2.0× |
+| S=130K, nq=2048 | 771.3 | 425.1 | 1.8× |
+| S=130K, nq=8192 | 3075.3 | 1696.4 | 1.8× |
+
+e2e（bs=8 × 9.9K token，同曲线）：**prefill 263.9→126.6s（2.08×）**，decode 不变。
+prefill S 梯度（backend 全链路，nq=256 尾 chunk）：5K/10K/20K/40K/80K/130K =
+9.5/17.1/27.8/37.5/50.6/62.1 ms/层——**prefill 延迟随 S 亚线性增长**（select 受
+池宽约束、稀疏前向受 K2 固定预算约束），长上下文 prefill 的结构性优势。
+
+剩余大头 = `_sparse_extend_one` 的随机行 gather（0.93ms vs einsum 0.44ms / 512 行
+chunk；576GB/s 未打满 HBM——gather 非合并访问）→ M8 TMA/Tensor Descriptor gather
+范畴。
+
+### 8b-4. M6 kq 真 4bit 存储（2026-09-24，任务 #26 完成，commit 7c2a6ba74）
+
+实现：pool 的 kq 从 fp32 单张量改为 **uint8+scale 三张量**（kq_q [R,S_cap,Hkv,2δ] uint8
+格点 + kq_sc/kq_mn [R,S_cap,Hkv] fp32 双 scale）。**逐位一致论证**：4bit 格点值 0-15 在
+fp32 中精确可表，`grid.float()*sc+mn` 与量化时 `round(...)*sc+mn` 走同一 IEEE 运算序列 →
+kq_unpack(*quant4_pack(x)) ≡ quant4(x)（test_tli_m4 [0] 直接断言）——4bit 存储零数值
+漂移。存储 128→40 B/token-head（3.2×）；131K 单请求 36 层 kq 从 ~5.4GB 降到 1.7GB，
+S_cap 预分配口径同步缓解。
+
+正确性回归：m4/m2b/m5 全 PASS（m5 graph replay vs eager 逐位 0.00e+00——量化一致性
+使批量/逐行/kernel/图四路径完全同值）；bs=8 graph e2e 78.8-86.5 ms/step（M5 70.3-75.5，
+**unpack 反量化带来 ~5-10% 小幅回退**，可用 M8 fused kernel 内 dequant 消除）。
+
+**附带两个方法论级发现（test_tli_dim_sweep.py，hotpotqa 真实 trace 5 层 × 2 个 t）**：
+
+1. **L1 粗筛维数可压**：d'=32→16 后 mass coverage 逐位不变（选中块集 172 vs 194 块，
+   但 L2 token 级 4bit 精筛把候选差异完全吸收）→ kmin/kmax 存储/流量再减半的免费午餐；
+2. **L2 细筛维数不可压**：δ=16→8（2δ=32→16）时剩余 mass coverage 0.953→0.782
+   （far-heavy 层 L03/L05 t 尾部最差 0.34）。与另一项目「细筛必须保全全维」的结论同构：
+   **两级索引的维数压缩边界画在 L1/L2 之间——粗筛上界可粗，细筛分数必须精**。
+
+**评估口径升级（test_tli_m4 [4]）**：新增**剩余 mass coverage**（竞争区 = 总 mass 去除
+sink+滑窗强制 token）：竞争区仅占总 mass mean 0.515 / min 0.315（H1 sink mass 0.37-0.71
+的直接后果），总口径 0.99+ 的饱和主要由强制位贡献——**论文质量表应改报剩余口径**
+（基线 0.953 / min 0.726），区分度显著更高。E4c 的 L1 far capture 是同思想在 L1/远端
+子集上的特例。
+
+### 8b-6. 同机 indexer kernel 三方对比（2026-09-25，#29/#30 完成，官方 kernel 原样接入统一 harness）
+
+口径：H20-3e（cc9.0 78SM）、decode 单 token indexer **per-layer-call 全链路**、同机同口径；
+Quest/DSA 侧合成数据对齐量级（kernel 级 microbench），TLI 侧真实 trace（qwen3-8b layer03 far-heavy
++ layer17 两层均值）。脚本：`sglang/bench_dsa_vs_tli_indexer.py` + `sglang/bench_quest_score.py` +
+`/tmp/bench_quest_select.cu`（Quest 官方 raft radix kernel 最小 fork，`/tmp/quest_min/`）；
+汇总：`sglang/kernel_comparison_indexers.json`。
+
+| indexer（ms/层） | S=10K | S=40K | S=131K | 索引存储/token | training-free | LongBench-13 |
+|---|---|---|---|---|---|---|
+| Quest 官方（page GEMV + raft decode_select_k，k=64pages=1024tok） | 0.066 | 0.077 | 0.107 | ~1KB（fp16 min/max 32head） | ✓ | 47.72 |
+| DSA 官方（tilelang fp8_index 64head×128d + topk 2048） | 0.476 | 0.490 | 0.503 | ~132B（fp8 proj） | ✗（1000 步/2.1B token warm-up） | —（V3.2 专属） |
+| TLI eager（两级 select 全链路） | 0.736 | 0.780 | 0.853 | ~336B（kq 4bit 40B/token-head×Hkv8 + L1 bounds） | ✓ | 49.92 |
+| TLI fused L1 | 0.604 | 0.658 | 0.787 | 同上 | ✓ | 49.92 |
+
+**诚实结论**（论文系统章节素材）：
+1. **Quest 索引最快**（GEMV+radix µs 级，HBM 带宽型）但代价 = 1KB/token 索引存储（3× TLI）
+   且 LongBench −2.2 分——Quest 的速度优势与其 fp16 全 head min/max 索引的存储代价绑定；
+2. **DSA 0.5ms 与 S 无关**（tilelang FP8 TC 生产级 kernel，launch 主导；纯算力账 ~20µs@131K），
+   但需训练 indexer 权重 + 每 token 64head×128d = 8192 MAC 的全量 GEMV；
+3. **TLI 延迟当前不占优**（0.6–0.83 vs DSA 0.5ms）——如实报告。结构性优势在算法侧：
+   每 token 索引 MAC ≈258（8kv-head×2δ32 + L1 摊销）= DSA 的 **1/32**、索引存储 ~3×↓ vs Quest、
+   D' 跳 13/36 层摊销、质量 +2.2 分 vs Quest。当前延迟差距来源 = eager topk/gather 的 launch
+   开销（三家在 131K 下都远离 HBM bound，排名反映的是实现成熟度）→ **M8 kernel 化是兑现路径**，
+   算力/存储余量已备好。
+4. **MoBA 未测**（flash-attn 未装）：降级预案 = 论文数字 + 算术账。
+
+工程沉淀：①tilelang 0.1.7 无 `TL_DISABLE_FAST_MATH` PassConfigKey（源码级删 no-op 开关）+
+jit 按首次形状特化（symbolic n 静态化）→ 每个 S 独立子进程；②Quest raft kernel 最小 fork：
+select_radix.cuh 行段拼接（1-708 + 710-818 set_buf_pointers + 927-1094 one_block kernel），
+shim 头断开 rmm/fmt 依赖链；③DSA 官方 kernel 的 k_s 签名是 [b,S]（须 squeeze）。
+
+### 8b-7. L2 维度可压性扩展 + 投影表示对照 + B' 分区时序消融（2026-09-25，本轮三实验）
+
+概念口径（用户定调）：**粗筛（L1）= 选哪些 block/page；细筛（L2）= 在粗筛选中的 block
+内选 token 及数量**。三个实验回应外部批判（GPT 复盘）与用户质询，脚本
+`test_tli_dim_sweep2.py` / `test_tli_proj_sweep.py` / `test_tli_partition_ablation.py`，
+数据 `tli_dim_sweep2.json` / `tli_proj_sweep.json` / `tli_partition_ablation.json`。
+
+**1. L2 维度选择不可压（扩展口径确认）+ 病因分离**（5 trace × 5 层 × 3 t，300 行）：
+far recall（vs dense 全维 far top-256 oracle，per-head）：δ=16→12→8→4 =
+0.557→0.500→0.378→0.274；**fp32 与 4bit 仅差 2–5%**（0.557/0.531、0.378/0.373）——
+病因=**维度不够，非量化精度**；全链路 pipeline 与「不限候选池」隔离口径几乎同值
+（0.528 vs 0.531）——L1 对 far recall 的额外损失可忽略。
+
+**2. 投影表示可压（用户直觉验证，重要新方向）**：per-kv-head SVD top-r 投影替代尾维选择
+（同隔离口径 fp32）：
+
+| far recall | 选择-r | PCA-r（同源） | PCA-r（跨任务基） | 随机-r |
+|---|---|---|---|---|
+| r=16 | 0.378 | **0.532** | 0.503 | 0.147 |
+| r=32 | 0.557 | **0.682** | 0.658 | 0.246 |
+
+- **PCA16 ≈ 选择32**：同质量打分维度砍半（16 vs 32 MAC/token-head）；
+  **PCA32 = +0.125**：同 FLOP 质量大增；**跨任务 PCA 基迁移仅 −0.024**（hotpotqa 校准基
+  打全部 5 任务）——离线校准哲学与 D' 一致，training-free 成立；
+- 随机投影崩溃（JL 保范数不保 GQA 求和后的点积排序）→ **降维必须用 K 协方差结构**；
+- 结论修正：**非对称压缩定律的 L2 半边 = 信息瓶颈在表示方式而非维数**——投影可压、
+  选择不可压。工程含义：kq 存 PCA 投影 4bit（r=16 → 16B/token-head vs 现 40B），
+  KV 写入侧一次 [D×r] GEMV（2048 MAC/token/head 摊销）——L2 打分 FLOP 再砍半 +
+  存储 2.5×↓（集成待办）。
+
+**2b. 投影深入探索**（`test_tli_proj_explore.py` / `test_tli_proj_mixed.py`，r=16）：
+- 子集选择全景：低频尾维 0.351（选择类最优）＞ even 0.081 ＞＞ 高频头维 0.026 崩溃
+  ——**「noPE/位置稳定」机制的反向验证**（Qwen3 无原生 noPE 维；旋转慢的低频尾维
+  = 近似 noPE，旋转快的高频维崩溃）；
+- PCA 0.489（+0.14 vs 尾维）；**小校准集 2048 token 即与全量校准同值**（0.489）——
+  校准成本可忽略；**4bit 量化投影仅 −0.022**（0.467）——存储口径 16B/token-head 成立；
+- **跨层共享基 No-Go**（0.234，层间 K 协方差差异大）→ per-layer 基，存储
+  36 层×Hkv8×[128,16] fp32 ≈ 2.4MB 可忽略；
+- **可解释性：PCA 与尾维子空间主角度 73°（近正交）**——两种机制独立（旋转稳定性
+  vs 协方差方差方向）；**混合打分 No-Go**（pca32 0.660 ＞ mixed32 0.555 ＞
+  tail32 0.543，同预算下混合双计交叠反降）→ 纯 PCA 是最优表示。
+
+**3. B' 分区时序消融 + far survival curve**（回应「far 在 L1 被剪掉则 L2 救不回」质询；
+global = L1/L2 均全局（TIA 语义）/ late = 当前 B'（L1 全局 + L2 分区）/ hier = L1 far
+保底 K1_far=16 块 + L2 分区；5 trace × 5 层 × 2 t）：
+
+| 模式 | far rec | far 名额 | far mass cov | L1 存活 | cov剩 |
+|---|---|---|---|---|---|
+| global | 0.664 | 569.4 | 0.8456 | 0.929 | 0.9207 |
+| late（B'） | 0.511 | 256.0 | 0.8414 | 0.929 | **0.9284** |
+| hier | 0.420 | 256.0 | 0.8105 | **0.677** | 0.9197 |
+
+- **「far 在 L1 被剪」实测不发生**：near 带+sink 仅 34 块 vs K1=128 → far 池保底
+  ≥94 块，oracle far token 的 L1 存活率 0.93–1.00（far-heavy 层 t=S/2 达 1.00）；
+- **far rec 的 global>late 是名额口径混淆**：global 下 far 平均占 569/1024 名额
+  （4bit 噪声 + far 区基数效应），far mass cov 两模式几乎同值（0.846 vs 0.841）；
+- **B' 的真实增益机制 = 近端名额保障**（方向与「防 far 被挤」的直觉叙事相反）：
+  far-heavy L05 t=S/2 cov剩 0.600→0.726 的全部增益来自近端带名额恢复（far mass cov
+  同值 0.9989）——名额分配从「分数噪声驱动」改为「预算驱动」，far 截到 256 质量不损；
+- **hier（L1 分区）No-Go**：L1 far 保底 16 块反而把 far 池从 ~94 块砍到 16 块
+  （L1 存活 0.677、far mass cov 0.811）——**分区只需在 L2 终选级，当前实现即正确形态**
+  （negative result + design decision 入论文）。
+
+### 8b-8. M9 PCA 投影降维集成（2026-09-25，任务 #33 完成）
+
+§8b-7 验证的「投影表示可压」工程落地：kq 存 PCA 投影 4bit，L2 精筛表示从
+「维度选择（refine_idx，2δ=32 维）」切换为「PCA 投影（r=16 维）」。
+
+**集成形态**（sglang tli backend，全部路径统一出口）：
+- 离线校准 `calibrate_pca_basis.py`：hotpotqa_0 far 区 per-(layer, kv-head) SVD
+  top-16 → `tli_pca_basis_r16.pt` [36, 8, 128, 16]（常驻 2.36MB，同 D' 离线校准哲学）；
+- config `SGLANG_TLI_PROJ_BASIS` / `SGLANG_TLI_PROJ_R`；backend 加载注入 per-layer
+  indexer；pool kq 尾维 `refine_nd()`：2δ→r（扩容/行视图路径自动继承）；
+- indexer `_k_refine`/`_q_refine`：选择与投影同一代码路径（build/update/select/
+  select_batched/update_pool_rows_decode/select_decode_batched 六处调用点统一替换）。
+
+**对拍实测**（`test_tli_m9.py` ALL PASS，30 行 = 3 任务 × 5 层 × 2 t，pipeline 全链路）：
+
+| 表示（L2 精筛） | 打分维 | B/tok-head | far recall |
+|---|---|---|---|
+| 选择 δ=16（当前生产） | 32 | 40 | 0.5174 |
+| 选择 δ=8（同维对照） | 16 | 24 | 0.3480 |
+| **PCA r=16** | **16** | **24** | **0.4423** |
+
+- **同成本口径（论文速度卖点）**：同样 16 维打分 / 24B 存储 / 带宽下，投影比选择
+  +0.094（+27%）——「表示方式」信息瓶颈结论的系统级兑现；
+- vs 全维选择 δ=16：−0.075，换 1.67× 存储节省 + 打分 FLOP 减半（质量-成本权衡点，
+  如实报告；弱势行集中在 musique/gov L05/L33 跨任务基迁移，hotpotqa 多行反超 sel32）；
+- **差距分解（集成零损耗证明）**：隔离 fp32 0.4843 → 4bit 0.4543（−0.030，与隔离
+  实验 −0.022 吻合）→ pipeline 0.4423（L1 −0.012，与选择口径的 L1 损失同级）；
+- **一致性对拍**：增量 vs 全量格点一致率 1.000000 + unpack allclose + select 集合
+  一致（投影是 GEMV，cuBLAS 批次相关归约顺序 → scale 有 1e-7 级 fp 尾差，语义口径；
+  选择路径 gather 无算术故逐位——M5 graph 对拍结论不受影响，PCA 模式下逐位口径
+  放宽为格点级）；pool 批量 flat 索引（nd2=16）vs per-request 32/32 head 集合一致；
+- **延迟（诚实口径）**：eager select 0.97–1.05×（trace 9.9K 0.791→0.813ms / 合成
+  131K 1.019→0.972ms）——**降维收益在 eager 路径被 topk/gather launch 开销掩盖**
+  （归因与 M3-b 一致），打分 FLOP 减半的兑现位在 M8 fused kernel（打分 GEMV 占比
+  大的形态）；存储 1.67× 是即刻收益；
+- **e2e smoke**：9.9K token 真实 narrativeqa 长上下文，PCA 路径稀疏 prefill + decode
+  全链路运行无崩溃、输出语义连贯（与选择路径输出不同属预期——表示改变→选择集
+  不同，非等价对拍口径）。
+
+**工程坑（沉淀）**：torch.einsum 标签里 head 维必须出现在输出（`"...hgd,hdr->...hgr"`）；
+漏写 h（曾写成 `kgd,hdr->kgr`）= h 变归约维、对全部 head 的基**求和**——k 路径标签
+恰好正确、q 路径全错，两者数值形状相同，far recall 0.126 vs 预期 0.53 才暴露
+（debug 脚本逐环节二分定位：隔离 fp32 ✓ → 4bit ✓ → _k_refine 逐位 ✓ → _q_refine
+max diff 42.5 ✗）。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
@@ -280,14 +479,19 @@ disabled（默认 BREAKABLE 依赖 sgl_kernel.weak_ref_tensor，0.3.16.post6 无
 3. ~~M4 批量化 decode~~ ✅（§8b-2：三阶段 bs=32 1236.8→326.4（3.8×），线性项 38→6.7ms/req，对拍全过）
 4. ~~M5 CUDA graph decode~~ ✅（§8b-3：三方法契约 + 统一增量/稀疏图内路径 + veto 钩子；
    replay 逐位一致 + e2e 逐字一致；bs=32 326.4→188.6 ms/step，累计 6.6× vs M3 原型）
-5. **M6 kq 真 4bit**（#26）：uint8+scale（128→40B/token-head），S=131K 主表硬前提
-6. **M7 prefill 加速**（#27）：chunked 增量索引复用（现每 chunk 全量 rebuild O(S²/chunk)）+
-   批量 build + S 梯度基准（0.7K→131K）
-7. **M8 H 卡特有优化**（#28）：TMA/Tensor Descriptor gather（Hopper）+ 141GB 大显存专属实验轴
-   （bs=64×S=131K 只有此卡放得下）+ cluster/L2 residency 探索，microbench 前后对比
+5. ~~M6 kq 真 4bit~~ ✅（§8b-4：uint8+scale 三张量逐位一致，128→40B/token-head；
+   附带发现 L1 维数可压 d'→16 / L2 维数不可压 δ→8 的两级维数边界 + 剩余 mass 评估口径）
+6. ~~M7 prefill 加速~~ ✅（§8b-5：归因修正——瓶颈是 select_batched 而非 build；
+   池==因果区快路径 + 共享反量化表，select 5.2×@10K / 1.8×@130K；
+   e2e prefill 263.9→126.6s（2.08×）；prefill 延迟随 S 亚线性）
+7. **M8 H 卡特有优化**（#28）：TMA/Tensor Descriptor gather（Hopper，含 M7 遗留的
+   _sparse_extend_one 随机行 gather 576GB/s→HBM 打满）+ 141GB 大显存专属实验轴
+   （bs=64×S=131K 只有此卡放得下）+ cluster/L2 residency 探索，microbench 前后对比；
+   **M8 的打分 kernel 现在有 r=16 投影口径可用（M9），打分 GEMV FLOP 减半待此兑现**
 8. H100 吞吐主表（机器申请中；H20 层已备好算力无关性论证：H20 TC 仅 H100 15% 仍拿到质量/流量收益）+ RULER/NIAH 补评测（对齐 Quest/SnapKV/HISA 论文数据集口径）
 9. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
 10. ~~Qwen3-32B 泛化复验~~ ✅（§8：A Go/D' Go 且更强/gate 判据修正为 negative result）+ 论文写作（骨架已定，主表已齐）
+11. ~~PCA 投影集成（M9）~~ ✅（§8b-8：同成本口径投影比选择 +27% far recall、存储 40→24B/token-head、六路径对拍全过、e2e smoke 通过；eager 延迟持平=launch 掩盖，FLOP 收益留待 M8）
 
 ## 10. 答辩防御清单（更新版）
 

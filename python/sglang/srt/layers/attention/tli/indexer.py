@@ -65,12 +65,24 @@ def gpu_kmeans(x: torch.Tensor, K: int, niter: int = 20, seed: int = 0):
 class TLIIndexer:
     """两级索引器（PyTorch 参考实现；kernel 化路径见导师 TileLang 两级 kernel）。"""
 
-    def __init__(self, profile: TLIProfile | None = None, head_dim: int = 128) -> None:
+    def __init__(
+        self,
+        profile: TLIProfile | None = None,
+        head_dim: int = 128,
+        basis: torch.Tensor | None = None,
+    ) -> None:
+        """basis: [Hkv, D, r] fp32（M9 PCA 投影基，离线校准）。
+        给定时 L2 精筛表示从「维度选择（idx2）」切换为「PCA 投影」：
+        kq 存 K@basis 的 4bit（r 维），打分维 2δ→r、存储 40→r+8 B/token-head。
+        """
         self.profile = profile or TLIProfile()
         p = self.profile
         self.register_buffer_idx(torch.arange(head_dim))
         self.idx1 = torch.tensor(p.subspace_idx(head_dim), dtype=torch.long)
         self.idx2 = torch.tensor(p.refine_idx(head_dim), dtype=torch.long)
+        assert basis is None or not p.far_kmeans, "PCA 投影与 kmeans 消融路径互斥"
+        self.basis = basis
+        self.nd2 = int(basis.shape[-1]) if basis is not None else 2 * p.delta
         self.skip_far: bool = False  # D'：由 backend 按 layer 掩码置位
 
     def register_buffer_idx(self, _):
@@ -79,7 +91,32 @@ class TLIIndexer:
     def to(self, device):
         self.idx1 = self.idx1.to(device)
         self.idx2 = self.idx2.to(device)
+        if self.basis is not None:
+            self.basis = self.basis.to(device)
         return self
+
+    # ---- M9：L2 精筛表示（选择 idx2 / PCA 投影，统一出口）----
+
+    def _k_refine(self, k: torch.Tensor) -> torch.Tensor:
+        """k: [..., Hkv, D] → [..., Hkv, nd2]（写入 kq 前的精筛表示）。"""
+        if self.basis is None:
+            return k[..., self.idx2]
+        return torch.einsum("...hd,hdr->...hr", k, self.basis)
+
+    def _q_refine(self, q: torch.Tensor) -> torch.Tensor:
+        """q: [..., H, D] → [..., H, nd2]（逐 q-head 精筛表示；GQA sum
+        由调用方 reshape(..., Hkv, G, nd2).sum(2) 完成——投影线性，
+        先投影后求和 == 先求和后投影）。"""
+        if self.basis is None:
+            return q[..., self.idx2]
+        Hkv, D, r = self.basis.shape
+        G = q.shape[-2] // Hkv
+        # 注意 einsum 标签：head 维必须出现在输出（hgd,hdr->hgr），
+        # 否则 h 变归约维 = 对全部 head 的基求和（曾踩：q 路径全错）
+        qp = torch.einsum(
+            "...hgd,hdr->...hgr", q.reshape(*q.shape[:-2], Hkv, G, D), self.basis
+        )
+        return qp.reshape(*q.shape[:-1], r)
 
     # ------------------------------------------------------------------ #
     # 索引维护（prefill 全量 / decode 增量），由 backend 调用
@@ -110,7 +147,8 @@ class TLIIndexer:
             kmax[-1] = kc[-1, :valid_tail].amax(0)
         # 4bit 部分维（L2 精筛用；M6 真 4bit 存储：uint8 格点 + fp32 scale，
         # 128→40B/token-head——S=131K pool 显存硬前提）
-        kq_q, kq_sc, kq_mn = quant4_pack(k[:S][..., self.idx2])  # [S, Hkv, 2δ] uint8 + [S, Hkv] ×2
+        # M9：basis 存在时存 PCA 投影 K@basis 的 4bit（r 维，16+8 B/token-head）
+        kq_q, kq_sc, kq_mn = quant4_pack(self._k_refine(k[:S]))  # [S, Hkv, nd2] uint8 + [S, Hkv] ×2
         index = {
             "kmin": kmin,
             "kmax": kmax,
@@ -161,7 +199,7 @@ class TLIIndexer:
             nb[:cap] = buf
             return nb
 
-        kq_q_new, kq_sc_new, kq_mn_new = quant4_pack(k_new[..., self.idx2])
+        kq_q_new, kq_sc_new, kq_mn_new = quant4_pack(self._k_refine(k_new))
         index["kq_q"] = _ensure(index["kq_q"], S)
         index["kq_sc"] = _ensure(index["kq_sc"], S)
         index["kq_mn"] = _ensure(index["kq_mn"], S)
@@ -318,8 +356,8 @@ class TLIIndexer:
                         tli_l2_partition_topk,
                     )
 
-                    nd2 = 2 * p.delta
-                    q_sub = q[..., self.idx2].reshape(H, nd2).contiguous()
+                    nd2 = self.nd2
+                    q_sub = self._q_refine(q).reshape(H, nd2).contiguous()
                     near_floor = p.sliding_window + far_tok_lo
                     far_cap = max(0, p.token_budget - near_floor)
                     k2_far = min(p.far_tokens, far_tok_hi - far_tok_lo, far_cap)
@@ -338,9 +376,9 @@ class TLIIndexer:
                         t,
                     )
 
-        nd2 = 2 * p.delta
+        nd2 = self.nd2
         kq = index["kq_q"]  # M6 uint8 格点 [S, Hkv, nd2]（容量 padding 靠 cand_pos < S 规避）
-        q2 = q[..., self.idx2].reshape(1, Hkv, G, nd2).sum(2)  # [1, Hkv, nd2]
+        q2 = self._q_refine(q).reshape(1, Hkv, G, nd2).sum(2)  # [1, Hkv, nd2]
         sel_mask = blk_onehot.any(0).repeat_interleave(p.block_size)[:S]
         cand_pos = torch.nonzero(sel_mask).squeeze(1)
         kq_h = kq_unpack(
@@ -416,7 +454,7 @@ class TLIIndexer:
         nblk = index["nblk"]
         kmin, kmax = kmin[:nblk], kmax[:nblk]  # 容量 padding 垃圾行切除
         K1 = min(p.k1_blocks, nblk)
-        nd2 = 2 * p.delta
+        nd2 = self.nd2
         bs = p.block_size
         kq = index["kq_q"]  # M6 uint8 格点（tok_c < S，容量 padding 无害）
         t_arr = t_arr.to(device)
@@ -458,7 +496,7 @@ class TLIIndexer:
             ).clamp(min=0)  # 块级滑窗（select 的 force_blks 同语义）
             onehot.scatter_(1, f_blk, True)
             sel_mask = onehot.repeat_interleave(bs, dim=1)[:, :S]  # [n, S]
-            q2 = q_c[..., self.idx2].reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
+            q2 = self._q_refine(q_c).reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
             # M7 快路径判定：池 ⊇ 因果区（池 ⊆ 因果区恒成立 → 即 ==）。
             # 真实数据 S ≲ K1*bs*Hkv 量级时并集全选，Tc==S，scatter 是纯绕路
             if bool((sel_mask.sum(1) >= t_c + 1).all()):
@@ -553,7 +591,7 @@ class TLIIndexer:
         if n == 0:
             return
         Hkv = k_new.shape[1]
-        nd2 = 2 * p.delta
+        nd2 = self.nd2
         d1 = p.coarse_dim
         device = k_new.device
         S_cap = pool_l["kq_q"].shape[1]
@@ -562,8 +600,8 @@ class TLIIndexer:
         if S_old_t is None:
             S_old_t = torch.tensor(S_old, device=device)
 
-        # ---- kq 追加（M6 uint8+scale 三张量 flat scatter）----
-        kq_q_new, kq_sc_new, kq_mn_new = quant4_pack(k_new[..., self.idx2])
+        # ---- kq 追加（M6 uint8+scale 三张量 flat scatter；M9 投影先于量化）----
+        kq_q_new, kq_sc_new, kq_mn_new = quant4_pack(self._k_refine(k_new))
         base_q = rows_l * (S_cap * Hkv * nd2) + S_old_t * (Hkv * nd2)
         off_q = (
             base_q.view(n, 1, 1)
@@ -654,7 +692,7 @@ class TLIIndexer:
         S_cap = kq_pool.shape[1]
         NBLK_CAP = kmin_pool.shape[1]
         bs = p.block_size
-        nd2 = 2 * p.delta
+        nd2 = self.nd2
         if torch.is_tensor(S_list):
             S_t = S_list.to(torch.long)
         else:
@@ -713,7 +751,7 @@ class TLIIndexer:
         # ---- L2: 4bit 精筛打分（M6：uint8 格点 + scale 的 flat gather + 重建）----
         # 重建 kq_c = grid*sc+mn 与 fp32 存储版逐位一致（IEEE 同运算序），
         # 打分数值零漂移；pool 常驻显存 128→40 B/token-head
-        q2 = q[..., self.idx2].reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
+        q2 = self._q_refine(q).reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
         s2 = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=device)
         rows_l = rows.to(torch.long)
         d_off = torch.arange(nd2, device=device)
