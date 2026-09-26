@@ -1618,5 +1618,1625 @@
     }
    ]
   }
+ },
+ "ruler_triton_seed2": {
+  "niah_multikey": {
+   "score": 0.9,
+   "n": 20,
+   "gen_s": 172.4,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "7614631"
+     ],
+     "out": "The special magic number for Jenica mentioned in the text is 7614631.\nThe specia",
+     "prompt_tokens": 32095
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6625156"
+     ],
+     "out": "Answer:\n6625156\nPassage:\nThe 1980s\nThe 1980s were a decade of economic growth, t",
+     "prompt_tokens": 32096
+    },
+    {
+     "ok": false,
+     "ans": [
+      "1025212"
+     ],
+     "out": "What is the special magic number for Fleming mentioned in the provided text? Wha",
+     "prompt_tokens": 32094
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6821196"
+     ],
+     "out": "Answer:\n6821196\nPassage:\nWhat is the special magic number for Joetta mentioned i",
+     "prompt_tokens": 32099
+    },
+    {
+     "ok": true,
+     "ans": [
+      "5080065"
+     ],
+     "out": "Answer: 5080065\nPassage:\nWeep Not, Child\nWeep Not, Child is a 1964 novel by Keny",
+     "prompt_tokens": 32098
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1794605"
+     ],
+     "out": "What is the special magic number for Tonda mentioned in the provided text? What ",
+     "prompt_tokens": 32101
+    },
+    {
+     "ok": true,
+     "ans": [
+      "9928713"
+     ],
+     "out": "The special magic number for Gwenn is 9928713.\n\nWhat is the special magic number",
+     "prompt_tokens": 32102
+    },
+    {
+     "ok": true,
+     "ans": [
+      "3753173"
+     ],
+     "out": "Select from the following options:\nA) 3753173\nB) 7806849\nC) 4334547\nD) 8208874\n\n",
+     "prompt_tokens": 32099
+    },
+    {
+     "ok": false,
+     "ans": [
+      "5222383"
+     ],
+     "out": "Passage 1:\nCapital Cities (band)\nCapital Cities is an American pop duo from Los ",
+     "prompt_tokens": 32097
+    },
+    {
+     "ok": true,
+     "ans": [
+      "2073316"
+     ],
+     "out": "The special magic number for Merna mentioned in the text is 2073316.\n\nWhat is th",
+     "prompt_tokens": 32096
+    },
+    {
+     "ok": true,
+     "ans": [
+      "8726268"
+     ],
+     "out": "Choices:\nA) 8726268\nB) 2472875\nC) 7054885\nD) 9377401\nThe special magic number fo",
+     "prompt_tokens": 32096
+    },
+    {
+     "ok": true,
+     "ans": [
+      "2862486"
+     ],
+     "out": "What is the special magic number for Tonda mentioned in the provided text? What ",
+     "prompt_tokens": 32095
+    },
+    {
+     "ok": true,
+     "ans": [
+      "3507874"
+     ],
+     "out": "What is the special magic number for Kati mentioned in the provided text? What i",
+     "prompt_tokens": 32100
+    },
+    {
+     "ok": true,
+     "ans": [
+      "5558043"
+     ],
+     "out": "Answer:\n5558043\nPassage:\nThe 1998 Winter Olympics\nThe 1998 Winter Olympics, offi",
+     "prompt_tokens": 32096
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1978924"
+     ],
+     "out": "Answer:\n1978924\nPassage:\nThe 1970s were a decade of change, with the end of the ",
+     "prompt_tokens": 32097
+    },
+    {
+     "ok": true,
+     "ans": [
+      "9677317"
+     ],
+     "out": "Answer:\n9677317\nPassage:\nThe 1996 Summer Olympics, officially known as the Games",
+     "prompt_tokens": 32099
+    },
+    {
+     "ok": true,
+     "ans": [
+      "5753596"
+     ],
+     "out": "Passage:\nThe special magic number for Zola is: 5753596.\nAnswer:\n5753596\nPassage:",
+     "prompt_tokens": 32099
+    },
+    {
+     "ok": true,
+     "ans": [
+      "2267930"
+     ],
+     "out": "Answer:\n2267930\nPassage:\nThe Great Gatsby\nThe Great Gatsby is a 1925 novel by F.",
+     "prompt_tokens": 32100
+    },
+    {
+     "ok": true,
+     "ans": [
+      "5896503"
+     ],
+     "out": "The special magic number for Kati mentioned in the provided text is 5896503.\n\nWh",
+     "prompt_tokens": 32097
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1301878"
+     ],
+     "out": "A) 1301878\nB) 4657691\nC) 8753964\nD) 1567021\n\nThe special magic number for Jenica",
+     "prompt_tokens": 32097
+    }
+   ]
+  },
+  "niah_multivalue": {
+   "score": 0.85,
+   "n": 20,
+   "gen_s": 172.1,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "2380290",
+      "9541195",
+      "5363007",
+      "6036021",
+      "2121598"
+     ],
+     "out": "Please provide the answer in a list format.\nAnswer:\n- 2380290\n- 9541195\n- 536300",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6437493",
+      "2449228",
+      "1585400",
+      "5790914",
+      "6596066"
+     ],
+     "out": "Please list them in order of their appearance.\nBased on the provided text, the s",
+     "prompt_tokens": 32120
+    },
+    {
+     "ok": true,
+     "ans": [
+      "4986638",
+      "6336720",
+      "7838347",
+      "2187460",
+      "5636952"
+     ],
+     "out": "What is the significance of these numbers?\nThe special magic numbers for Young m",
+     "prompt_tokens": 32111
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6216957",
+      "5603233",
+      "6060174",
+      "2089796",
+      "3704060"
+     ],
+     "out": "Please list them.\nAnswer:\nThe special magic numbers for Lidia mentioned in the p",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6291673",
+      "2662183",
+      "6483852",
+      "5805985",
+      "9073940"
+     ],
+     "out": "Please list them in order of their appearance.\nThe special magic numbers for Dal",
+     "prompt_tokens": 32111
+    },
+    {
+     "ok": false,
+     "ans": [
+      "9143182",
+      "8730136",
+      "5530325",
+      "6182851",
+      "2934312"
+     ],
+     "out": "The text contains several instances of \"One of the special magic numbers for You",
+     "prompt_tokens": 32114
+    },
+    {
+     "ok": true,
+     "ans": [
+      "4115295",
+      "2146646",
+      "6911945",
+      "6223869",
+      "3940783"
+     ],
+     "out": "Please list them.\nAnswer:\nThe special magic numbers for Dallas mentioned in the ",
+     "prompt_tokens": 32111
+    },
+    {
+     "ok": false,
+     "ans": [
+      "8945700",
+      "5841046",
+      "1890926",
+      "8821701",
+      "7202936"
+     ],
+     "out": "Please list them in order of their appearance in the text.\nOkay, let's see. I ne",
+     "prompt_tokens": 32120
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1535352",
+      "1306218",
+      "4121135",
+      "7735553",
+      "3686153"
+     ],
+     "out": "One of the special magic numbers for Renate is: 3686153.\nOne of the special magi",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1751474",
+      "2474102",
+      "3269350",
+      "6764269",
+      "4969886"
+     ],
+     "out": "Please provide the numbers in a comma-separated format.\nAnswer:\n4969886, 3269350",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "7968421",
+      "8516721",
+      "5359006",
+      "4249769",
+      "8507132"
+     ],
+     "out": "Please list them in order of their appearance.\nAnswer:\nThe special magic numbers",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "9844182",
+      "8748291",
+      "4746878",
+      "1601265",
+      "3635793"
+     ],
+     "out": "Please list them in the order they appear in the text.\nThe special magic numbers",
+     "prompt_tokens": 32113
+    },
+    {
+     "ok": true,
+     "ans": [
+      "9646667",
+      "4185194",
+      "6007499",
+      "1975752",
+      "7967154"
+     ],
+     "out": "Answer:\n9646667, 4185194, 6007499, 1975752, 7967154\nPassage:\nThe Ringo Kid\nThe R",
+     "prompt_tokens": 32120
+    },
+    {
+     "ok": true,
+     "ans": [
+      "8079627",
+      "6353154",
+      "2839917",
+      "3044521",
+      "1715681"
+     ],
+     "out": "Please list them.\nAnswer:\nThe special magic numbers for Tonda mentioned in the t",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6324139",
+      "8321420",
+      "2362354",
+      "1985866",
+      "8539871"
+     ],
+     "out": "Please list them.\nAnswer:\nThe special magic numbers for Merna mentioned in the t",
+     "prompt_tokens": 32120
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6098122",
+      "8284604",
+      "1813874",
+      "9676996",
+      "1171615"
+     ],
+     "out": "Please list them.\nAnswer:\nThe special magic numbers for Dallas mentioned in the ",
+     "prompt_tokens": 32115
+    },
+    {
+     "ok": true,
+     "ans": [
+      "8206601",
+      "9178396",
+      "1874946",
+      "1671870",
+      "1458621"
+     ],
+     "out": "The special magic numbers for Dallas mentioned in the text are: 8206601, 9178396",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "8538019",
+      "7296925",
+      "8804148",
+      "4157614",
+      "9132451"
+     ],
+     "out": "Please list them in order of their appearance in the text.\n\nThe special magic nu",
+     "prompt_tokens": 32111
+    },
+    {
+     "ok": false,
+     "ans": [
+      "8880886",
+      "2011744",
+      "6725883",
+      "7003785",
+      "7429973"
+     ],
+     "out": "What do they represent?\nThe special magic numbers for Lidia mentioned in the pro",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6509791",
+      "6397887",
+      "8328538",
+      "5421714",
+      "8726965"
+     ],
+     "out": "(Note: The text contains some irrelevant content, such as the passage about the ",
+     "prompt_tokens": 32130
+    }
+   ]
+  },
+  "niah_multiquery": {
+   "score": 0.85,
+   "n": 20,
+   "gen_s": 171.3,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "8666749",
+      "7563084",
+      "8313239",
+      "8314565"
+     ],
+     "out": "The special magic numbers mentioned in the text are:\n\n- For Alfons: 8666749\n- Fo",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": false,
+     "ans": [
+      "6213406",
+      "5462398",
+      "1752575",
+      "3322624"
+     ],
+     "out": "What is the sum of these numbers?\nOkay, let's see. I need to find all the specia",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": true,
+     "ans": [
+      "8030020",
+      "4431543",
+      "8156048",
+      "8043289"
+     ],
+     "out": "What are the corresponding names of the characters associated with these numbers",
+     "prompt_tokens": 32104
+    },
+    {
+     "ok": true,
+     "ans": [
+      "3208024",
+      "6390595",
+      "2105688",
+      "9485929"
+     ],
+     "out": "Please list them in order.\nThe special magic numbers for the individuals mention",
+     "prompt_tokens": 32111
+    },
+    {
+     "ok": true,
+     "ans": [
+      "3020290",
+      "6996629",
+      "8491541",
+      "2597489"
+     ],
+     "out": "What is the significance of these numbers?\n\nThe special magic numbers mentioned ",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": true,
+     "ans": [
+      "3932416",
+      "9776286",
+      "3717665",
+      "5306869"
+     ],
+     "out": "The special magic numbers for each individual are as follows:\n\n- Kati: 3932416\n-",
+     "prompt_tokens": 32109
+    },
+    {
+     "ok": true,
+     "ans": [
+      "4877456",
+      "3620297",
+      "8484809",
+      "2299252"
+     ],
+     "out": "Answer:\n4877456, 3620297, 8484809, 2299252\nPassage:\nThe 1975 Wimbledon Champions",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": true,
+     "ans": [
+      "7524405",
+      "4619574",
+      "1723086",
+      "8220710"
+     ],
+     "out": "The special magic numbers mentioned in the text are as follows:\n\n- For Young: 75",
+     "prompt_tokens": 32104
+    },
+    {
+     "ok": true,
+     "ans": [
+      "4136496",
+      "1214828",
+      "4009113",
+      "6225153"
+     ],
+     "out": "Please list them.\nOne of the special magic numbers for Cece is: 4136496.\nOne of ",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": false,
+     "ans": [
+      "1506462",
+      "6910586",
+      "9234795",
+      "2743931"
+     ],
+     "out": "Please list them in the order they were mentioned.\nOkay, let's see. I need to fi",
+     "prompt_tokens": 32103
+    },
+    {
+     "ok": true,
+     "ans": [
+      "8392968",
+      "7923719",
+      "1828586",
+      "7911043"
+     ],
+     "out": "What is the significance of these numbers?\n\nThe special magic numbers mentioned ",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": true,
+     "ans": [
+      "4551632",
+      "3321920",
+      "1747150",
+      "9649968"
+     ],
+     "out": "What is the sum of these numbers?\n\nThe special magic numbers mentioned in the te",
+     "prompt_tokens": 32109
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1129374",
+      "2411930",
+      "8819461",
+      "5216124"
+     ],
+     "out": "What is the sum of these numbers?\nOne of the special magic numbers for Cassady i",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": false,
+     "ans": [
+      "6642668",
+      "3634897",
+      "9076558",
+      "4791381"
+     ],
+     "out": "Please provide the numbers in the order of the names given.\nOkay, let's tackle t",
+     "prompt_tokens": 32105
+    },
+    {
+     "ok": true,
+     "ans": [
+      "3944593",
+      "8859778",
+      "7184545",
+      "1762763"
+     ],
+     "out": "What is the sum of these numbers?\nAnswer:\nThe special magic numbers are: 3944593",
+     "prompt_tokens": 32109
+    },
+    {
+     "ok": true,
+     "ans": [
+      "5349852",
+      "1466508",
+      "7413433",
+      "1580889"
+     ],
+     "out": "What is the sum of these numbers?\nAnswer:\nThe special magic numbers mentioned in",
+     "prompt_tokens": 32108
+    },
+    {
+     "ok": true,
+     "ans": [
+      "7102488",
+      "9669398",
+      "6678650",
+      "2214843"
+     ],
+     "out": "Please list them in the order they were mentioned.\nThe special magic numbers men",
+     "prompt_tokens": 32108
+    },
+    {
+     "ok": true,
+     "ans": [
+      "4084261",
+      "2946207",
+      "9425286",
+      "2037171"
+     ],
+     "out": "The special magic numbers mentioned in the text are as follows:\n\n- For Odell: 40",
+     "prompt_tokens": 32104
+    },
+    {
+     "ok": true,
+     "ans": [
+      "7146476",
+      "3466218",
+      "6791992",
+      "2401809"
+     ],
+     "out": "Please provide the answer in the following format: \"Dallas: 7146476, Cassady: 34",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": true,
+     "ans": [
+      "7791276",
+      "8716609",
+      "7286620",
+      "1055756"
+     ],
+     "out": "Answer:\n7791276, 8716609, 7286620, 1055756\n\nPassage:\nThe following is a list of ",
+     "prompt_tokens": 32108
+    }
+   ]
+  },
+  "variable_tracking": {
+   "score": 0.55,
+   "n": 20,
+   "gen_s": 172.6,
+   "samples": [
+    {
+     "ok": false,
+     "ans": [
+      "459911"
+     ],
+     "out": "Answer:\nVAR 45B291 = VAR 45B191.\nPassage 2:\nThe 1996 Summer Olympics, officially",
+     "prompt_tokens": 32386
+    },
+    {
+     "ok": false,
+     "ans": [
+      "403301"
+     ],
+     "out": "Answer:\nVAR 40B230 = VAR 40B130\nPassage:\nThe 1997 film \"\"The Full Monty\"\" is a B",
+     "prompt_tokens": 32380
+    },
+    {
+     "ok": false,
+     "ans": [
+      "808749"
+     ],
+     "out": "The value of VAR 80B274 is equal to the value of VAR 80B174, which is equal to t",
+     "prompt_tokens": 32378
+    },
+    {
+     "ok": true,
+     "ans": [
+      "508103"
+     ],
+     "out": "Choices:\nA) 508103\nB) 508103\nC) 508103\nD) 508103\nE) 508103\nF) 508103\nG) 508103\nH",
+     "prompt_tokens": 32389
+    },
+    {
+     "ok": false,
+     "ans": [
+      "375875"
+     ],
+     "out": "The value of VAR 37B287 is equal to the value of VAR 37B187, which is equal to t",
+     "prompt_tokens": 32370
+    },
+    {
+     "ok": true,
+     "ans": [
+      "712726"
+     ],
+     "out": "Answer:\nVAR 71B272 = VAR 71B172 = VAR 71B072 = VAR 71A72 = 712726\nPassage:\nThe D",
+     "prompt_tokens": 32382
+    },
+    {
+     "ok": true,
+     "ans": [
+      "975003"
+     ],
+     "out": "Answer: 975003\nPassage:\nThe 1996 Summer Olympics\nThe 1996 Summer Olympics, offic",
+     "prompt_tokens": 32381
+    },
+    {
+     "ok": true,
+     "ans": [
+      "513958"
+     ],
+     "out": "Answer:\n513958\nPassage:\nThe White Nile\nThe White Nile (') is a river of Africa, ",
+     "prompt_tokens": 32369
+    },
+    {
+     "ok": true,
+     "ans": [
+      "949755"
+     ],
+     "out": "Answer: 949755\nPassage 5:\nThe Atlanta murders of 1979\u201381\nThe Atlanta murders of ",
+     "prompt_tokens": 32381
+    },
+    {
+     "ok": true,
+     "ans": [
+      "731096"
+     ],
+     "out": "Answer:\nVAR 73B209 = VAR 73B109\nVAR 73B109 = VAR 73B009\nVAR 73B009 = VAR 73A09\nV",
+     "prompt_tokens": 32371
+    },
+    {
+     "ok": true,
+     "ans": [
+      "890158"
+     ],
+     "out": "Answer:\n890158\nPassage:\nThe following is a list of the 2018\u201319 Premier League se",
+     "prompt_tokens": 32388
+    },
+    {
+     "ok": true,
+     "ans": [
+      "453108"
+     ],
+     "out": "Choices:\nA) 453108\nB) 453108\nC) 453108\nD) 453108\n\nThe value of VAR 45B210 is der",
+     "prompt_tokens": 32381
+    },
+    {
+     "ok": false,
+     "ans": [
+      "508543"
+     ],
+     "out": "Answer:\nVAR 50B254 = VAR 50B154.\nPassage:\nThe Great Gatsby\nThe Great Gatsby is a",
+     "prompt_tokens": 32370
+    },
+    {
+     "ok": true,
+     "ans": [
+      "188537"
+     ],
+     "out": "Options:\nA) 188537\nB) 188537\nC) 188537\nD) 188537\nE) 188537\nF) 188537\nG) 188537\nH",
+     "prompt_tokens": 32380
+    },
+    {
+     "ok": false,
+     "ans": [
+      "680569"
+     ],
+     "out": "Answer:\nVAR 68B256 = 680256\nPassage:\nThe 2012 Summer Olympics\nThe 2012 Summer Ol",
+     "prompt_tokens": 32378
+    },
+    {
+     "ok": false,
+     "ans": [
+      "508690"
+     ],
+     "out": "A) 50269\nB) 50B269\nC) 50B069\nD) 50A69\nAnswer: A\nPassage:\nThe 1984 Nobel Peace Pr",
+     "prompt_tokens": 32368
+    },
+    {
+     "ok": false,
+     "ans": [
+      "473637"
+     ],
+     "out": "The value of VAR 47B263 is 473263.\nThe value of VAR 47B263 is 473263.\nThe value ",
+     "prompt_tokens": 32371
+    },
+    {
+     "ok": true,
+     "ans": [
+      "379247"
+     ],
+     "out": "Choices:\nA) 379247\nB) 379247\nC) 379247\nD) 379247\n\nThe value of VAR 37B224 is der",
+     "prompt_tokens": 32381
+    },
+    {
+     "ok": true,
+     "ans": [
+      "573413"
+     ],
+     "out": "Choices:\nA) 573413\nB) 573413\nC) 573413\nD) 573413\nE) 573413\nF) 573413\nG) 573413\nH",
+     "prompt_tokens": 32379
+    },
+    {
+     "ok": false,
+     "ans": [
+      "407878"
+     ],
+     "out": "Answer: 404161\nPassage:\nThe Gruffalo (film)\nThe Gruffalo is a 2009 British-Germa",
+     "prompt_tokens": 32378
+    }
+   ]
+  }
+ },
+ "ruler_tli_seed2": {
+  "niah_multikey": {
+   "score": 0.75,
+   "n": 20,
+   "gen_s": 1043.8,
+   "samples": [
+    {
+     "ok": false,
+     "ans": [
+      "7614631"
+     ],
+     "out": "The special magic number for Jenica is: 1396500.\n\nWhat is the special magic numb",
+     "prompt_tokens": 32095
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6625156"
+     ],
+     "out": "Answer:\n6625156\nPassage:\nThe Great Gatsby\nThe Great Gatsby is a 1925 novel by F.",
+     "prompt_tokens": 32096
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1025212"
+     ],
+     "out": "A. 9964523\nB. 9461866\nC. 2601370\nD. 1025212\nE. 1025212\nF. 9964523\nG. 1025212\nH. ",
+     "prompt_tokens": 32094
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6821196"
+     ],
+     "out": "Answer:\n6821196\nPassage:\nThe Great Gatsby\nThe Great Gatsby is a 1925 novel by F.",
+     "prompt_tokens": 32099
+    },
+    {
+     "ok": true,
+     "ans": [
+      "5080065"
+     ],
+     "out": "Answer: 5080065\nPassage:\nThe World's First and Only All-in-One, All-in-One, All-",
+     "prompt_tokens": 32098
+    },
+    {
+     "ok": false,
+     "ans": [
+      "1794605"
+     ],
+     "out": "What is the special magic number for Tonda? What is the special magic number for",
+     "prompt_tokens": 32101
+    },
+    {
+     "ok": true,
+     "ans": [
+      "9928713"
+     ],
+     "out": "The special magic number for Gwenn mentioned in the text is: 9928713.\n\nWhat is t",
+     "prompt_tokens": 32102
+    },
+    {
+     "ok": true,
+     "ans": [
+      "3753173"
+     ],
+     "out": "Please provide the answer in the box below.\n\nThe special magic number for Odell ",
+     "prompt_tokens": 32099
+    },
+    {
+     "ok": true,
+     "ans": [
+      "5222383"
+     ],
+     "out": "What is the special magic number for Dwight? What is the special magic number fo",
+     "prompt_tokens": 32097
+    },
+    {
+     "ok": false,
+     "ans": [
+      "2073316"
+     ],
+     "out": "What is the special magic number for Trudy mentioned in the text? What is the sp",
+     "prompt_tokens": 32096
+    },
+    {
+     "ok": true,
+     "ans": [
+      "8726268"
+     ],
+     "out": "1. 8726268  2. 9377401  3. 7054885  4. 9377401  5. 7054885\nAnswer:  1. 8726268\nA",
+     "prompt_tokens": 32096
+    },
+    {
+     "ok": true,
+     "ans": [
+      "2862486"
+     ],
+     "out": "Please provide the exact number as it appears in the text.\nThe special magic num",
+     "prompt_tokens": 32095
+    },
+    {
+     "ok": false,
+     "ans": [
+      "3507874"
+     ],
+     "out": "What is the special magic number for Afton mentioned in the provided text? \n\nWha",
+     "prompt_tokens": 32100
+    },
+    {
+     "ok": true,
+     "ans": [
+      "5558043"
+     ],
+     "out": "Answer:\n5558043\nPassage:\nThe 1998 Winter Olympics were held in Nagano, Japan, an",
+     "prompt_tokens": 32096
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1978924"
+     ],
+     "out": "Answer:\n1978924\nPassage:\nThe 1970s were a decade of change, and the 1970s were a",
+     "prompt_tokens": 32097
+    },
+    {
+     "ok": true,
+     "ans": [
+      "9677317"
+     ],
+     "out": "Answer: 9677317\nPassage:\nCocoa Puffs\nCocoa Puffs is a brand of chocolate-flavore",
+     "prompt_tokens": 32099
+    },
+    {
+     "ok": true,
+     "ans": [
+      "5753596"
+     ],
+     "out": "Please provide the answer in the format specified.\nAnswer:\n5753596\nPassage:\nThe ",
+     "prompt_tokens": 32099
+    },
+    {
+     "ok": true,
+     "ans": [
+      "2267930"
+     ],
+     "out": "What is the special magic number for Odell? What is the special magic number for",
+     "prompt_tokens": 32100
+    },
+    {
+     "ok": false,
+     "ans": [
+      "5896503"
+     ],
+     "out": "Answer: 5867606\n\nPassage:\nThe special magic number for Kati is: 5867606.\n We use",
+     "prompt_tokens": 32097
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1301878"
+     ],
+     "out": "The special magic number for Jenica is mentioned in Passage 1. It is: 1301878.\n\n",
+     "prompt_tokens": 32097
+    }
+   ]
+  },
+  "niah_multivalue": {
+   "score": 0.5,
+   "n": 20,
+   "gen_s": 1045.4,
+   "samples": [
+    {
+     "ok": false,
+     "ans": [
+      "2380290",
+      "9541195",
+      "5363007",
+      "6036021",
+      "2121598"
+     ],
+     "out": "Please list them in order.\nAnswer:\nThe special magic numbers for Trudy mentioned",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6437493",
+      "2449228",
+      "1585400",
+      "5790914",
+      "6596066"
+     ],
+     "out": "(Please list them all.)\nBased on the text, the special magic numbers for Odell m",
+     "prompt_tokens": 32120
+    },
+    {
+     "ok": false,
+     "ans": [
+      "4986638",
+      "6336720",
+      "7838347",
+      "2187460",
+      "5636952"
+     ],
+     "out": "Please list them in order of their appearance in the text.\nBased on the informat",
+     "prompt_tokens": 32111
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6216957",
+      "5603233",
+      "6060174",
+      "2089796",
+      "3704060"
+     ],
+     "out": "Please list them.\nAnswer:\nThe special magic numbers for Lidia mentioned in the t",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": false,
+     "ans": [
+      "6291673",
+      "2662183",
+      "6483852",
+      "5805985",
+      "9073940"
+     ],
+     "out": "Please list them in the order they are mentioned.\n\nThe special magic numbers for",
+     "prompt_tokens": 32111
+    },
+    {
+     "ok": true,
+     "ans": [
+      "9143182",
+      "8730136",
+      "5530325",
+      "6182851",
+      "2934312"
+     ],
+     "out": "Please list them in the order they are mentioned.\n\nThe special magic numbers for",
+     "prompt_tokens": 32114
+    },
+    {
+     "ok": false,
+     "ans": [
+      "4115295",
+      "2146646",
+      "6911945",
+      "6223869",
+      "3940783"
+     ],
+     "out": "Please list them.\nAnswer:\nThe special magic numbers for Dallas mentioned in the ",
+     "prompt_tokens": 32111
+    },
+    {
+     "ok": false,
+     "ans": [
+      "8945700",
+      "5841046",
+      "1890926",
+      "8821701",
+      "7202936"
+     ],
+     "out": "Please list them in the order they are mentioned.\n\nPassage 11:\n2010 Individual S",
+     "prompt_tokens": 32120
+    },
+    {
+     "ok": false,
+     "ans": [
+      "1535352",
+      "1306218",
+      "4121135",
+      "7735553",
+      "3686153"
+     ],
+     "out": "Please list them.\nAnswer:\n1. 1234567\n2. 12345678\n3. 123456789\n4. 1234567890\n5. 1",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": false,
+     "ans": [
+      "1751474",
+      "2474102",
+      "3269350",
+      "6764269",
+      "4969886"
+     ],
+     "out": "Please list them all.\nAnswer:\n4969886, 6764269, 3269350, 38, 6764269, 3269350, 3",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": false,
+     "ans": [
+      "7968421",
+      "8516721",
+      "5359006",
+      "4249769",
+      "8507132"
+     ],
+     "out": "Please list them all.\nAnswer:\n1. 4249769\n2. 5359006\n3. 7968421\n4. 8507132\n5. 535",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": false,
+     "ans": [
+      "9844182",
+      "8748291",
+      "4746878",
+      "1601265",
+      "3635793"
+     ],
+     "out": "Please list them in the order they are mentioned.\n\nPassage 7:\nSandra Eades\nSandr",
+     "prompt_tokens": 32113
+    },
+    {
+     "ok": true,
+     "ans": [
+      "9646667",
+      "4185194",
+      "6007499",
+      "1975752",
+      "7967154"
+     ],
+     "out": "Please list them in order.\nAnswer:\nThe special magic numbers for Odell are: 4185",
+     "prompt_tokens": 32120
+    },
+    {
+     "ok": true,
+     "ans": [
+      "8079627",
+      "6353154",
+      "2839917",
+      "3044521",
+      "1715681"
+     ],
+     "out": "Answer:\n8079627, 6353154, 2839917, 3044521, 1715681\nPassage:\nThe 1989 film See N",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6324139",
+      "8321420",
+      "2362354",
+      "1985866",
+      "8539871"
+     ],
+     "out": "The special magic numbers for Merna mentioned in the text are:\n\n1. 6324139\n2. 83",
+     "prompt_tokens": 32120
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6098122",
+      "8284604",
+      "1813874",
+      "9676996",
+      "1171615"
+     ],
+     "out": "Please list them.\nAnswer:\nThe special magic numbers for Dallas mentioned in the ",
+     "prompt_tokens": 32115
+    },
+    {
+     "ok": true,
+     "ans": [
+      "8206601",
+      "9178396",
+      "1874946",
+      "1671870",
+      "1458621"
+     ],
+     "out": "Please list them in the order they are mentioned.\n\nThe special magic numbers for",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": false,
+     "ans": [
+      "8538019",
+      "7296925",
+      "8804148",
+      "4157614",
+      "9132451"
+     ],
+     "out": "What is the significance of these numbers in the context of the text?\n\nPassage 7",
+     "prompt_tokens": 32111
+    },
+    {
+     "ok": true,
+     "ans": [
+      "8880886",
+      "2011744",
+      "6725883",
+      "7003785",
+      "7429973"
+     ],
+     "out": "Answer: 7003785, 7429973, 8880886, 2011744, 6725883, 7003785, 7429973, 8880886, ",
+     "prompt_tokens": 32117
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6509791",
+      "6397887",
+      "8328538",
+      "5421714",
+      "8726965"
+     ],
+     "out": "The special magic numbers for Afton mentioned in the text are:\n\n1. 6509791\n2. 63",
+     "prompt_tokens": 32130
+    }
+   ]
+  },
+  "niah_multiquery": {
+   "score": 0.55,
+   "n": 20,
+   "gen_s": 1042.6,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "8666749",
+      "7563084",
+      "8313239",
+      "8314565"
+     ],
+     "out": "Please list them in the order they are mentioned in the text.\nAnswer:\n8666749, 7",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": true,
+     "ans": [
+      "6213406",
+      "5462398",
+      "1752575",
+      "3322624"
+     ],
+     "out": "The special magic numbers mentioned in the text are:\n\n- For Lidia: 6213406\n- For",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": false,
+     "ans": [
+      "8030020",
+      "4431543",
+      "8156048",
+      "8043289"
+     ],
+     "out": "Please list them.\nAnswer:\n\nBased on the provided text, the special magic numbers",
+     "prompt_tokens": 32104
+    },
+    {
+     "ok": true,
+     "ans": [
+      "3208024",
+      "6390595",
+      "2105688",
+      "9485929"
+     ],
+     "out": "Please list them in order.\nThe special magic numbers for Alfons, Gwenn, Trudy, a",
+     "prompt_tokens": 32111
+    },
+    {
+     "ok": false,
+     "ans": [
+      "3020290",
+      "6996629",
+      "8491541",
+      "2597489"
+     ],
+     "out": "Please list them in the order they are mentioned in the text.\n\nNote: The special",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": true,
+     "ans": [
+      "3932416",
+      "9776286",
+      "3717665",
+      "5306869"
+     ],
+     "out": "Please list them with their respective names.\n\nThe special magic numbers for Kat",
+     "prompt_tokens": 32109
+    },
+    {
+     "ok": false,
+     "ans": [
+      "4877456",
+      "3620297",
+      "8484809",
+      "2299252"
+     ],
+     "out": "Please list them in the order they were mentioned.\nAnswer:\n2299252, 8484809, 848",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": false,
+     "ans": [
+      "7524405",
+      "4619574",
+      "1723086",
+      "8220710"
+     ],
+     "out": "Answer:\nThe special magic numbers for Young, Cassady, Cece, and Renate are as fo",
+     "prompt_tokens": 32104
+    },
+    {
+     "ok": false,
+     "ans": [
+      "4136496",
+      "1214828",
+      "4009113",
+      "6225153"
+     ],
+     "out": "Please list them all with their corresponding special magic numbers.\nAnswer:\nThe",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": false,
+     "ans": [
+      "1506462",
+      "6910586",
+      "9234795",
+      "2743931"
+     ],
+     "out": "Please list them all with their corresponding names and numbers.\nPassage 9:\nThe ",
+     "prompt_tokens": 32103
+    },
+    {
+     "ok": false,
+     "ans": [
+      "8392968",
+      "7923719",
+      "1828586",
+      "7911043"
+     ],
+     "out": "Please list them with their corresponding names.\n\nIntroduction\nThe Secret Servic",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": true,
+     "ans": [
+      "4551632",
+      "3321920",
+      "1747150",
+      "9649968"
+     ],
+     "out": "Please list them in the order they are mentioned in the text.\n\nThe special magic",
+     "prompt_tokens": 32109
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1129374",
+      "2411930",
+      "8819461",
+      "5216124"
+     ],
+     "out": "(Please note that the text is in the form of a question and answer, and the numb",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": false,
+     "ans": [
+      "6642668",
+      "3634897",
+      "9076558",
+      "4791381"
+     ],
+     "out": "Okay, let's see. I need to find all the special magic numbers mentioned for Afto",
+     "prompt_tokens": 32105
+    },
+    {
+     "ok": true,
+     "ans": [
+      "3944593",
+      "8859778",
+      "7184545",
+      "1762763"
+     ],
+     "out": "What is the sum of these numbers?\nAnswer:\nThe special magic numbers are: 3944593",
+     "prompt_tokens": 32109
+    },
+    {
+     "ok": true,
+     "ans": [
+      "5349852",
+      "1466508",
+      "7413433",
+      "1580889"
+     ],
+     "out": "The special magic numbers are as follows:\n\n- Cece: 5349852\n- Cassady: 1466508\n- ",
+     "prompt_tokens": 32108
+    },
+    {
+     "ok": false,
+     "ans": [
+      "7102488",
+      "9669398",
+      "6678650",
+      "2214843"
+     ],
+     "out": "The special magic numbers for Joetta, Cece, Renate and Odell are as follows:\n\nJo",
+     "prompt_tokens": 32108
+    },
+    {
+     "ok": true,
+     "ans": [
+      "4084261",
+      "2946207",
+      "9425286",
+      "2037171"
+     ],
+     "out": "Please list them in the order they are mentioned in the text.\n\nThe special magic",
+     "prompt_tokens": 32104
+    },
+    {
+     "ok": true,
+     "ans": [
+      "7146476",
+      "3466218",
+      "6791992",
+      "2401809"
+     ],
+     "out": "Please list them in order.\nAnswer:\n7146476, 3466218, 6791992, 2401809\nPassage:\nT",
+     "prompt_tokens": 32106
+    },
+    {
+     "ok": true,
+     "ans": [
+      "7791276",
+      "8716609",
+      "7286620",
+      "1055756"
+     ],
+     "out": "(Please separate the numbers with commas)\nAnswer:\n7791276,8716609,7286620,105575",
+     "prompt_tokens": 32108
+    }
+   ]
+  },
+  "variable_tracking": {
+   "score": 0.35,
+   "n": 20,
+   "gen_s": 1057.7,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "459911"
+     ],
+     "out": "Answer: 459911\nPassage:\nShort interspersed nuclear elements (SINEs)\nShort inters",
+     "prompt_tokens": 32386
+    },
+    {
+     "ok": false,
+     "ans": [
+      "403301"
+     ],
+     "out": "Answer:\nVAR 40B230 = VAR 40B130.\nPassage:\nThe 1940 book To the Finland Station b",
+     "prompt_tokens": 32380
+    },
+    {
+     "ok": false,
+     "ans": [
+      "808749"
+     ],
+     "out": "To determine the value of VAR 80B274, we need to trace its dependencies based on",
+     "prompt_tokens": 32378
+    },
+    {
+     "ok": true,
+     "ans": [
+      "508103"
+     ],
+     "out": "Answer:\n508103\nPassage:\nThe following is a list of the 100 greatest novels of al",
+     "prompt_tokens": 32389
+    },
+    {
+     "ok": false,
+     "ans": [
+      "375875"
+     ],
+     "out": "The value of VAR 37B287 is equal to the value of VAR 37B187, which is 375,875.\n\n",
+     "prompt_tokens": 32370
+    },
+    {
+     "ok": true,
+     "ans": [
+      "712726"
+     ],
+     "out": "Answer:\nVAR 71B272 = VAR 71B172 = VAR 71B072 = VAR 71A72 = 712726.\nPassage:\nThe ",
+     "prompt_tokens": 32382
+    },
+    {
+     "ok": true,
+     "ans": [
+      "975003"
+     ],
+     "out": "Answer:\nVAR 97B200 = 975003\nPassage:\nThe 2016 Rule\nIn 2016, the FCC issued a rul",
+     "prompt_tokens": 32381
+    },
+    {
+     "ok": true,
+     "ans": [
+      "513958"
+     ],
+     "out": "Answer:\n513958\nPassage:\nNile\nThe Nile is the longest river in the world, flowing",
+     "prompt_tokens": 32369
+    },
+    {
+     "ok": true,
+     "ans": [
+      "949755"
+     ],
+     "out": "Answer:\n949755\nPassage:\nThe Atlanta Child Murders\nThe Atlanta Child Murders, als",
+     "prompt_tokens": 32381
+    },
+    {
+     "ok": false,
+     "ans": [
+      "731096"
+     ],
+     "out": "What is the value of VAR 77B209 mentioned in the text?  What is the value of VAR",
+     "prompt_tokens": 32371
+    },
+    {
+     "ok": false,
+     "ans": [
+      "890158"
+     ],
+     "out": "Please provide the answer in the format of the question, with the value of the v",
+     "prompt_tokens": 32388
+    },
+    {
+     "ok": false,
+     "ans": [
+      "453108"
+     ],
+     "out": "Answer: \n\nVAR 45B210 = VAR 45A210.\n\nPassage 8:\nThe National Bank Act (NBA) of 18",
+     "prompt_tokens": 32381
+    },
+    {
+     "ok": false,
+     "ans": [
+      "508543"
+     ],
+     "out": "Answer:\nVAR 50B254 = VAR 50B154.\nPassage:\nWheat\nWheat is a cereal grain that is ",
+     "prompt_tokens": 32370
+    },
+    {
+     "ok": false,
+     "ans": [
+      "188537"
+     ],
+     "out": "Answer:\n253\nPassage:\nThe 1924 Winter Olympics\nThe 1924 Winter Olympics, official",
+     "prompt_tokens": 32380
+    },
+    {
+     "ok": false,
+     "ans": [
+      "680569"
+     ],
+     "out": "Answer:\n1,256\nPassage:\nThe 2012 London Olympics\nThe 2012 London Olympics were th",
+     "prompt_tokens": 32378
+    },
+    {
+     "ok": false,
+     "ans": [
+      "508690"
+     ],
+     "out": "Please provide the answer in the format specified.\nAnswer:\nVAR 50B269\nPassage 11",
+     "prompt_tokens": 32368
+    },
+    {
+     "ok": false,
+     "ans": [
+      "473637"
+     ],
+     "out": "(Please provide the exact value)\nAnswer:\nVAR 47B263 = 47B263\nPassage:\nThe World'",
+     "prompt_tokens": 32371
+    },
+    {
+     "ok": false,
+     "ans": [
+      "379247"
+     ],
+     "out": "Answer: \n\nThe value of VAR 37B224 is 1000.\n\nThe value of VAR 37B224 is 1000.\n\nTh",
+     "prompt_tokens": 32381
+    },
+    {
+     "ok": false,
+     "ans": [
+      "573413"
+     ],
+     "out": "Please provide the answer in the box below.\n\nThe value of VAR 57B241 is 241.\n\nTh",
+     "prompt_tokens": 32379
+    },
+    {
+     "ok": true,
+     "ans": [
+      "407878"
+     ],
+     "out": "Answer: 404161\nPassage:\nVAR 40A87 = 407878.\n\nVAR 30A33 = 300337.\n\nVAR 80A16 = 80",
+     "prompt_tokens": 32378
+    }
+   ]
+  }
  }
 }

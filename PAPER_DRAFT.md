@@ -77,9 +77,9 @@ TLI 以 sglang attention backend 形式全链路集成：4bit 三张量索引逐
 2. **系统**：生产级集成——4bit 索引存储、批量 kernel 组合、CUDA graph
    三方法契约，每步配逐位/格点级对拍（§5）；
 3. **双口径诚实评估**：LongBench 均值（49.92 vs FullKV 50.36）+ RULER 多任务
-   （NIAH 单针双 seed 0.625、multikey/multivalue/multiquery/VT 均值 0.588 vs
-   0.80）两端；kernel microbench（同机三方，Quest/DSA 官方 kernel 原样接入）
-   + e2e 吞吐两层都测（§6）；
+   （NIAH 单针双 seed 0.625、multikey/multivalue/multiquery/VT 双 seed
+   pooled 均值 0.562 vs 0.794）两端；kernel microbench（同机三方，Quest/DSA
+   官方 kernel 原样接入）+ e2e 吞吐两层都测（§6）；
 4. **negative results 护城河**：12 项 No-Go 假设（聚类代表、L1 分区、
    在线 gate、跨层共享 PCA 基、CPU 捞取……）逐项映射到 design
    decisions（§4/§7），加三例测量方法案例（两例主动复测撤回 headline、
@@ -475,21 +475,24 @@ qasper 44.03 / multifieldqa_en 52.98——qasper 与 TIA 精确同值）。诊�
 必须复测（§7 方法论案例二）。
 
 **RULER 多任务扩展（Quest/HISA 论文口径对齐）**：NIAH 之外补 RULER 官方
-模板四任务（S=32K、n=20/任务、同机同权重双方法、评分=答案值全命中）：
+模板四任务（S=32K、双 seed 各 n=20 → pooled n=40/任务、同机同权重双方法、
+评分=答案值全命中）：
 
 | RULER 任务 | FullKV | TLI@1024 | gap | 失败模式 |
 |---|---|---|---|---|
-| niah_multikey（4 针异 key） | 0.95 | 0.70 | −0.25 | 抓到干扰 key 的数字（同单针机制） |
-| niah_multivalue（同 key 5 值列举） | 0.70 | 0.55 | −0.15 | 部分值丢失（针多冗余缓冲） |
-| niah_multiquery（4 针 4 问） | 0.85 | 0.70 | −0.15 | 同上 |
-| variable_tracking（5 值×3 链） | 0.70 | 0.40 | −0.30 | 检索到链中段 VAR 名而非赋值源头 |
-| **均值** | **0.80** | **0.588** | **−0.21** | — |
+| niah_multikey（4 针异 key） | 0.925 | 0.725 | −0.20 | 抓到干扰 key 的数字（同单针机制） |
+| niah_multivalue（同 key 5 值列举） | 0.775 | 0.525 | −0.25 | 部分值丢失（针多冗余缓冲） |
+| niah_multiquery（4 针 4 问） | 0.850 | 0.625 | −0.225 | 同上 |
+| variable_tracking（5 值×3 链） | 0.625 | 0.375 | −0.25 | 检索到链中段 VAR 名而非赋值源头 |
+| **均值** | **0.794** | **0.562** | **−0.231** | — |
 
-三点诚实读法：①多任务均值 gap（−0.21）**小于**单针极端 gap（−0.375）——
-多针自带冗余，单针是稀疏检索的 worst case；②VT 掉分最大（−0.30）——
-链上针全落 far 区时 0.8% far 预算的物理上限与 NIAH 诊断同构，FullKV 基线
-本身也仅 0.70（Qwen3-8B 链式追踪能力上限）；③单 seed n=20 口径（与
-NIAH 案例二教训一致标注，双 seed 复测与 H100 主表合并跑）。
+三点诚实读法：①多任务均值 gap（−0.231）**小于**单针极端 gap（−0.375）——
+多针自带冗余，单针是稀疏检索的 worst case；②VT/multivalue 掉分最大
+（−0.25）——链上针全落 far 区时 0.8% far 预算的物理上限与 NIAH 诊断
+同构，FullKV 基线本身也仅 0.625（Qwen3-8B 链式追踪能力上限）；③双 seed
+pooled n=40 口径（任务×seed 方差 ±0.15 实测——FullKV VT 两 seed 0.70/0.55、
+TLI multiquery 0.70/0.55，单任务单 seed 数字不可引；池化后逐任务 gap
+收窄至 −0.20~−0.25）。
 
 **CWE/FWE（聚合型）不纳入对比的依据**：合成词流任务（common×30 vs
 filler×8 频率沟）四轮诊断显示 Qwen3-8B 在 8K–32K 词流上聚合计数不可解
