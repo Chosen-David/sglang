@@ -828,6 +828,10 @@ class TLISparseAttnBackend(AttentionBackend):
         k_buf, v_buf = pool.get_kv_buffer(layer_id)
         nq, H = q_b.shape[0], q_b.shape[1]
         # M11 fused 路径：sel 逻辑位置 → pool 槽位（与 eager 相同的一次小 gather）
+        # 注意：q_raw 是父张量 q[starts[b]:ends[b]] 的切片 view，行 stride 可能
+        # 不等于 H*D（实测 stride=6144 ≠ 4096）；kernel 寻址假设行连续，
+        # 必须先连续化（一次 bf16 拷贝仍远快于 eager 的 fp32 双物化），
+        # 否则 row≥1 全部读错位置（e2e 乱文根因，2026-09-27 修复）。
         if (
             q_raw is not None
             and self.profile.use_prefill_kernel
@@ -836,8 +840,9 @@ class TLISparseAttnBackend(AttentionBackend):
             and (self.head_dim & (self.head_dim - 1)) == 0
         ):
             pool_sel = locs[sel]  # [nq, Hkv, K2] pool 槽位
+            q_c = q_raw if q_raw.is_contiguous() else q_raw.contiguous()
             out_k = tli_sparse_gather_attn_dot(
-                q_raw, pool_sel, k_buf, v_buf, G, S_loc=k_buf.shape[0]
+                q_c, pool_sel, k_buf, v_buf, G, S_loc=k_buf.shape[0]
             )
             return out_k.view(nq, H * self.head_dim)
         K2 = sel.shape[-1]
