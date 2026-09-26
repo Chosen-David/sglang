@@ -281,6 +281,27 @@ E5b 端到端实现中发现 E4b 的 budget 语义有 bug：整簇贪心展开�
 - 延迟：eager 1.897 ms → triton 1.165 ms = **1.63×**
 - 完整两级 = L1 kernel + 小 compaction（2048 元素）+ L2 kernel，共 2 launches（vs eager ~15 kernels）
 
+### 3.9 E59 双消融（2026-09-26，8B/30B trace 重放，回应两个设计问题）
+
+**消融一：L1 块表示 minmax vs avg**（`analyze_e59_l1_ablation.py`，K1=128 块、far top-1024 mass recall 口径，8B 16 条 trace + 30B hotpotqa）：
+
+| 块表示 | 8B 均值 | 8B 最差 | 30B hotpotqa |
+|---|---|---|---|
+| minmax 上界（现行） | **0.885** | 0.781 (narrativeqa) | **0.967** |
+| avg 均值点积 | 0.695 | 0.513 (narrativeqa) | 0.948 |
+
+minmax 全面胜出（8B 平均 +0.19，最差样本 +0.27）：avg 是块内均值的非保守估计，块内符号对消使远端高响应块被系统性低估——这正是 TIA 采用 minmax 上界的理论依据（上界粗筛在「漏选」方向上错误更少）。**结论：现行 minmax 设计实证最优，avg 记入消融表。**
+
+**消融二：near_len 配比敏感性**（`analyze_e59_near_alpha.py`，near_len ∈ {1024, 2048, 4096}，far 区 mass 与 far 区 top-256 覆盖率）：
+
+| near_len | 8B far_mass 均值 | 8B far top-256 覆盖 | 30B far_mass |
+|---|---|---|---|
+| 1024 | 0.364 | 0.758 | 0.192 |
+| 2048（现行） | 0.330 | 0.772 | 0.182 |
+| 4096 | 0.284 | 0.782 | 0.118 |
+
+near_len 4 倍变化（1024→4096）far mass 仅降 0.08、far 选择质量仅升 ~2%——**边际递减明显，固定 near_len=2048 是合理工作点**。用户提议的 alpha 比例化（near 预算随总预算按比例分）实证上收益不显著且引入额外超参；更重要的是：**固定 near_len + 常数 far 预算 = 每 token 成本 O(1)（与序列长度 t 无关），这是 TLI 相对 sliding-window+自适应 budget 方法（如 TWI top-p）的结构性设计优势**——alpha 化会引入 O(t) 依赖破坏该性质，记入论文设计动机段。
+
 ---
 
 ## 4. 创新点 C：TC×CC 异构 Kernel —— 批判性分析
@@ -379,6 +400,23 @@ self.layer_far_skip: torch.BoolTensor [n_layers]   # True = 该层跳过远端�
 
 1. **分布偏移**：校准 profile 与实际 workload 任务不一致时 recall 下降（如用 hotpotqa+needle 校准、gov_report 来了只跳 13/实际需要 0 层）——**此时质量不损失**（保守方向的错误只是少省点算力）；反向错误（把 far 重要的层跳了）由 precision 1.00 + margin 阈值防护。
 2. **写进论文的口径**：D' 是「calibration-based static layer scheduling」，与 Mixture-of-Attention 层异质性研究（如 NSA 的 head 选择、SBA）对话，但那些是训练后的路由，D' 是 training-free 校准——增量声明要写清楚。
+
+### 4A.6 D' 升级：prefill 动态测层 → decode 动态跳 far（E60，2026-09-26，commit 2f9b10f03）
+
+E5b 已证明静态全局掩码跨任务不泛化（musique/qasper/multifieldqa_en 掉 4.8-5.9 分），per-task 重校准也失败。升级方案：**不依赖校准集，在当前请求自己的 prefill 末 chunk 上测 per-layer far mass**——分布偏移问题从根上消除（测的就是推理时的真实分布）。
+
+机制（`indexer.py`，env `SGLANG_TLI_DYN_GATE` / `SGLANG_TLI_DYN_GATE_THRESH=0.01`）：
+1. `select_batched` 末 chunk（r1==Nq）对真实 fine 分数矩阵 softmax 后统计 far 区 mass（行×Hkv 平均）→ 存 `self.dyn_far_stat`；
+2. decode `select()` 开头幂等置位：`skip_far = dyn_far_stat < thresh`；
+3. far_stat 双峰分布（musique 18 层 <0.01 vs 其余 0.017-0.26），阈值 0.01 切在自然间隙上。
+
+验证（`test_tli_8b_dyngate.py` / `_mh.py`，LongBench 官方模板口径）：
+- **离线 corr GO**：prefill far_stat 与 decode 真实 far 质量相关 0.86-0.99；
+- **安全任务零损失**（gov_report/narrativeqa，far_stat 低 → 跳层，输出与 gate-off 语义一致）；
+- **多跳三任务 GO**（musique/qasper/multifieldqa_en——静态版正是在这批任务崩的）：gate-on 输出与 gate-off（= TIA 精度基线）语义等价，静态版失败模式（掉 4.8-5.9 分）未复现；
+- 全量 E5b 三任务 200 样本/任务双臂对照进行中（`test_tli_dyngate_e5b.py`，sglang 版）。
+
+设计权衡（写论文时明确）：动态测层的开销 = prefill 末 chunk 一次 softmax+sum（O(S·Hkv)，与一次 L2 打分同量级，分摊到整个 decode 期可忽略）；收益 = 跳层层的 far 检索（L1 topk + L2 gather + attention far 部分）全部省掉。
 
 ---
 

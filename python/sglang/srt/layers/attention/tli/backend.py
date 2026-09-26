@@ -46,6 +46,7 @@ import torch
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
 from sglang.srt.layers.attention.tli.config import TLIProfile
 from sglang.srt.layers.attention.tli.indexer import TLIIndexer
+from sglang.srt.layers.attention.tli.kernels import tli_sparse_gather_attn_dot
 
 # 增量维护的单步上限：decode n=1 常态；超过（如 chunked/speculative 或
 # req_pool_idx 被新请求复用导致 S 倒退/跳变）则全量重建
@@ -665,7 +666,8 @@ class TLISparseAttnBackend(AttentionBackend):
             t_arr = torch.arange(prefix, S, device=q.device)
             sel = indexer.select_batched(index, q_b, t_arr)  # [nq, Hkv, K2] 逻辑位置
             out[starts[b] : ends[b]] = self._sparse_extend_one(
-                q_b, sel, locs, pool, layer_id, Hkv, G
+                q_b, sel, locs, pool, layer_id, Hkv, G,
+                q_raw=q[starts[b] : ends[b]],
             ).to(q.dtype)
         # 返回约定：[T, H*D]（helper 已按此形状返回）
         return out
@@ -799,14 +801,29 @@ class TLISparseAttnBackend(AttentionBackend):
         o = torch.einsum("ahgs,hsd->ahgd", att, v_e)
         return o.reshape(nq, -1)
 
-    def _sparse_extend_one(self, q_b, sel, locs, pool, layer_id, Hkv, G):
+    def _sparse_extend_one(self, q_b, sel, locs, pool, layer_id, Hkv, G, q_raw=None):
         """单个请求的稀疏 prefill（select_batched 选择 + gather 前向）。
 
         sel: [nq, Hkv, K2] 逻辑位置（far+near 拼接，scatter 口径无重复）。
-        按 kv head 循环 + 行分块控制 gather 峰值显存。
+        M11：SGLANG_TLI_PREFILL_KERNEL=1 时走 Triton fused gather+online
+        softmax（省 [n,K2,D] fp32 物化的 3× 带宽，kernel 级 11-16×），
+        q_raw 为 bf16 原 view（kernel 输入；eager 路径用 fp32 的 q_b）。
         """
         k_buf, v_buf = pool.get_kv_buffer(layer_id)
         nq, H = q_b.shape[0], q_b.shape[1]
+        # M11 fused 路径：sel 逻辑位置 → pool 槽位（与 eager 相同的一次小 gather）
+        if (
+            q_raw is not None
+            and self.profile.use_prefill_kernel
+            and q_raw.dtype in (torch.bfloat16, torch.float16)
+            and (G & (G - 1)) == 0
+            and (self.head_dim & (self.head_dim - 1)) == 0
+        ):
+            pool_sel = locs[sel]  # [nq, Hkv, K2] pool 槽位
+            out_k = tli_sparse_gather_attn_dot(
+                q_raw, pool_sel, k_buf, v_buf, G, S_loc=k_buf.shape[0]
+            )
+            return out_k.view(nq, H * self.head_dim)
         K2 = sel.shape[-1]
         pool_sel = locs[sel]  # [nq, Hkv, K2] pool 槽位
         out = torch.empty(nq, H, self.head_dim, device=q_b.device, dtype=q_b.dtype)

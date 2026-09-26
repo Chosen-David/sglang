@@ -508,3 +508,149 @@ def tli_compact(
         num_warps=4,
     )
     return tok
+
+
+# ---------------- M11：统一稀疏 attention fused gather+softmax（#58 ext 主力）----------------
+# 归因定稿：30B prefill ext 61%（_sparse_extend_one 的 gather 物化 [n,K2,D] fp32
+# ≈17GB/chunk 带宽主导，Python 批量化三连试 No-Go）。本 kernel 经 sel 间接寻址
+# 直读 K/V（bf16 原地 fp32 累加 online softmax），省掉全部中间物化：带宽账
+# eager = 读bf16+写fp32+读fp32(×2 for K/V) ≈ 3×；fused = 只读 bf16 一次。
+# decode _sparse_attn 与 prefill _sparse_extend_one 共用（形态一致：
+# per (row, kv-head) 的 [G,D] q × [K2,D] 间接寻址 K/V）。
+# 哨兵语义：sel >= S_loc 的槽位 softmax 权重置 0（与 eager valid mask 相同）。
+# online softmax 与全量 softmax 数学等价（fp32 累加顺序差 ~1e-6 级）。
+@triton.jit
+def _tli_sparse_attn_kernel(
+    q_ptr, sel_ptr, kbuf_ptr, vbuf_ptr, out_ptr,
+    sm_scale,
+    H, Hkv, K2, S_loc,
+    G: tl.constexpr, D: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+):
+    row = tl.program_id(0).to(tl.int64)
+    h = tl.program_id(1)
+    offs_g = tl.arange(0, G)
+    offs_d = tl.arange(0, D)
+    qp = q_ptr + row * (H * D) + (h * G + offs_g)[:, None] * D + offs_d[None, :]
+    q = tl.load(qp).to(tl.float32)  # [G, D]
+    m_i = tl.full([G], float("-inf"), tl.float32)
+    l_i = tl.zeros([G], tl.float32)
+    acc = tl.zeros([G, D], tl.float32)
+    sel_base = sel_ptr + (row * Hkv + h) * K2
+    kv_stride = Hkv * D
+    for k0 in range(0, K2, BLOCK_K):
+        offs_k = k0 + tl.arange(0, BLOCK_K)
+        km = offs_k < K2
+        s_v = tl.load(sel_base + offs_k, mask=km, other=S_loc).to(tl.int64)
+        valid = s_v < S_loc
+        s_c = tl.where(valid, s_v, 0)
+        # K/V tile [BLOCK_K, D]：pool 槽位 s_c × kv head h 连续 D 维
+        addr = s_c[:, None] * kv_stride + h * D + offs_d[None, :]
+        kt = tl.load(kbuf_ptr + addr, mask=km[:, None], other=0).to(tl.float32)
+        att = tl.sum(q[:, None, :] * kt[None, :, :], axis=2) * sm_scale  # [G, BK]
+        att = tl.where(valid[None, :], att, float("-inf"))
+        m_new = tl.maximum(m_i, tl.max(att, axis=1))
+        p = tl.exp(att - m_new[:, None])  # -inf 位 → 0
+        alpha = tl.exp(m_i - m_new)
+        l_i = l_i * alpha + tl.sum(p, axis=1)
+        acc = acc * alpha[:, None]
+        vt = tl.load(vbuf_ptr + addr, mask=km[:, None], other=0).to(tl.float32)
+        acc += tl.sum(p[:, :, None] * vt[None, :, :], axis=1)  # [G, D]
+        m_i = m_new
+    out = acc / l_i[:, None]
+    outp = out_ptr + row * (H * D) + (h * G + offs_g)[:, None] * D + offs_d[None, :]
+    tl.store(outp, out.to(out_ptr.dtype.element_ty))
+
+
+def tli_sparse_gather_attn(
+    q: torch.Tensor,      # [n, H, D] bf16/fp16 contiguous
+    sel: torch.Tensor,    # [n, Hkv, K2] int 逻辑位置（>= S_loc 为哨兵）
+    k_buf: torch.Tensor,  # [pool, Hkv, D] contiguous
+    v_buf: torch.Tensor,
+    G: int,
+    S_loc: int,           # 逻辑位置合法值域（哨兵判定）
+    block_k: int = 64,
+) -> torch.Tensor:
+    """返回 [n, H, D] 与 q 同 dtype。G 须为 2 的幂（GQA 常见 4/8）。"""
+    n, H, D = q.shape
+    Hkv = k_buf.shape[1]
+    K2 = sel.shape[-1]
+    assert (G & (G - 1)) == 0 and D & (D - 1) == 0
+    out = torch.empty_like(q)
+    grid = (n, Hkv)
+    _tli_sparse_attn_kernel[grid](
+        q, sel, k_buf, v_buf, out, D**-0.5,
+        H, Hkv, K2, S_loc,
+        G=G, D=D, BLOCK_K=block_k, num_warps=8,
+    )
+    return out
+
+
+# M11-b：tl.dot（Tensor Core）变体——G pad 到 16 进 TC，广播 mul+sum 在 G=8
+# 时寄存器压力过大（30B 形态 0.83×）。P 转 bf16 走 TC 是 FA2 标准做法。
+@triton.jit
+def _tli_sparse_attn_dot_kernel(
+    q_ptr, sel_ptr, kbuf_ptr, vbuf_ptr, out_ptr,
+    sm_scale,
+    H, Hkv, K2, S_loc,
+    G: tl.constexpr, D: tl.constexpr, GP: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+):
+    row = tl.program_id(0).to(tl.int64)
+    h = tl.program_id(1)
+    offs_m = tl.arange(0, GP)
+    offs_d = tl.arange(0, D)
+    qm = offs_m < G
+    qp = q_ptr + row * (H * D) + (h * G + offs_m)[:, None] * D + offs_d[None, :]
+    q_tile = tl.load(qp, mask=qm[:, None], other=0)  # [GP, D] bf16
+    m_i = tl.full([GP], float("-inf"), tl.float32)
+    l_i = tl.zeros([GP], tl.float32)
+    acc = tl.zeros([GP, D], tl.float32)
+    sel_base = sel_ptr + (row * Hkv + h) * K2
+    kv_stride = Hkv * D
+    for k0 in range(0, K2, BLOCK_K):
+        offs_k = k0 + tl.arange(0, BLOCK_K)
+        km = offs_k < K2
+        s_v = tl.load(sel_base + offs_k, mask=km, other=S_loc).to(tl.int64)
+        valid = s_v < S_loc
+        s_c = tl.where(valid, s_v, 0)
+        addr = s_c[:, None] * kv_stride + h * D + offs_d[None, :]
+        kt = tl.load(kbuf_ptr + addr, mask=km[:, None], other=0)  # [BK, D] bf16
+        att = tl.dot(q_tile, tl.trans(kt)) * sm_scale  # [GP, BK] fp32
+        att = tl.where(valid[None, :], att, float("-inf"))
+        m_new = tl.maximum(m_i, tl.max(att, axis=1))
+        p = tl.exp(att - m_new[:, None])
+        alpha = tl.exp(m_i - m_new)
+        l_i = l_i * alpha + tl.sum(p, axis=1)
+        acc = acc * alpha[:, None]
+        vt = tl.load(vbuf_ptr + addr, mask=km[:, None], other=0)  # [BK, D] bf16
+        acc = tl.dot(p.to(vt.dtype), vt, acc)  # [GP, D] fp32
+        m_i = m_new
+    out = acc / l_i[:, None]
+    outp = out_ptr + row * (H * D) + (h * G + offs_m)[:, None] * D + offs_d[None, :]
+    tl.store(outp, out.to(out_ptr.dtype.element_ty), mask=qm[:, None])
+
+
+def tli_sparse_gather_attn_dot(
+    q: torch.Tensor,      # [n, H, D] bf16 contiguous
+    sel: torch.Tensor,    # [n, Hkv, K2] int 逻辑位置（>= S_loc 为哨兵）
+    k_buf: torch.Tensor,  # [pool, Hkv, D] bf16 contiguous
+    v_buf: torch.Tensor,
+    G: int,
+    S_loc: int,
+    block_k: int = 64,
+) -> torch.Tensor:
+    """返回 [n, H, D] 与 q 同 dtype。GP = max(16, G_pow2)（tl.dot 最小 M）。"""
+    n, H, D = q.shape
+    Hkv = k_buf.shape[1]
+    K2 = sel.shape[-1]
+    assert (G & (G - 1)) == 0 and D & (D - 1) == 0
+    GP = max(16, G)
+    out = torch.empty_like(q)
+    grid = (n, Hkv)
+    _tli_sparse_attn_dot_kernel[grid](
+        q, sel, k_buf, v_buf, out, D**-0.5,
+        H, Hkv, K2, S_loc,
+        G=G, D=D, GP=GP, BLOCK_K=block_k, num_warps=8,
+    )
+    return out
