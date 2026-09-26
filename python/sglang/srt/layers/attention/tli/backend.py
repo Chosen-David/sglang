@@ -768,6 +768,22 @@ class TLISparseAttnBackend(AttentionBackend):
         ).view(n, Hkv, sel.shape[-1])  # [n, Hkv, K2] pool 槽位
         K2 = pool_pos.shape[-1]
         k_buf, v_buf = pool.get_kv_buffer(layer_id)
+        # M11-decode：fused kernel 路径（SGLANG_TLI_SPARSE_KERNEL=1）——
+        # eager 的 [n,Hkv,K2,D] fp32 双物化（+flat 索引大张量）全部省掉，
+        # per-lane valid 掩码与 eager 语义一致（哨兵=softmax 前屏蔽）。
+        # 全部为 tensor 运算（无 host 同步），CUDA graph 可录制。
+        q_raw = q[rows]
+        if (
+            self.profile.use_sparse_attn_kernel
+            and q_raw.dtype in (torch.bfloat16, torch.float16)
+            and q_raw.is_contiguous()
+            and (G & (G - 1)) == 0
+            and (D & (D - 1)) == 0
+        ):
+            return tli_sparse_gather_attn_dot(
+                q_raw, pool_pos, k_buf, v_buf, G,
+                S_loc=k_buf.shape[0], valid=valid,
+            )
         # flat 索引：槽位 s、kv head h、维 d → s*(Hkv*D) + h*D + d
         d_off = torch.arange(D, device=q.device)
         h_off = torch.arange(Hkv, device=q.device).view(1, Hkv, 1, 1) * D

@@ -590,11 +590,11 @@ def tli_sparse_gather_attn(
 # 时寄存器压力过大（30B 形态 0.83×）。P 转 bf16 走 TC 是 FA2 标准做法。
 @triton.jit
 def _tli_sparse_attn_dot_kernel(
-    q_ptr, sel_ptr, kbuf_ptr, vbuf_ptr, out_ptr,
+    q_ptr, sel_ptr, kbuf_ptr, vbuf_ptr, out_ptr, vld_ptr,
     sm_scale,
     H, Hkv, K2, S_loc,
     G: tl.constexpr, D: tl.constexpr, GP: tl.constexpr,
-    BLOCK_K: tl.constexpr,
+    BLOCK_K: tl.constexpr, HAS_VLD: tl.constexpr,
 ):
     row = tl.program_id(0).to(tl.int64)
     h = tl.program_id(1)
@@ -612,7 +612,13 @@ def _tli_sparse_attn_dot_kernel(
         offs_k = k0 + tl.arange(0, BLOCK_K)
         km = offs_k < K2
         s_v = tl.load(sel_base + offs_k, mask=km, other=S_loc).to(tl.int64)
-        valid = s_v < S_loc
+        if HAS_VLD:
+            # decode 批量路径：valid 由 per-row seq_lens 在 host 侧算好
+            # （逻辑位置界，pool 槽位任意大不能做界），传 uint8 掩码
+            valid = tl.load(vld_ptr + (row * Hkv + h) * K2 + offs_k,
+                            mask=km, other=0) != 0
+        else:
+            valid = s_v < S_loc
         s_c = tl.where(valid, s_v, 0)
         addr = s_c[:, None] * kv_stride + h * D + offs_d[None, :]
         kt = tl.load(kbuf_ptr + addr, mask=km[:, None], other=0)  # [BK, D] bf16
@@ -633,14 +639,16 @@ def _tli_sparse_attn_dot_kernel(
 
 def tli_sparse_gather_attn_dot(
     q: torch.Tensor,      # [n, H, D] bf16 contiguous
-    sel: torch.Tensor,    # [n, Hkv, K2] int 逻辑位置（>= S_loc 为哨兵）
+    sel: torch.Tensor,    # [n, Hkv, K2] int pool 槽位
     k_buf: torch.Tensor,  # [pool, Hkv, D] bf16 contiguous
     v_buf: torch.Tensor,
     G: int,
-    S_loc: int,
+    S_loc: int,           # 标量界（prefill 全有效口径）
     block_k: int = 64,
+    valid: torch.Tensor | None = None,  # [n, Hkv, K2] bool（decode per-row 界）
 ) -> torch.Tensor:
-    """返回 [n, H, D] 与 q 同 dtype。GP = max(16, G_pow2)（tl.dot 最小 M）。"""
+    """返回 [n, H, D] 与 q 同 dtype。GP = max(16, G_pow2)（tl.dot 最小 M）。
+    valid=None → 标量界 sel < S_loc；否则逐 lane 掩码（decode 哨兵语义）。"""
     n, H, D = q.shape
     Hkv = k_buf.shape[1]
     K2 = sel.shape[-1]
@@ -649,8 +657,11 @@ def tli_sparse_gather_attn_dot(
     out = torch.empty_like(q)
     grid = (n, Hkv)
     _tli_sparse_attn_dot_kernel[grid](
-        q, sel, k_buf, v_buf, out, D**-0.5,
+        q, sel, k_buf, v_buf, out,
+        valid.view(torch.uint8) if valid is not None else q,
+        D**-0.5,
         H, Hkv, K2, S_loc,
-        G=G, D=D, GP=GP, BLOCK_K=block_k, num_warps=8,
+        G=G, D=D, GP=GP, BLOCK_K=block_k,
+        HAS_VLD=valid is not None, num_warps=8,
     )
     return out
