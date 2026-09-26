@@ -895,13 +895,23 @@ class TLIIndexer:
             and (p.coarse_dim & (p.coarse_dim - 1)) == 0
             and q.is_contiguous()
         ):
-            from sglang.srt.layers.attention.tli.kernels import (
-                tli_l1_score_batched,
-            )
+            if getattr(p, "use_l1_tc_kernel", False) and p.coarse_dim >= 16:
+                # M8-TC：tl.dot tf32 MMA 版（SGLANG_TLI_L1TC_KERNEL=1）
+                from sglang.srt.layers.attention.tli.kernels import (
+                    tli_l1_score_batched_dot,
+                )
 
-            sc1 = tli_l1_score_batched(
-                q, self.idx1, kmin_pool, kmax_pool, rows_l, nblk_t, t_t, bs
-            )  # 垃圾块 -inf 已在 kernel 内烘焙（skip_far 的 keep 掩码走 eager）
+                sc1 = tli_l1_score_batched_dot(
+                    q, self.idx1, kmin_pool, kmax_pool, rows_l, nblk_t, t_t, bs
+                )
+            else:
+                from sglang.srt.layers.attention.tli.kernels import (
+                    tli_l1_score_batched,
+                )
+
+                sc1 = tli_l1_score_batched(
+                    q, self.idx1, kmin_pool, kmax_pool, rows_l, nblk_t, t_t, bs
+                )  # 垃圾块 -inf 已在 kernel 内烘焙（skip_far 的 keep 掩码走 eager）
         else:
             kmin_b = kmin_pool[rows]  # [n, NBLK_CAP, Hkv, d']（容量行含垃圾，靠掩码）
             kmax_b = kmax_pool[rows]

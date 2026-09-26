@@ -330,6 +330,92 @@ def tli_l1_score_batched(
     return sc1
 
 
+# ---------------- M8-TC：L1 批量打分 Tensor Core 化（tl.dot 版）----------------
+# 动机：KernelD 广播 mul+sum 是 [MBLK,DP] 逐元素 FMA；TC 化后走 tf32 MMA。
+# 打分语义 sc[m] = Σ_d q_pos·kmax[m,d] + Σ_d q_neg·kmin[m,d]，用 Q 打包
+# [DP,16]（col0=q_pos, col1=q_neg，N 维 pad 16 进 TC）两个 dot 后掩码提取
+# col0(kmax·q_pos) + col1(kmin·q_neg)。
+# 注意：kernel 读 pool 带宽不变（~128MB@bs32/131K），是内存受限算子——
+# TC 化的收益预期在寄存器/指令数而非流量，A/B 实测定去留（诚实口径：
+# 若平手或更慢即为 negative result 资产）。精度 tf32（10bit 尾数）：
+# L1 是粗筛上界（E8-2 已证 L1 可容忍并列多选，L2 4bit 精筛吸收），
+# 近 tie 分数翻转由 L2 兜底。DP < 16 不满足 tl.dot K 维时回退广播版。
+@triton.jit
+def _tli_l1_score_batched_dot_kernel(
+    q_ptr, idx1_ptr, kmin_ptr, kmax_ptr, rows_ptr, nblk_ptr, t_ptr, sc1_ptr,
+    H, D, BS,
+    HKV: tl.constexpr, G: tl.constexpr, DP: tl.constexpr,
+    NBLK, MBLK: tl.constexpr,
+):
+    ah = tl.program_id(0)  # a*HKV + h
+    j = tl.program_id(1)
+    a = ah // HKV
+    h = ah % HKV
+    offs_d = tl.arange(0, DP)
+    offs_n = tl.arange(0, 16)
+    d_idx = tl.load(idx1_ptr + offs_d)  # int64 子空间维度索引
+    # group-sum q（先 G-sum 后点积，与 eager/广播版同分组）
+    q_pos = tl.zeros([DP], dtype=tl.float32)
+    q_neg = tl.zeros([DP], dtype=tl.float32)
+    for g in range(G):
+        qv = tl.load(q_ptr + (a * H + h * G + g) * D + d_idx).to(tl.float32)
+        q_pos += tl.maximum(qv, 0.0)
+        q_neg += tl.minimum(qv, 0.0)
+    # Q 打包 [DP, 16]：col0=q_pos、col1=q_neg、其余 0（N 维 pad 16 进 TC）
+    q_mat = tl.where(
+        offs_n[None, :] == 0, q_pos[:, None],
+        tl.where(offs_n[None, :] == 1, q_neg[:, None], 0.0),
+    )
+    row = tl.load(rows_ptr + a).to(tl.int64)
+    offs_m = j * MBLK + tl.arange(0, MBLK)
+    mm = offs_m < NBLK
+    addr = (row * NBLK + offs_m[:, None]).to(tl.int64) * (HKV * DP) + h * DP + offs_d[None, :]
+    kmin = tl.load(kmin_ptr + addr, mask=mm[:, None], other=0.0)
+    kmax = tl.load(kmax_ptr + addr, mask=mm[:, None], other=0.0)
+    # 两个 tf32 MMA：[MBLK,DP]×[DP,16]
+    dmax = tl.dot(kmax, q_mat)  # col0 = kmax·q_pos
+    dmin = tl.dot(kmin, q_mat)  # col1 = kmin·q_neg
+    e0 = (offs_n == 0).to(tl.float32)
+    e1 = (offs_n == 1).to(tl.float32)
+    sc = tl.sum(dmax * e0[None, :] + dmin * e1[None, :], axis=1)
+    # valid_blk = 块首 < nblk & 块尾 ≤ t（垃圾块 -inf，同广播版）
+    nblk_a = tl.load(nblk_ptr + a).to(tl.int32)
+    t_a = tl.load(t_ptr + a).to(tl.int32)
+    valid = mm & (offs_m < nblk_a) & ((offs_m + 1) * BS - 1 <= t_a)
+    sc = tl.where(valid, sc, float("-inf"))
+    tl.store(sc1_ptr + ah.to(tl.int64) * NBLK + offs_m, sc, mask=mm)
+
+
+def tli_l1_score_batched_dot(
+    q: torch.Tensor,     # [n, H, D] fp32 连续
+    idx1: torch.Tensor,  # [d'] int64 子空间维度索引（device）
+    kmin_pool: torch.Tensor,  # [R, NBLK, Hkv, d'] fp32（pool 常驻）
+    kmax_pool: torch.Tensor,
+    rows: torch.Tensor,  # [n] pool 行号
+    nblk_t: torch.Tensor,  # [n] int64
+    t_t: torch.Tensor,   # [n] int64
+    block_size: int,
+    mblk: int = 256,
+) -> torch.Tensor:
+    """TC 版 tli_l1_score_batched（同签名同输出形状；DP≥16 才可用）。"""
+    n, H, D = q.shape
+    HKV = kmin_pool.shape[2]
+    DP = kmin_pool.shape[-1]
+    NBLK = kmin_pool.shape[1]
+    G = H // HKV
+    assert DP >= 16, f"tl.dot K 维须 ≥16，DP={DP} 请用广播版"
+    sc1 = torch.empty(n, HKV, NBLK, dtype=torch.float32, device=q.device)
+    grid = (n * HKV, triton.cdiv(NBLK, mblk))
+    _tli_l1_score_batched_dot_kernel[grid](
+        q, idx1, kmin_pool, kmax_pool,
+        rows.to(torch.long).contiguous(),
+        nblk_t.to(torch.long).contiguous(), t_t.to(torch.long).contiguous(),
+        sc1, H, D, block_size,
+        HKV=HKV, G=G, DP=DP, NBLK=NBLK, MBLK=mblk, num_warps=4,
+    )
+    return sc1
+
+
 # ---------------- M8-KernelC：双池直写（P6+P7 融合进 KernelA）----------------
 # P6（masked_fill 链 0.41ms）+ P7 的 far_sc/near_sc 物化消除：打分 kernel 直接
 # 按 far/near 池边界写两张 -inf 掩码后的分数表，下游 topk 无需再物化。

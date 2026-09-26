@@ -81,6 +81,9 @@ class TLIProfile:
         # ---- M8-KernelD：批量 L1 fused gather+GEMV（P1 行 gather 262μs +
         # P2 einsum permute 拷贝 ~346μs → 单 kernel 直读 pool）----
         self.use_l1_batched_kernel: bool = _env_bool("SGLANG_TLI_L1B_KERNEL", True)
+        # ---- M8-TC：L1 批量打分 Tensor Core 化（tl.dot tf32 MMA 替代广播
+        # mul+sum；DP≥16 才生效否则静默回退广播版。A/B 后定默认值）----
+        self.use_l1_tc_kernel: bool = _env_bool("SGLANG_TLI_L1TC_KERNEL", False)
         # ---- M8-KernelC：双池直写（far/near -inf 烘进 KernelA 写出口径，
         # 消除 P6 masked_fill 链与 P7 的 far_sc/near_sc 物化；关闭可回退
         #   s2 单输出路径做 A/B 对拍）----
