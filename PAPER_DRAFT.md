@@ -446,7 +446,8 @@ torch.equal / 逐元素 / jaccard 对拍（§5.2）；4bit 索引与增量维护
 | repobench-p | 66.50 | 63.41 | 66.40 | 63.87 | 65.59 |
 | **AVG** | **50.36** | **47.72** | **50.06** | **47.86** | **49.92** |
 
-TLI 距 TIA −0.14、距 FullKV −0.44——以 1024/9900 token（K2/S@9.9K）的
+TLI 距 TIA −0.14、距 FullKV −0.44——以 1024/7500 token（K2/S@7.5K，实测
+token 化口径；历史标签 9.9K 系按中文比例错算，§8b-25 修正）的
 稀疏预算守住 dense 质量；9/13 子集不低于 TIA，3 子集反超
 （hotpotqa 53.96 / 2wikimqa 39.07 / passage_retrieval 100.0）。
 
@@ -539,10 +540,11 @@ decode_select 实现，此处只列单 token 口径 + TLI 批量数，避免跨�
 
 ### 6.4 End-to-End Throughput【正文 v1】
 
-**decode 优化轨迹（bs=32, S=9.9K, CUDA graph 口径）**：M3 eager 原型
+**decode 优化轨迹（bs=32, S≈7.5K 实测 token，历史标签 9.9K 已按 §8b-25 修正；
+CUDA graph 口径）**：M3 eager 原型
 1236.8 → M5 +graph 188.6 → M8 +kernel 99.0 ms/step——**累计 12.5×**
 （323 tok/s@bs32），同一指标体系内逐级归因（批量化 3.8× / graph 1.7× /
-kernel 1.9×）。vs triton dense 31.7 ms/step 仍慢 3.1×——9.9K 档 attention
+kernel 1.9×）。vs triton dense 31.7 ms/step 仍慢 3.1×——7.5K 档 attention
 流量尚未主导，诚实边界如实报告（fig9a）。
 
 **S 增长收窄链（bs=16，ignore_eos 干净口径 §8b-25）**：S≈7.5K 慢 3.53×
