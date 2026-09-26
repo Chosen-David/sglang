@@ -12,6 +12,9 @@ warnings.filterwarnings("ignore")
 
 BACKEND = os.environ.get("BACKEND", "triton")
 FAR = os.environ.get("FAR", "")  # tli 时覆盖 far_tokens（空=默认 256）
+if FAR:
+    # 须在 Engine（scheduler spawn 子进程）初始化前设 env
+    os.environ["SGLANG_TLI_FAR_TOKENS"] = FAR
 TAG = os.environ.get("TAG", BACKEND if not FAR else f"{BACKEND}_far{FAR}")
 TASK = os.environ.get("TASK", "musique")
 MAXGEN = {"musique": 32, "qasper": 128, "multifieldqa_en": 64}[TASK]
