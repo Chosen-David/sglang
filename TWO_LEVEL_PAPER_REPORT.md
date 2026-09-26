@@ -1146,6 +1146,59 @@ ignore_eos=True + 记录 completion_tokens 校验 + prefill 交替配对 + 弃
 首轮瞬态**——m8/m8_long/m10 全系列历史 decode 数字标记为「旧口径
 （EOS 不受控）」，以本节干净值为准。
 
+### 8b-26. S=40K 第三点补测：KV pool 容量边界 + 差分法可测性极限（2026-09-26，#57）
+
+动机：翻转点 54-57K 为两点外推（7.5K/30K），补 40K 第三点（贴近模型
+40960 上限）把外推距离从 24K 压到 15K。数据源 vcsum token 精确口径
+（19 个唯一 ≥165K chars 中文长文档，bs16 充足）。
+
+**发现的物理容量边界（先于数据本身的重要）**：
+- KV 物理账（Qwen3-8B，36 层×8kvhead×128d×2×2B=147.5KB/token）：
+  bs16 需求 30K→484K token、40K→**644K token**；
+- tli 后端额外吃 ~15.8GB 静态内存（per-layer 索引池 kq/kmin/kmax 预分配，
+  证据：graph capture 后 avail triton 40.96GB vs tli 25.14GB）→
+  mem_fraction=0.7 下 tli pool 仅 ~497K token；
+- **30K 点（484K vs 497K，余量 2.7%）是踩线通过**；40K 超限 30% →
+  KV 溢出触发 retraction 重算，prefill/decode 交错执行，差分法的相位
+  分离假设被破坏。实测症状：同 run round0=41.0 / round1=125.1 ms/step
+  （3× 双峰）+ prefill spread 21.2s + total 恒定反相关（1011.5/1011.8s），
+  ktok 校验全过但 decode 已非良定义量——**retraction 混沌下 ktok 校验
+  不足以判数据有效性**（#56 校验链的边界）；
+- triton 侧 pool ~728K 装得下：**40K triton 64.8±1.3 ms/step 有效**
+  （高段斜率 2.38ms/K vs 低段 1.005——40K 档 attention 流量渐占主导）。
+
+**修复**：VAR_MEM_FRAC=0.85（tli pool ~653K ≥ 644K，capture 后剩
+4.18GB 验证通过）。配置差异（40K 点 mem0.85 vs 30K/7.5K 点 mem0.7）
+须在图表注中诚实标注。
+
+（40K tli @0.85 复测结果待补——若两轮一致则第三点成立并三点重拟合；
+若仍双峰则归档为「40K@bs16 差分法在 H20 不可测」negative result。）
+
+**40K 第三点最终落地（三次尝试全链路）**：
+- 尝试 2（mem0.85）：scheduler OOM（kernels.py:447 near_sc [n,Hkv,Tc]
+  fp32 双 scratch 超 capture 后 4.18GB 余量）——**mem 0.85 与 40K prefill
+  transient 在默认 chunk 下不可兼得**；
+- 尝试 3（mem0.85 + chunked_prefill=2048 + expandable_segments）：成功。
+  两次独立 run，稳态（弃池首次增长轮）样本 **62.5 / 67.0 / 67.3 →
+  tli 40K = 64.9±2.4 ms/step**；triton 40K = 64.8±1.3。新瞬态发现：
+  expandable_segments 大池首次增长成本可被 prefill-only run 承担
+  （run1 的 prefill 估 998s vs 稳态 941s，差分 −39.8s 假象），第二轮起
+  prefill spread 仅 1.0s——「弃首轮」教训的第 4 形态（池增长瞬态）。
+
+**三点实测结论（fig9c 两点外推 → 三点实测）**：
+- triton 3pt 拟合 b=1.365ms/K、a=5.81ms；tli 3pt 拟合 b=0.047ms/K
+  （平台假设成立：63.5 / 65.0 / 64.9 跨 32K 增长仅 +1.4）；
+- **交叉点从两点外推 54-57K 前移至实测 42-45K**（tli 平台带
+  63.5-67.3 × triton 拟合 → 42.3-45.1K，线性交点 43.6K）；
+- **40K 档 tli/triton = 1.00×（打平）**——收窄链 3.53× → 1.61× →
+  1.00×，S=40K 即 parity；S>45K 起进入 TLI 收益区。翻转点比外推
+  更近的原因：triton 高段斜率 2.38ms/K（40-30K 段）vs 低段 1.005
+  （30-7.5K 段）——attention 流量 ∝S 显性化在 30K 后加速；
+- 诚实标注：40K 点 mem0.85+chunk2048 vs 30K/7.5K 点 mem0.7 默认
+  chunk（decode 走 CUDA graph 路径，配置差异不影响 decode step 口径，
+  但 prefill 时间不可跨点比较）；chunk2048 使 tli prefill 941s 略慢于
+  30K 口径外推值（chunk 串行开销）。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）

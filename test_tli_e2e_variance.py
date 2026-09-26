@@ -22,6 +22,14 @@ BS = int(os.environ.get("VAR_BS", 16))
 N_DECODE = int(os.environ.get("LONG_N_DECODE", 256))
 MODE = os.environ.get("VAR_MODE", "30k")  # 30k=vcsum token 精确 | 9k=m8_e2e chars 口径
 N_ROUNDS = int(os.environ.get("VAR_ROUNDS", 2))
+# #57：bs16×40K 需 644K token KV，mem 0.7 下 tli pool 仅 ~497K（索引池吃 15.8GB）
+# → retraction 混沌（同 run 41/125ms 双峰）。40K 档必须 0.85（pool ~653K）。
+# 0.85 又遇 prefill transient OOM（capture 后仅剩 4.18GB，select_batched 的
+# far/near_sc [n,Hkv,Tc] fp32 双 scratch 超 4GB）→ VAR_CHUNK 压小
+# chunked_prefill：decode 差分法只依赖两次 run 同 chunking，chunk 不影响
+# decode step 估计的口径。
+MEM_FRAC = float(os.environ.get("VAR_MEM_FRAC", 0.7))
+CHUNK = int(os.environ.get("VAR_CHUNK", 0))  # 0 = 引擎默认
 OUT_JSON = "/home/wangyuanshuo02/sglang/tli_e2e_variance_results.json"
 
 
@@ -84,18 +92,21 @@ def make_prompts(bs):
 
 def main():
     backend = sys.argv[1] if len(sys.argv) > 1 else "tli"
-    tag = f"var_{MODE}_{backend}_bs{BS}_n{N_DECODE}" + (f"_r{N_ROUNDS}" if N_ROUNDS != 2 else "")
+    # tag 必须含 S（TARGET_TOKENS）：否则不同 S 的 run 会互相覆盖 JSON 归档
+    # （#57 教训：40K run 差点覆盖 #56 的 30K 仲裁数据）
+    tag = f"var_{MODE}_S{TARGET_TOKENS}_{backend}_bs{BS}_n{N_DECODE}" + (f"_r{N_ROUNDS}" if N_ROUNDS != 2 else "")
 
     eng = Engine(
         model_path=MODEL,
         attention_backend=backend,
         dtype="bfloat16",
         device="cuda",
-        mem_fraction_static=0.7,
+        mem_fraction_static=MEM_FRAC,
         trust_remote_code=True,
         disable_radix_cache=True,
         watchdog_timeout=1800,
         cuda_graph_config={"decode": {"backend": "full", "bs": [BS]}, "prefill": {"backend": "disabled"}},
+        **({"chunked_prefill_size": CHUNK} if CHUNK else {}),
     )
     eng.generate(["warmup"], sampling_params={"temperature": 0.0, "max_new_tokens": 4})
     prompts = make_prompts(BS)

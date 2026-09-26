@@ -35,7 +35,8 @@ partitioned budgets, and offline-calibrated layer skipping. TLI is fully
 integrated into sglang with bit-exact 4-bit indexing, a four-kernel batched
 select (15.0×), and CUDA-graph compatibility—12.5× decode speedup over the
 eager prototype. On LongBench-13, TLI scores 49.92 vs. FullKV 50.36; honest
-boundaries are reported end-to-end (crossover at S≈54–57K). All conclusions rest
+boundaries are reported end-to-end: decode reaches parity with dense at
+S=40K (3-pt measured crossover 42–45K). All conclusions rest
 on 30+ measured hypotheses, each with parity checks, including two headline
 claims we retracted ourselves upon replication—treating measurement
 methodology as a first-class contribution.
@@ -88,8 +89,9 @@ TLI 以 sglang attention backend 形式全链路集成：4bit 三张量索引逐
 
 全部结论建立在 30+ 个实测假设之上——每个设计决策都可追溯到一次
 带对拍的实验，每个被否决的方向都有数字。TLI 的诚实边界同样明确：
-7.5K/30K 档 decode 尚未跑赢 dense（慢 3.53×/1.61×，干净口径），收益位在 S≥54–57K
-翻转点之后的长上下文大 batch 区间（fig9c），以及 training-free + 低索引
+7.5K/30K 档 decode 尚未跑赢 dense（慢 3.53×/1.61×，干净口径），**S=40K 档
+实测打平（1.00×），收益位在三点实测翻转点 S≈42–45K 之后的长上下文大 batch
+区间（fig9c）**，以及 training-free + 低索引
 存储的部署约束区间。
 
 ## 2. Background & Related Work（1 页）
@@ -547,18 +549,19 @@ CUDA graph 口径）**：M3 eager 原型
 kernel 1.9×）。vs triton dense 31.7 ms/step 仍慢 3.1×——7.5K 档 attention
 流量尚未主导，诚实边界如实报告（fig9a）。
 
-**S 增长收窄链（bs=16，ignore_eos 干净口径 §8b-25）**：S≈7.5K 慢 3.53×
-（63.5±0.4 / 18.0±0.0，稳态 4 轮）→ 30K 慢 1.61×（65.0±1.1 / 40.4±1.6），
-误差棒首次可报告——S 增长下差距单调收窄；tli ≈S 不变（63.5→65.0，
-+2.4%）vs triton 2.24×（18.0→40.4）。两点线性外推（triton 斜率 1.005
-ms/K vs tli 0.067ms/K）给出**翻转点 S≈54–57K**（拟合线交叉 56.5K；
-两点外推模型粗，区间报告）（fig9c 虚线）。测量学修正链（§8b-25）：
-历史差分法两 bug（greedy EOS 早停不受控 + prefill run-to-run 方差进
-decode 差分）+ S 标签错算（9.9K→实测 7.5K，narrativeqa 英文比例）——
-修正后翻转点从 44-51K 移至 54-57K，收窄链 3.48×/1.55× → 3.53×/1.61×
-（历史数字测的正是稳态、偏差 <5%，结论叙事不变）。**H100 主表口径
-（bs≥16 × S=128K）远在翻转点之后**，是收益验证位【缺：机器申请中，
-论文 headline 表】。
+**S 增长收窄链（bs=16，ignore_eos 干净口径 §8b-25/§8b-26）**：S≈7.5K 慢
+3.53×（63.5±0.4 / 18.0±0.0，稳态 4 轮）→ 30K 慢 1.61×（65.0±1.1 /
+40.4±1.6）→ **40K 打平 1.00×（64.9±2.4 / 64.8±1.3，三次 run 稳态
+62.5/67.0/67.3）**——误差棒全程可报告；tli ≈S 不变（63.5 / 65.0 /
+64.9，跨 32K 增长仅 +1.4）vs triton 18.0 / 40.4 / 64.8。**三点实测
+翻转点 S≈42–45K**（triton 3pt 拟合 b=1.365ms/K、a=5.81ms；tli 平台
+63.5-67.3 带 → 交叉 42.3-45.1K，线性交点 43.6K；两点外推的 54-57K
+高估了翻转点——triton 高段斜率 2.38ms/K vs 低段 1.005，attention
+流量显性化在 30K 后加速）。40K 点配置注：mem0.85+chunk2048（KV pool
+容量边界 §8b-26：tli 索引池 15.8GB 使 pool 仅 ~497K token，默认配置
+下 40K×bs16 溢出触发 retraction 混沌——测量学新发现：差分法噪声地板
+= 物理容量边界）。**H100 主表口径（bs≥16 × S=128K）远在翻转点之后**，
+是收益验证位【缺：机器申请中，论文 headline 表】。
 
 **prefill（30K，批分双档）**：M8 787/1565s → M10 kernel 化 373/741s，
 **两档加速比完全一致（2.11×）**——慢路径成本 ∝bs×S 的线性项被消除的
@@ -628,6 +631,17 @@ kernel 级；④**microbench 的输入形态必须取自真实管线**——合�
 （连续/均匀）会在带宽命中与调参排序两处同时失真，且部分覆盖 bug 不
 产生任何运行时错误信号。
 
+**案例四：差分法的物理容量边界**（§8b-26）。S=40K×bs16 补测时同 run
+出现 41.0/125.1 ms/step 的 3× 双峰且 ktok 校验全过——根因不是测量噪声
+而是 **KV pool 容量溢出**：tli 的 per-layer 索引池占 15.8GB 静态内存，
+使 mem0.7 下 pool 仅 ~497K token，低于 40K×16 需求 644K 达 30%——溢出
+触发 retraction 重算，prefill/decode 交错执行，差分法的相位分离假设
+失效。两层教训：①**ktok 校验不足以判定数据有效性**（输出完整但时间
+账目已乱）；②**差分法的噪声地板由物理容量边界而非统计方差决定**——
+逼近 pool 上限的配置（如 30K 点余量仅 2.7%）天然高风险，测量前必须
+核算 bs×S×KV/token 与 pool 上限。附带发现 expandable_segments 大池
+首次增长可产生 40s 级 prefill 假差分（「弃首轮」原则第 4 形态）。
+
 对社区的含义：稀疏注意力论文常用的「单 seed × n≤20 差分表」口径，
 在 far 槽位（~32 个）这类低基数指标上置信度不足；本文全部 headline 数字
 配复测或大 n，并把撤回过程如实写入。
@@ -651,7 +665,8 @@ kernel 级；④**microbench 的输入形态必须取自真实管线**——合�
    每 token 索引 MAC = DSA 的 1/32，免训练。
 
 **诚实边界**：7.5K/30K 档 decode 未跑赢 dense triton（慢 3.53×/1.61×，
-干净口径）；两点线性外推翻转点 S≈54–57K（fig9c，S 标签修正后），收益位在 S≥128K 的 HBM 流量主导
+干净口径），**S=40K 档实测打平（1.00×）——三点实测翻转点 S≈42–45K**
+（fig9c，两点外推 54-57K 曾高估；triton 高段斜率加速所致），收益位在 S≥128K 的 HBM 流量主导
 区间 + 大 batch；NIAH 0.625 vs dense 1.0 是 far 池 0.8% 预算的物理上限
 （与 Quest/HISA 同性质）。**未来工作**：H100 主表（S=131K × bs≥16，
 机器申请中）、held-out gate 验证（precision ≥0.98 硬阈值）、RULER QA 类
@@ -681,6 +696,6 @@ topk 的算法级近似替换（prefill 剩余 67% 瓶颈）。
 2. ~~held-out gate 验证~~ ✅（E6b LOO 16 trace：TH=0.01 prec mean 0.990，
    narrativeqa 单点 0.923 + 误跳 far 占 0.29% + e2e 不掉分交叉验证——§4.3 已回填）
 3. ~~RULER 多任务~~ ✅ 全六任务（multikey/multivalue/multiquery/VT/qa1/qa2 双方法双 seed pooled n=40，§6.2 表六任务均值 gap −0.21）+ NIAH 双 seed ✅；CWE/FWE 已证伪为模型能力上限（FullKV 0 分无区分度，§6.2 脚注）
-4. ~~图表升级 fig9/fig10~~ ✅（make_fig9.py：S 收窄链（§8b-25 干净口径 3.53×→1.61× + 误差棒）+ M10 prefill 双档 + 54–57K 翻转点（S 标签修正）；make_fig10.py：kernel 阶梯 + 三方微基准 + decode 轨迹）
+4. ~~图表升级 fig9/fig10~~ ✅（make_fig9.py：S 收窄链（§8b-25/26 干净口径 3.53×→1.61×→1.00× 三点 + 误差棒）+ M10 prefill 双档 + 42–45K 三点实测翻转点；make_fig10.py：kernel 阶梯 + 三方微基准 + decode 轨迹）
 5. 多 seed 置信区间（主表 200 样本已有；NIAH 双 seed 已测；e2e 曲线单次——按测量学 §7 原则标注）
 6. ~~正文八节+摘要~~ ✅ 全部【正文 v1】（2026-09-26，b3c10336a→b5c228f75）
