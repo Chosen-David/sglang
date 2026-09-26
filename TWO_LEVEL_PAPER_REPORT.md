@@ -1008,11 +1008,13 @@ key 的干扰数字（与单针 NIAH 同机制）；③gap（−0.21）小于单
 （−0.375）：多针任务部分命中率高（针多冗余）。与 Quest/HISA 论文报告的
 同预算 RULER 损失同性质（Quest@1024 RULER needle 类同样显著掉分）。
 
-**诚实口径**：①单 seed n=20（与 NIAH 单 seed 案例二的教训一致，双 seed
-复测列为 H100 项合并跑）；②FullKV 在 multiquery/multivalue 也非满分
-（0.85/0.70）——Qwen3-8B 本身的列举能力上限，gap 才是稀疏损失；
-③TLI 生成 1045s vs triton 173s/任务 = 稀疏 prefill 慢路径 6×（M10 已修
-但 32K prefill 仍 ~2× 于 dense + 索引构建），质量评测不计入速度口径。
+**诚实口径**：①~~单 seed n=20，双 seed 复测列为 H100 项~~ ✅ 已在本地
+补齐（§8b-23：seed2=5678 双方法，pooled n=40，gap −0.231 与单 seed
+一致——质量评测不依赖机器型号的判断得到验证）；②FullKV 在
+multiquery/multivalue 也非满分（0.85/0.70）——Qwen3-8B 本身的列举能力
+上限，gap 才是稀疏损失；③TLI 生成 1045s vs triton 173s/任务 = 稀疏
+prefill 慢路径 6×（M10 已修但 32K prefill 仍 ~2× 于 dense + 索引构建），
+质量评测不计入速度口径。
 
 ### 8b-22. RULER CWE/FWE 扩展：模型能力上限证伪链（2026-09-26，#53——negative result 资产）
 

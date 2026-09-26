@@ -641,8 +641,9 @@ kernel 级；④**microbench 的输入形态必须取自真实管线**——合�
 两点线性外推翻转点 S≈44–51K（fig9c），收益位在 S≥128K 的 HBM 流量主导
 区间 + 大 batch；NIAH 0.625 vs dense 1.0 是 far 池 0.8% 预算的物理上限
 （与 Quest/HISA 同性质）。**未来工作**：H100 主表（S=131K × bs≥16，
-机器申请中）、held-out gate 验证（precision ≥0.98 硬阈值）、RULER 全量、
-结构性 topk 的算法级近似替换（prefill 剩余 67% 瓶颈）。
+机器申请中）、held-out gate 验证（precision ≥0.98 硬阈值）、RULER QA 类
+补全（检索+链式四任务双 seed 已完成，聚合类已证伪无区分度）、结构性
+topk 的算法级近似替换（prefill 剩余 67% 瓶颈）。
 
 ---
 
@@ -656,7 +657,7 @@ kernel 级；④**microbench 的输入形态必须取自真实管线**——合�
 | §4.2 B' | §8b-7/E4c/§8b-16 | fig3、tli_niah_results.json |
 | §4.3 D' | §8/E6/E6b/gate 失败史 | fig4、e6b_heldout_gate.json |
 | §5 Impl | §8b-2~5/8b-8/8b-12/8b-13/8b-15 | — |
-| §6.2 质量 | §4 主表/§8b-16 | fig6、tli_niah_results.json |
+| §6.2 质量 | §4 主表/§8b-16/§8b-22/§8b-23 | fig6、tli_niah_results.json、tli_ruler_results.json、tli_ruler_cwe_results.json |
 | §6.3 kernel | §8b-6 | kernel_comparison_indexers.json |
 | §6.4 e2e | §8b-13/8b-14/8b-15 | fig9、tli_m8_e2e_results.json、tli_m10_bench.json、tli_m8_e2e_long_results.json |
 | §7 测量学 | §8b-14 修正段/§8b-16 修正段/§8b-17 | — |
@@ -666,7 +667,7 @@ kernel 级；④**microbench 的输入形态必须取自真实管线**——合�
 1. 【缺】H100 主表（S=131K×bs16/32）——§6.4 headline（机器申请中）
 2. ~~held-out gate 验证~~ ✅（E6b LOO 16 trace：TH=0.01 prec mean 0.990，
    narrativeqa 单点 0.923 + 误跳 far 占 0.29% + e2e 不掉分交叉验证——§4.3 已回填）
-3. 【部分完成】RULER 多任务（multikey/multivalue/multiquery/VT 四任务双方法，§6.2 表）+ NIAH 双 seed + 双 seed 复测（tli 跑中）——CWE/FWE 已证伪为模型能力上限（FullKV 0 分无区分度，§6.2 脚注），QA 类视主表需求
+3. ~~RULER 多任务~~ ✅（multikey/multivalue/multiquery/VT 四任务双方法双 seed pooled n=40，§6.2 表 gap −0.231）+ NIAH 双 seed ✅；CWE/FWE 已证伪为模型能力上限（FullKV 0 分无区分度，§6.2 脚注）——QA 类视主表需求
 4. ~~图表升级 fig9/fig10~~ ✅（make_fig9.py：S 收窄链 + M10 prefill 双档 + 44–51K 翻转点外推；make_fig10.py：kernel 阶梯 + 三方微基准 + decode 轨迹）
 5. 多 seed 置信区间（主表 200 样本已有；NIAH 双 seed 已测；e2e 曲线单次——按测量学 §7 原则标注）
 6. ~~正文八节+摘要~~ ✅ 全部【正文 v1】（2026-09-26，b3c10336a→b5c228f75）
