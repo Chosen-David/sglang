@@ -1199,6 +1199,88 @@ ignore_eos=True + 记录 completion_tokens 校验 + prefill 交替配对 + 弃
   但 prefill 时间不可跨点比较）；chunk2048 使 tli prefill 941s 略慢于
   30K 口径外推值（chunk 串行开销）。
 
+### 8b-27. E59 双消融：L1 块表示 + near_len 配比（2026-09-26，#59 完成，8B/30B trace 重放）
+
+**动机**（用户两个设计问题）：①为什么 near 用 minmax 而非 avg 等其他块表示？
+②near/far 配比是否应该 alpha 比例化而非固定 near_len？脚本
+`two-level-attention/exp/trace/analyze_e59_l1_ablation.py`（块表示消融）+
+`analyze_e59_near_alpha.py`（配比扫描），结果 `e59_*.json`。
+
+**消融一：块表示**（K1=128 块、far top-1024 mass recall、8B 16 条 trace + 30B）：
+
+| 块表示 | 8B 均值 | 8B 最差（narrativeqa） | 30B hotpotqa |
+|---|---|---|---|
+| **minmax 上界（TIA/TLI 现行）** | **0.885** | 0.781 | **0.967** |
+| avg 均值点积 | 0.695 | 0.513 | 0.948 |
+
+minmax 全面胜出（8B +0.19、最差样本 +0.27）：avg 是块内均值非保守估计，
+块内符号对消系统性低估远端高响应块——上界粗筛「漏选方向错误更少」的
+理论依据首次实证量化。写论文 §方法（设计动机）+ §消融表。
+
+**消融二：near_len ∈ {1024, 2048, 4096}**（far mass + far 区 top-256 覆盖）：
+
+| near_len | 8B far_mass | 8B far top-256 覆盖 | 30B far_mass |
+|---|---|---|---|
+| 1024 | 0.364 | 0.758 | 0.192 |
+| **2048（现行）** | 0.330 | 0.772 | 0.182 |
+| 4096 | 0.284 | 0.782 | 0.118 |
+
+near_len 4 倍变化仅移动 far mass 0.08 / 选择质量 ~2%——边际递减，2048 是
+合理工作点。**alpha 比例化实证 No-Go**（收益不显著且引入超参 + 破坏
+「固定 near_len + 常数 far 预算 = O(1)/token」的结构性设计优势——
+对比 TWI top-p 类 O(t) 自适应预算的卖点），诚实记入消融章节。
+
+### 8b-28. E60：D' 升级为 prefill 动态测层 gate（2026-09-26/27，#60，commit 2f9b10f03）
+
+**动机**：静态全局掩码跨任务不泛化（E5b musique/qasper/multifieldqa 掉
+4.8-5.9 分）、per-task 重校准也失败——改为**当前请求自己的 prefill 末
+chunk 测 per-layer far mass**（分布偏移从根上消除）。
+
+机制（`indexer.py`，`SGLANG_TLI_DYN_GATE`/`_THRESH=0.01`）：末 chunk
+softmax(fine) far 区统计 → `dyn_far_stat` → decode select 幂等置位
+skip_far；far_stat 双峰（musique 18 层 <0.01 vs 其余 0.017-0.26），
+阈值切自然间隙。开销 = 末 chunk 一次 softmax+sum，分摊 decode 期可忽略。
+
+验证链：离线 corr 0.86-0.99 GO → 安全任务零损失 → **多跳三任务（静态版
+失败集）全 GO**。全量 E5b 双臂（200 样本×3 任务 × gate on/off，sglang
+`test_tli_dyngate_e5b.py`）进行中；**musique 前 80 条 gate-on/off
+100% 逐字一致**（早期信号：gate 在 far-heavy 任务不跳层，恢复 gate-off
+=TIA 精度基线）。已知限制：dyn_far_stat 为 per-layer 单值，同质 batch
+（评测口径）无害，混合 batch 跨请求污染——正确修法 = stat 存共享 pool
+per-row（TODO，生产语义）。
+
+### 8b-29. M11：统一稀疏 attention fused kernel（2026-09-27，#58 ext 主力，commit 1a77d0088 + f0f94a6b2）
+
+**动机**：30B prefill 归因 ext=61%（`_sparse_extend_one` 的 [n,K2,D] fp32
+gather 物化 ≈17GB/chunk 带宽主导）+ Python 批量化三连试 No-Go
+（23.7/21.4 vs 20.2s）→ Triton fused 是唯一路线。
+
+**kernel**（`kernels.py` `_tli_sparse_attn_dot_kernel`）：per (row,
+kv-head) 的 [G,D] q × sel 间接寻址 K/V tile [BK,D] + online softmax；
+**G pad 到 16 进 Tensor Core**（`tl.dot(q, K^T)` + `tl.dot(p.bf16, V, acc)`
+= FA2 标准做法）。prefill 标量界 + decode per-lane valid 掩码
+（HAS_VLD 编译期分支）双口径。
+
+**microbench**（合成数据、8B Hkv8/G4 与 30B Hkv4/G8 形态、K2=1024）：
+
+| 形态 | eager | fused | 加速 |
+|---|---|---|---|
+| 8B chunk 2K | 130.7ms | 8.45ms | **15.5×** |
+| 8B chunk 4K | 163.4ms | 8.76ms | **18.7×** |
+| 30B chunk 2K | 47.4ms | 4.25ms | **11.2×** |
+| 30B chunk 4K | 73.3ms | 4.43ms | **16.5×** |
+
+有效带宽 ~2TB/s（≈H20 HBM 一半，gather 随机性所致——上限由间接寻址
+non-coalesced 决定）。对拍 5 形态 + valid 路径全 PASS（≤5e-3，bf16 级）。
+
+**negative result（工程）**：广播 mul+sum 版（[G,BK,D] 中间积）G=4 快
+2.8× 但 **G=8 寄存器溢出反慢 0.83×**——GQA 组大的模型必须走 tl.dot。
+
+接入：prefill `_sparse_extend_one`（`SGLANG_TLI_PREFILL_KERNEL` 默认开）
++ decode `_sparse_attn_batched`（`SGLANG_TLI_SPARSE_KERNEL` 默认关，
+graph AB 验证后开）。e2e AB（输出一致性 + 长文 prefill 计时）待 E5b
+双臂让出 GPU。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
@@ -1219,9 +1301,19 @@ ignore_eos=True + 记录 completion_tokens 校验 + prefill 交替配对 + 弃
    微基准 7.0× / e2e prefill 双档 2.11×；decode 差分法失效教训 → N=256 双侧
    复测修正 §8b-14 结论——30K decode 稳定慢 ~1.5× 未打平，线性外推翻转点 S≈44–51K（fig9c；§8b-25 终修正：54–57K）)
 8. H100 吞吐主表（机器申请中；H20 层已备好算力无关性论证：H20 TC 仅 H100 15% 仍拿到质量/流量收益）+ RULER/NIAH 补评测（对齐 Quest/SnapKV/HISA 论文数据集口径）
+   **【2026-09-26 #58 预核算修正：原规格 S=131K×bs16/32 单卡物理不可行——KV
+   需 310/620GB > 141GB 显存（h100_pool_budget.py）；主表须改 TP2 或 bs8 档。
+   且 Qwen3-8B max_position=40960，S≥64K 收益区点须换 256K-context 模型
+   （本地平台有 Qwen3-30B-A3B-Instruct-2507，验证中）。另一成果：tli TP2
+   兼容已打通（num_kv_heads per-rank bug 修复 + 双 backend smoke 全过）——
+   H20 双卡即可测 S=64K×bs16（pool +28%）】**
 9. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
 10. ~~Qwen3-32B 泛化复验~~ ✅（§8：A Go/D' Go 且更强/gate 判据修正为 negative result）+ 论文写作（骨架已定，主表已齐）
 11. ~~PCA 投影集成（M9）~~ ✅（§8b-8：同成本口径投影比选择 +27% far recall、存储 40→24B/token-head、六路径对拍全过、e2e smoke 通过；eager 延迟持平=launch 掩盖，FLOP 收益留待 M8）
+12. ~~#58 30B 崩坏根因~~ ✅（select_batched 早期行因果越界→均匀重复 grid 修复，commit 2d6b0e4be；8B 无回归；#59 双消融 §8b-27 完成；30B prefill 归因 ext 61%）
+13. #60 全量 E5b 多跳复验（进行中：双臂 200×3 任务，musique 前 80 条 100% 一致早期信号 §8b-28）+ M11 e2e AB（kernel 11-19× §8b-29，e2e 待 GPU）
+14. M11 后续：decode e2e AB + graph 路径验证（SGLANG_TLI_SPARSE_KERNEL 开默认）+ 30B prefill 端到端复测（预期 ext 61%→大幅收窄）
+15. 最终 PPT + 论文写作（用户指示：全部任务完成后产出新版）
 
 ## 10. 答辩防御清单（更新版）
 
