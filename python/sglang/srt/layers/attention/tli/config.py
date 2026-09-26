@@ -102,6 +102,11 @@ class TLIProfile:
         self.pool_rows: int = _env_int("SGLANG_TLI_POOL_R", 32)
         # 短序列退 dense
         self.dense_threshold: int = _env_int("SGLANG_TLI_DENSE_THRESHOLD", 2048)
+        # ---- #58 消融开关：L2 打分的 q 侧 GQA 聚合方式（sum | max）。
+        # max = 逐 q-head 打分取组内 max。注：G-sum 符号冲突曾被怀疑为
+        # 30B 崩坏根因，终局诊断（#58）证实真根因是 select_batched 早期
+        # 行因果越界，与本聚合无关；留作打分质量消融口径。----
+        self.q_agg: str = os.environ.get("SGLANG_TLI_Q_AGG", "sum")
 
     def subspace_idx(self, head_dim: int) -> list[int]:
         """position-stable 子空间维度索引（Qwen3 rotate_half 两半的尾维）。

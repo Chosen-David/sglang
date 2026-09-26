@@ -115,7 +115,17 @@ class TLISparseAttnBackend(AttentionBackend):
     def _init_from_runner(self, runner) -> None:
         model_config = runner.model_config
         self.head_dim = model_config.head_dim if model_config.head_dim else 128
-        self.num_kv_heads = getattr(model_config, "num_key_value_heads", None) or 1
+        # TP 兼容（#58）：取 per-rank kv head 数（TP2 下 Qwen3-8B Hkv 8→4）。
+        # 原版直接取全局 num_key_value_heads=8，view(bs,8,128) 与每卡实际
+        # [bs,4,128] 尺寸不符 → graph capture 即崩。
+        try:
+            from sglang.srt.distributed import get_parallel
+
+            self.num_kv_heads = model_config.get_num_kv_heads(
+                get_parallel().attn_tp_size, get_parallel().attn_dcp_size
+            )
+        except Exception:
+            self.num_kv_heads = getattr(model_config, "num_key_value_heads", None) or 1
         n_layers = model_config.num_hidden_layers
         self._num_layers = n_layers
         if self.profile.layer_skip_path:

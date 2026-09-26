@@ -508,7 +508,11 @@ class TLIIndexer:
             ).clamp(min=0)  # 块级滑窗（select 的 force_blks 同语义）
             onehot.scatter_(1, f_blk, True)
             sel_mask = onehot.repeat_interleave(bs, dim=1)[:, :S]  # [n, S]
-            q2 = self._q_refine(q_c).reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
+            # #58 GQA 聚合：sum（8B G=4 校准）vs max（30B G=8 投影符号冲突
+            # 时 sum 互相抵消 → 打分失真）。max = 逐 q-head 打分取组内 max。
+            q_agg_max = getattr(p, "q_agg", "sum") == "max"
+            q_g = self._q_refine(q_c).reshape(n, Hkv, G, nd2)  # [n, Hkv, G, nd2]
+            q2 = q_g.sum(2) if not q_agg_max else None  # [n, Hkv, nd2]
             far_lo_k = p.sink_blocks * bs  # M10 慢路径 kernel 分支提前用（原版在 B' 段定义）
             # M7 快路径判定：池 ⊇ 因果区（池 ⊆ 因果区恒成立 → 即 ==）。
             # 真实数据 S ≲ K1*bs*Hkv 量级时并集全选，Tc==S，scatter 是纯绕路。
@@ -517,12 +521,18 @@ class TLIIndexer:
             # 必然触发（30K 实测末 chunk 128/128 慢路径，q 是否真实无关）
             fast_path = bool((sel_mask.sum(1) >= t_c + 1).all())
             if fast_path:
-                fine = torch.einsum("ahd,shd->ahs", q2, kq_f)  # [n, Hkv, S]
+                if q_agg_max:
+                    fine = torch.einsum(
+                        "ahgd,shd->ahgs", q_g, kq_f
+                    ).max(2).values  # [n, Hkv, S]
+                else:
+                    fine = torch.einsum("ahd,shd->ahs", q2, kq_f)  # [n, Hkv, S]
                 causal_full = pos.view(1, S) <= t_c.view(-1, 1)  # [n, S]
                 fine = fine.masked_fill(~causal_full.unsqueeze(1), float("-inf"))
             elif (
                 getattr(p, "use_prefill_kernel", False)
                 and not self.skip_far
+                and not q_agg_max  # max 聚合暂走 eager（kernel 内 GEMV 是 sum 口径）
                 and n >= 2
                 and (Hkv & (Hkv - 1)) == 0
                 and (nd2 & (nd2 - 1)) == 0
@@ -615,7 +625,12 @@ class TLIIndexer:
 
                 # ---- L2: 4bit 部分维精筛 → scatter 进 fine [n, Hkv, S] ----
                 kq_c = kq_f[tok_c]  # [n, Tc, Hkv, nd2]（共享表 gather，替代逐 chunk 反量化）
-                s2 = torch.einsum("ahd,athd->aht", q2, kq_c)  # [n, Hkv, Tc]
+                if q_agg_max:
+                    s2 = torch.einsum(
+                        "ahgd,athd->ahgt", q_g, kq_c
+                    ).max(2).values  # [n, Hkv, Tc]
+                else:
+                    s2 = torch.einsum("ahd,athd->aht", q2, kq_c)  # [n, Hkv, Tc]
                 causal = (tok <= t_c.view(-1, 1)) & valid  # [n, Tc]
                 fine = torch.full((n, Hkv, S), float("-inf"), device=device)
                 fine.scatter_(
@@ -657,7 +672,29 @@ class TLIIndexer:
                 out.append(res)
             else:
                 out.append(torch.topk(fine, min(p.token_budget, S), dim=-1).indices)
-        return torch.cat(out, dim=0)  # [Nq, Hkv, K2]
+        res_all = torch.cat(out, dim=0)  # [Nq, Hkv, K2]
+        # #58 行级因果修复（30B 崩坏根因）：早期行（t_r < K2，仅 prefill 首
+        # chunk 存在——后续 chunk t_arr 从 prefix 起均 ≥ K2）的因果 token 数
+        # 小于 K2，topk 的 -inf 填充槽位会返回 S 维内任意位置（含未来 token）；
+        # M10 kernel 路径哨兵转 0 同样不保证行级因果。下游 _sparse_extend_one
+        # softmax 无掩码 → 早期行直接看到本 chunk 未来 token，逐层传播污染
+        # 全序列（30B 64-token 生成陷入重复循环；审计 caus_over=2095104 全部
+        # 来自前 K2-1 行）。修复：这些行整行替换为 [0, t_r] 均匀重复 grid
+        # （每位置重复次数差 ≤1，softmax 数学等价 dense 行）。t_r ≥ K2 的行
+        # 越界数为 0（审计验证），不动。
+        early = t_arr < res_all.shape[-1]  # [Nq]
+        if bool(early.any()):
+            K2 = res_all.shape[-1]
+            Hkv2 = res_all.shape[1]
+            for r in early.nonzero().squeeze(-1).tolist():
+                t_r = int(t_arr[r])
+                reps = K2 // (t_r + 1)
+                rem = K2 - reps * (t_r + 1)
+                grid = torch.arange(t_r + 1, device=res_all.device).repeat_interleave(reps)
+                if rem > 0:
+                    grid = torch.cat([grid, torch.arange(rem, device=res_all.device)])
+                res_all[r] = grid.view(1, K2).expand(Hkv2, K2)
+        return res_all
 
     @torch.no_grad()
     def update_pool_rows_decode(
