@@ -1107,6 +1107,42 @@ answer，评分 = 任一答案别名 substring 命中（RULER 官方口径）。
 pooled gap −0.21 与四任务单 seed −0.21 / 双 seed −0.231 一致——
 RULER 质量损失结论在任务族扩展下稳健。
 
+### 8b-25. e2e decode 差分法测量 bug 仲裁（2026-09-26，#56——fig9a 口径加固）
+
+**发现的系统性测量 bug**：`test_tli_m8_e2e(_long).py` 系列的 decode 计时用
+差分法（t_total − t_prefill 两次独立 run 相减），且 **无 ignore_eos**：
+greedy 下「一句话总结」prompt 会在 ~30 token EOS 早停，实际 decode 步数
+远小于 max_new_tokens。铁证链：①无 ignore_eos 复测同配置两轮 decode
+2.02s（~30 步早停）vs 16.56s（走满 256 步）——8× 离散完全由 EOS 位置
+随机决定；②m10 结果 decode_s 为负（−0.15/−3.06s，第二次 prefill 比第
+一次快）暴露差分法还受 prefill run-to-run 方差污染（tli prefill ~735s
+方差 0.1-15s → decode ±0.4-59ms/step）。历史 1.55×（67.1/43.4）建立在
+「恰好走满」的运气上。
+
+**干净重测（ignore_eos=True + ktok 校验 + P/D 交替多轮，
+`test_tli_e2e_variance.py`，bs=16 / CUDA graph / N=256）**：
+
+| 点位 | triton dense | TLI 稳态 | 比值 |
+|---|---|---|---|
+| S≈7.5K（narrativeqa 32K chars 实测 avg） | 18.0 ± 0.0 ms/step | 63.5 ± 0.4（63.1/63.4/63.9） | **3.53× slower** |
+| S≈30K（vcsum token 精确） | 40.4 ± 1.6（39.6/41.2） | 65.0 ± 1.1（64.5/65.6） | **1.61× slower** |
+
+**两个额外发现**：①**首轮瞬态**：tli 9K 档首轮 47.2ms vs 稳态 63.5ms
+（+34%）——engine init 后第一次 prefill+decode 循环有 warm-up 效应
+（prefill 同样 163→159s），稳态才是持续 serving 口径；②**S 标签错算**：
+9K 点实际平均 token = 7.5K（narrativeqa 英文 ~4.3 chars/token，历史
+「9.9K」按中文 vcsum 3.2 chars/token 比例错算）——修正后 triton 斜率
+1.005ms/K（旧 1.229）→ **翻转点从 44-51K 移到 54-57K（拟合 56.5K）**。
+
+**结论**：①S 收窄链修正为 3.53×→1.61×（旧 3.48×→1.55×——方向与
+量级不变，历史数字测的正是稳态、偏差 <5%）；②翻转点修正 44-51K →
+54-57K（S 标签修正主导，非测量噪声）——诚实边界更远但结论叙事不变
+（收益位仍在 S≥128K HBM 主导区）；③fig9 已按干净口径重绘（误差棒 +
+S 标签修正 + 交叉 54-57K）；④测量学教训入库：**greedy 差分法必须
+ignore_eos=True + 记录 completion_tokens 校验 + prefill 交替配对 + 弃
+首轮瞬态**——m8/m8_long/m10 全系列历史 decode 数字标记为「旧口径
+（EOS 不受控）」，以本节干净值为准。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
