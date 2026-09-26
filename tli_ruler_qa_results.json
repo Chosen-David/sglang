@@ -1,0 +1,1556 @@
+{
+ "qa_dry": {
+  "qa1": {
+   "score": 1.0,
+   "n": 3,
+   "gen_s": 28.3,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "Nadine Elizabeth Louise Coyle",
+      "Outta My Mind",
+      "Nadine Coyle discography"
+     ],
+     "out": "The special magic answer for Randell is: Nadine Elizabeth Louise Coyle.\nPassage:",
+     "prompt_tokens": 32834
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1984"
+     ],
+     "out": "The special magic answer for Kati is: 1984.\nQuestion:\nWhat is the name of the ca",
+     "prompt_tokens": 32881
+    },
+    {
+     "ok": true,
+     "ans": [
+      "N Z",
+      "Nouvelle-Zelande",
+      "Kiwiland"
+     ],
+     "out": "The special magic answer for Zola is: N Z.\nThe special magic answer for Zola is:",
+     "prompt_tokens": 32825
+    }
+   ]
+  },
+  "qa2": {
+   "score": 0.667,
+   "n": 3,
+   "gen_s": 28.3,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "Long Island"
+     ],
+     "out": "The special magic answer for Trudy is: Long Island.\nPassage:\nCaloris Planitia\nCa",
+     "prompt_tokens": 32916
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1919"
+     ],
+     "out": "The special magic answer for Cece is: 1919.\nPassage:\nThe 1990s\nThe 1990s were a ",
+     "prompt_tokens": 32901
+    },
+    {
+     "ok": false,
+     "ans": [
+      "the City of Peace"
+     ],
+     "out": "What is the special magic answer for Alfons mentioned in the provided text? What",
+     "prompt_tokens": 32854
+    }
+   ]
+  }
+ },
+ "qa_triton": {
+  "qa1": {
+   "score": 0.75,
+   "n": 20,
+   "gen_s": 178.4,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "Nadine Elizabeth Louise Coyle",
+      "Outta My Mind",
+      "Nadine Coyle discography"
+     ],
+     "out": "The special magic answer for Randell is: Nadine Elizabeth Louise Coyle.\nPassage:",
+     "prompt_tokens": 32834
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1984"
+     ],
+     "out": "The special magic answer for Kati is: 1984.\nQuestion:\nWhat is the name of the ca",
+     "prompt_tokens": 32881
+    },
+    {
+     "ok": true,
+     "ans": [
+      "N Z",
+      "Nouvelle-Zelande",
+      "Kiwiland"
+     ],
+     "out": "The special magic answer for Zola is: N Z.\nThe special magic answer for Zola is:",
+     "prompt_tokens": 32825
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Karl Marx",
+      "Karl Heinrich Marx",
+      "K. H. Marx"
+     ],
+     "out": "The special magic answer for Renate is: Karl Marx.\nPassage:\nThe 1995 Pro Bowl\nTh",
+     "prompt_tokens": 32961
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Underground Railway",
+      "Underground railroad",
+      "The Underground Railroad"
+     ],
+     "out": "The special magic answer for Afton is: Underground Railway.\n\nWhat is the special",
+     "prompt_tokens": 32906
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Seven",
+      "seven",
+      "7"
+     ],
+     "out": "What is the special magic answer for Kati mentioned in the provided text? What i",
+     "prompt_tokens": 32876
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Almond tree",
+      "Luz (nut)",
+      "Amygdalus amara"
+     ],
+     "out": "Answer:\nAlmond tree\nPassage:\nThe 1937 film \"The 39 Steps\" is a British spy thril",
+     "prompt_tokens": 32817
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Foot fracture",
+      "Human feet",
+      "Foot muscles"
+     ],
+     "out": "The special magic answer for Randell is: Foot fracture.\n\nWhat is the special mag",
+     "prompt_tokens": 32853
+    },
+    {
+     "ok": true,
+     "ans": [
+      "MARTIN LUTHER KING",
+      "Martin Luther King,Jr.",
+      "MLK Jr."
+     ],
+     "out": "The special magic answer for Alfons is: MARTIN LUTHER KING.\nBased on the provide",
+     "prompt_tokens": 32861
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Brighthelmstone",
+      "UN/LOCODE:GBBSH",
+      "Brighton music"
+     ],
+     "out": "What is the special magic answer for Jenica mentioned in the provided text? What",
+     "prompt_tokens": 32900
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Midtribulation rapture",
+      "Midtribulationism",
+      "Pre-tribulation"
+     ],
+     "out": "The special magic answer for Lidia is: Midtribulation rapture.\n\nWhat is the spec",
+     "prompt_tokens": 32877
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Bnefica",
+      "Slbenfica",
+      "Grupo sport lisboa"
+     ],
+     "out": "The special magic answer for Kati is: Bnefica.\n\nWhat is the special magic answer",
+     "prompt_tokens": 32845
+    },
+    {
+     "ok": true,
+     "ans": [
+      "The Last Great Tortoise Race",
+      "Jasper Fforde"
+     ],
+     "out": "The special magic answer for Dwight is: The Last Great Tortoise Race.\nBased on t",
+     "prompt_tokens": 32842
+    },
+    {
+     "ok": true,
+     "ans": [
+      "PAULINE QUIRKE",
+      "Pauline Quirke",
+      "Pauline Quirk"
+     ],
+     "out": "The special magic answer for Renate is: PAULINE QUIRKE.\nPassage:\nThe special mag",
+     "prompt_tokens": 32947
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Lady Browning",
+      "Daphne Du Maurier",
+      "Daphne de Maurier"
+     ],
+     "out": "Answer:\nLady Browning\nPassage:\nThe special magic questions for various individua",
+     "prompt_tokens": 32888
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Arlene Philips",
+      "Arlene Phillips"
+     ],
+     "out": "Answer:\nArlene Philips\nPassage:\nThe Gruffalo (film)\nThe Gruffalo is a 2009 Briti",
+     "prompt_tokens": 32870
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Great daine",
+      "Great Danes",
+      "Deutsche Dogge"
+     ],
+     "out": "What is the special magic answer for Alfons mentioned in the provided text? What",
+     "prompt_tokens": 32824
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Psychoactive mushroom",
+      "Bacidocarp",
+      "Macrofungi"
+     ],
+     "out": "What is the special magic answer for Jenica mentioned in the provided text? What",
+     "prompt_tokens": 32871
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Holly Heston Rochell",
+      "John Charles Carter",
+      "Charleton Heston"
+     ],
+     "out": "The special magic answer for Young is: Holly Heston Rochell.\nPassage:\nThe New Yo",
+     "prompt_tokens": 32861
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Marnie Nixon",
+      "Marni Nixon"
+     ],
+     "out": "What is the special magic answer for Dallas mentioned in the provided text? What",
+     "prompt_tokens": 32905
+    }
+   ]
+  },
+  "qa2": {
+   "score": 0.8,
+   "n": 20,
+   "gen_s": 178.2,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "Big 12 Conference"
+     ],
+     "out": "The special magic answer for Kati is: Big 12 Conference.\nPassage:\nCaloris Planit",
+     "prompt_tokens": 32929
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Taoiseach of Ireland"
+     ],
+     "out": "The special magic answer for Dallas is: Taoiseach of Ireland.\nQuestion:\nWhat is ",
+     "prompt_tokens": 32860
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Nobel Prize"
+     ],
+     "out": "The special magic answer for Cassady is: Nobel Prize.\nPassage:\nThe Rabi cycle is",
+     "prompt_tokens": 32966
+    },
+    {
+     "ok": true,
+     "ans": [
+      "number five"
+     ],
+     "out": "The special magic answer for Dwight is: number five.\nPassage:\nThe 1995 Pro Bowl\n",
+     "prompt_tokens": 32876
+    },
+    {
+     "ok": true,
+     "ans": [
+      "George Balanchine"
+     ],
+     "out": "The special magic answer for Young is: George Balanchine.\nThe special magic answ",
+     "prompt_tokens": 32914
+    },
+    {
+     "ok": false,
+     "ans": [
+      "1763"
+     ],
+     "out": "What is the special magic answer for Joetta mentioned in the provided text? What",
+     "prompt_tokens": 32885
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Long Island"
+     ],
+     "out": "Answer:\nLong Island\nPassage:\nThe 1980s\nThe 1980s\nThe 1980s were a decade of econ",
+     "prompt_tokens": 32897
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Jeffersontown, Kentucky"
+     ],
+     "out": "The special magic answer for Cece is: Jeffersontown, Kentucky.\n\nWhat is the spec",
+     "prompt_tokens": 32896
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Band-e Amir National Park"
+     ],
+     "out": "What is the special magic answer for Cece mentioned in the provided text? What i",
+     "prompt_tokens": 32925
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Big 12 Conference"
+     ],
+     "out": "The special magic answer for Fleming is: Big 12 Conference.\nOne of the special m",
+     "prompt_tokens": 32913
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Taoiseach of Ireland"
+     ],
+     "out": "The special magic answer for Kati is: Taoiseach of Ireland.\n\nWhat is the special",
+     "prompt_tokens": 32870
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Nobel Prize"
+     ],
+     "out": "The special magic answer for Joetta is: Nobel Prize.\n\nWhat is the special magic ",
+     "prompt_tokens": 32951
+    },
+    {
+     "ok": true,
+     "ans": [
+      "number five"
+     ],
+     "out": "What is the special magic answer for Merna mentioned in the provided text?\nAnswe",
+     "prompt_tokens": 32876
+    },
+    {
+     "ok": true,
+     "ans": [
+      "George Balanchine"
+     ],
+     "out": "What is the special magic answer for Cassady mentioned in the provided text?\nAns",
+     "prompt_tokens": 32903
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1763"
+     ],
+     "out": "Answer:\n1763\nPassage:\nThe 1984 Summer Olympics\nThe 1984 Summer Olympics, officia",
+     "prompt_tokens": 32875
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Long Island"
+     ],
+     "out": "Answer:\nLong Island\nPassage:\nThe Gruffalo (film)\nThe Gruffalo is a 2009 British-",
+     "prompt_tokens": 32896
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Jeffersontown, Kentucky"
+     ],
+     "out": "What is the special magic answer for Joetta mentioned in the provided text?\nAnsw",
+     "prompt_tokens": 32907
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Band-e Amir National Park"
+     ],
+     "out": "The special magic answer for Randell is: Band-e-Amir National Park.\n\nWhat is the",
+     "prompt_tokens": 32910
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Big 12 Conference"
+     ],
+     "out": "The special magic answer for Dallas is: Big 12 Conference.\nThe special magic ans",
+     "prompt_tokens": 32927
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Taoiseach of Ireland"
+     ],
+     "out": "What is the special magic answer for Gwenn mentioned in the provided text? What ",
+     "prompt_tokens": 32862
+    }
+   ]
+  }
+ },
+ "qa_tli": {
+  "qa1": {
+   "score": 0.5,
+   "n": 20,
+   "gen_s": 1089.2,
+   "samples": [
+    {
+     "ok": false,
+     "ans": [
+      "Nadine Elizabeth Louise Coyle",
+      "Outta My Mind",
+      "Nadine Coyle discography"
+     ],
+     "out": "Answer:\nThe special magic answer for Randell is: The answer is \"The answer is th",
+     "prompt_tokens": 32834
+    },
+    {
+     "ok": false,
+     "ans": [
+      "1984"
+     ],
+     "out": "The special magic answer for Kati is: The 1961 novel 'The Prime of Miss Jean Bro",
+     "prompt_tokens": 32881
+    },
+    {
+     "ok": false,
+     "ans": [
+      "N Z",
+      "Nouvelle-Zelande",
+      "Kiwiland"
+     ],
+     "out": "What is the special magic answer for Zola mentioned in the provided text? What i",
+     "prompt_tokens": 32825
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Karl Marx",
+      "Karl Heinrich Marx",
+      "K. H. Marx"
+     ],
+     "out": "Answer:\nKarl Marx\nPassage:\nThe special magic answer for Renate is: Karl Marx.\nPa",
+     "prompt_tokens": 32961
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Underground Railway",
+      "Underground railroad",
+      "The Underground Railroad"
+     ],
+     "out": "The special magic answer for Afton is: Phoebe Sparrow.\n\nWhat is the special magi",
+     "prompt_tokens": 32906
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Seven",
+      "seven",
+      "7"
+     ],
+     "out": "The special magic answer for Dallas is: Seven.\n\nWhat is the special magic answer",
+     "prompt_tokens": 32876
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Almond tree",
+      "Luz (nut)",
+      "Amygdalus amara"
+     ],
+     "out": "Answer:\nAlmond tree\nPassage:\nThe special magic answer for Cassady is: Almond tre",
+     "prompt_tokens": 32817
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Foot fracture",
+      "Human feet",
+      "Foot muscles"
+     ],
+     "out": "The special magic answer for Randell is: The answer is the name of the person wh",
+     "prompt_tokens": 32853
+    },
+    {
+     "ok": false,
+     "ans": [
+      "MARTIN LUTHER KING",
+      "Martin Luther King,Jr.",
+      "MLK Jr."
+     ],
+     "out": "The special magic answer for Alfons is: The Krypton Factor.\n\nThe special magic a",
+     "prompt_tokens": 32861
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Brighthelmstone",
+      "UN/LOCODE:GBBSH",
+      "Brighton music"
+     ],
+     "out": "The special magic answer for Alfons is: Brighthelmstone.\n\nOne of the special mag",
+     "prompt_tokens": 32900
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Midtribulation rapture",
+      "Midtribulationism",
+      "Pre-tribulation"
+     ],
+     "out": "The special magic answer for Lidia is: Midtribulation rapture.\n\nWhat is the spec",
+     "prompt_tokens": 32877
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Bnefica",
+      "Slbenfica",
+      "Grupo sport lisboa"
+     ],
+     "out": "Answer:\nThe special magic answer for Kati is: The name of the first American pre",
+     "prompt_tokens": 32845
+    },
+    {
+     "ok": true,
+     "ans": [
+      "The Last Great Tortoise Race",
+      "Jasper Fforde"
+     ],
+     "out": "The special magic answer for Dwight is: The Last Great Tortoise Race.\n\nWhat is t",
+     "prompt_tokens": 32842
+    },
+    {
+     "ok": true,
+     "ans": [
+      "PAULINE QUIRKE",
+      "Pauline Quirke",
+      "Pauline Quirk"
+     ],
+     "out": "Answer: \nPAULINE QUIRKE\nPassage:\nThe Glorious Revolution\nThe Glorious Revolution",
+     "prompt_tokens": 32947
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Lady Browning",
+      "Daphne Du Maurier",
+      "Daphne de Maurier"
+     ],
+     "out": "Answer: Chief Inspector of Prisons\nPassage:\nThe special magic answer for Dallas ",
+     "prompt_tokens": 32888
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Arlene Philips",
+      "Arlene Phillips"
+     ],
+     "out": "Answer:\nArline Philips\nPassage:\nThe Seven Deadly Sins and the Four Last Things\nT",
+     "prompt_tokens": 32870
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Great daine",
+      "Great Danes",
+      "Deutsche Dogge"
+     ],
+     "out": "What is the special magic answer for Afton?\nAnswer:\nGreat daine\nPassage 11:\nEkof",
+     "prompt_tokens": 32824
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Psychoactive mushroom",
+      "Bacidocarp",
+      "Macrofungi"
+     ],
+     "out": "The special magic answer for Renate is: Psychoactive mushroom.\n\nWhat is the spec",
+     "prompt_tokens": 32871
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Holly Heston Rochell",
+      "John Charles Carter",
+      "Charleton Heston"
+     ],
+     "out": "Answer:\nStanley (TV series)\nPassage:\nThe New York Times\nThe New York Times (NYT)",
+     "prompt_tokens": 32861
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Marnie Nixon",
+      "Marni Nixon"
+     ],
+     "out": "What is the special magic answer for Kati mentioned in the provided text?\nAnswer",
+     "prompt_tokens": 32905
+    }
+   ]
+  },
+  "qa2": {
+   "score": 0.55,
+   "n": 20,
+   "gen_s": 1090.8,
+   "samples": [
+    {
+     "ok": false,
+     "ans": [
+      "Big 12 Conference"
+     ],
+     "out": "Answer:\nBourkina-Fasso\nPassage:\nBourkina-Fasso\nBourkina-Fasso is the name of the",
+     "prompt_tokens": 32929
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Taoiseach of Ireland"
+     ],
+     "out": "The special magic answer for Dallas is: The recent repeal of the US military pol",
+     "prompt_tokens": 32860
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Nobel Prize"
+     ],
+     "out": "The special magic answer for Cassady is: Nobel Prize.\nPassage:\nThe special magic",
+     "prompt_tokens": 32966
+    },
+    {
+     "ok": true,
+     "ans": [
+      "number five"
+     ],
+     "out": "Answer:\nnumber five\nPassage:\nThe special magic answer for Dwight is: number five",
+     "prompt_tokens": 32876
+    },
+    {
+     "ok": true,
+     "ans": [
+      "George Balanchine"
+     ],
+     "out": "A. George Balanchine\nB. George Balanchine\nC. George Balanchine\nD. George Balanch",
+     "prompt_tokens": 32914
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1763"
+     ],
+     "out": "The special magic answer for Gwenn is: 1763.\nWhat is the special magic answer fo",
+     "prompt_tokens": 32885
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Long Island"
+     ],
+     "out": "Answer:\nLong Island\nPassage:\nThe special magic answer for Kati mentioned in the ",
+     "prompt_tokens": 32897
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Jeffersontown, Kentucky"
+     ],
+     "out": "Answer:\nThe special magic answer for Cece is: 1998.\nPassage:\nThe special magic a",
+     "prompt_tokens": 32896
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Band-e Amir National Park"
+     ],
+     "out": "The special magic answer for Renate is: Band-e-Amir National Park.\ne\nOne of the ",
+     "prompt_tokens": 32925
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Big 12 Conference"
+     ],
+     "out": "The special magic answer for Fleming is: 15 KSTP, The Music Station.\n\nOne of the",
+     "prompt_tokens": 32913
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Taoiseach of Ireland"
+     ],
+     "out": "The special magic answer for Kati is: Taoiseach of Ireland.\n\nWhat is the special",
+     "prompt_tokens": 32870
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Nobel Prize"
+     ],
+     "out": "Answer:\nThe special magic answer for Joetta is: The special magic answer for Joe",
+     "prompt_tokens": 32951
+    },
+    {
+     "ok": true,
+     "ans": [
+      "number five"
+     ],
+     "out": "The special magic answer for Merna is: number five.\n\nOne of the special magic qu",
+     "prompt_tokens": 32876
+    },
+    {
+     "ok": false,
+     "ans": [
+      "George Balanchine"
+     ],
+     "out": "Answer:\nThe special magic answer for Cassady is: 1688.\nPassage:\nThe Glorious Rev",
+     "prompt_tokens": 32903
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1763"
+     ],
+     "out": "Answer: 1763\nPassage 1:\nFishing rod tapers\nFishing rod tapers describe how much ",
+     "prompt_tokens": 32875
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Long Island"
+     ],
+     "out": "Answer:\nLong Island\nPassage:\nThe Seven Deadly Sins and the Four Last Things\nThe ",
+     "prompt_tokens": 32896
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Jeffersontown, Kentucky"
+     ],
+     "out": "What is the special magic answer for Joetta?\nAnswer:\nJeffersontown, Kentucky.\nPa",
+     "prompt_tokens": 32907
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Band-e Amir National Park"
+     ],
+     "out": "The special magic answer for Randell is: 1956.\n\nOne of the special magic questio",
+     "prompt_tokens": 32910
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Big 12 Conference"
+     ],
+     "out": "The special magic answer for Dallas is: Big 12 Conference.\nAnswer:\nBig 12 Confer",
+     "prompt_tokens": 32927
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Taoiseach of Ireland"
+     ],
+     "out": "The special magic answer for Jenica is: The Star Sailors.\n\nWhat is the special m",
+     "prompt_tokens": 32862
+    }
+   ]
+  }
+ },
+ "qa_triton_seed2": {
+  "qa1": {
+   "score": 0.7,
+   "n": 20,
+   "gen_s": 178.2,
+   "samples": [
+    {
+     "ok": false,
+     "ans": [
+      "Chazer",
+      "Piggeh",
+      "Sus (genus)"
+     ],
+     "out": "What is the special magic answer for Alfons mentioned in the provided text? What",
+     "prompt_tokens": 32853
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Phoebe Sparrow",
+      "Gary sparrow",
+      "Donald Bamford"
+     ],
+     "out": "Answer:\nPhoebe Sparrow\nPassage:\nThe 1980s\nThe 1980s were a decade of significant",
+     "prompt_tokens": 32809
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Almond tree",
+      "Luz (nut)",
+      "Amygdalus amara"
+     ],
+     "out": "The special magic answer for Fleming is: Almond tree.\nBased on the information p",
+     "prompt_tokens": 32863
+    },
+    {
+     "ok": true,
+     "ans": [
+      "ISO 3166-1:PG",
+      "Papua Niu Gini",
+      "New Guinea Papua"
+     ],
+     "out": "Answer:\nISO 3166-1:PG\nPassage:\nWhat is the special magic answer for Merna mentio",
+     "prompt_tokens": 32887
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Peacherine",
+      "Peach",
+      "Prunus daemonifuga"
+     ],
+     "out": "The special magic answer for Renate is: Peacherine.\nAnswer:\nPeacherine\nPassage:\n",
+     "prompt_tokens": 32925
+    },
+    {
+     "ok": false,
+     "ans": [
+      "John Chilcot",
+      "Sir John Chilcot"
+     ],
+     "out": "What is the special magic answer for Tonda mentioned in the provided text? What ",
+     "prompt_tokens": 32856
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Hartford.",
+      "Hartford CT",
+      "Hartford, Connecticut"
+     ],
+     "out": "The special magic answer for Cece is: Hartford.\n\nThe special magic answer for Ce",
+     "prompt_tokens": 32813
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Ettrick shepherd",
+      "The ettrick shepherd",
+      "The Ettrick Shepherd"
+     ],
+     "out": "What is the special magic answer for Young mentioned in the provided text? What ",
+     "prompt_tokens": 32975
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Archibald alec leach",
+      "ArchibaldAlexanderLeach",
+      "Archibald Alexander Leach"
+     ],
+     "out": "The special magic answer for Fleming is: Archibald Alec Leach.\nBased on the give",
+     "prompt_tokens": 32864
+    },
+    {
+     "ok": true,
+     "ans": [
+      "James bLUNT",
+      "James blunt",
+      "JAMES BLUNT"
+     ],
+     "out": "The special magic answer for Joetta is: James bLUNT.\n\nWhat is the special magic ",
+     "prompt_tokens": 32853
+    },
+    {
+     "ok": true,
+     "ans": [
+      "\u0627\u0644\u062c\u0645\u0647\u0648\u0631\u064a\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629 \u0627\u0644\u0633\u0648\u0631\u064a\u0629",
+      "Amorrhitis",
+      "\u0633\u0648\u0631\u064a\u0627"
+     ],
+     "out": "The special magic answer for Young is: \u0627\u0644\u062c\u0645\u0647\u0648\u0631\u064a\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629 \u0627\u0644\u0633\u0648\u0631\u064a\u0629.\n\nWhat is the s",
+     "prompt_tokens": 32865
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Fedallah",
+      "Timor Tim",
+      "Dagoo"
+     ],
+     "out": "The special magic answer for Odell is: Fedallah.\n\nWhat is the special magic answ",
+     "prompt_tokens": 32799
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Trent",
+      "Trent (disambiguation)",
+      "TRENT"
+     ],
+     "out": "What is the special magic answer for Lidia mentioned in the provided text? What ",
+     "prompt_tokens": 32861
+    },
+    {
+     "ok": true,
+     "ans": [
+      "The Black Eyed Peas",
+      "Black Eyed Peas",
+      "Instant def"
+     ],
+     "out": "Answer:\nThe Black Eyed Peas\nPassage:\nThe Black Eyed Peas\nThe Black Eyed Peas are",
+     "prompt_tokens": 32865
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Curling sheet",
+      "Curling",
+      "Chess on ice"
+     ],
+     "out": "The special magic answer for Tonda is: Curling sheet.\nQuestion:\nWhat was the nam",
+     "prompt_tokens": 32925
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Chinese People's Republic",
+      "China (Peking)",
+      "The prc"
+     ],
+     "out": "Answer:\nChinese People's Republic\nPassage:\nThe Great South Run\nThe Great South R",
+     "prompt_tokens": 32869
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Breakfast At Tiffanys",
+      "Breakfast at Tiffanies",
+      "Breakfast at Tiffany\u2019s"
+     ],
+     "out": "The special magic answer for Odell is: Moon River.\nPassage:\nThe United States ha",
+     "prompt_tokens": 32826
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Aldo Moro"
+     ],
+     "out": "Answer:\nAldo Moro\nPassage:\nVestibular system\nThe vestibular system is a sensory ",
+     "prompt_tokens": 32982
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Scratch sheet",
+      "Race horse",
+      "Pony racing"
+     ],
+     "out": "The special magic answer for Kati is: Scratch sheet.\n\nThe special magic answer f",
+     "prompt_tokens": 32869
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Cardigan",
+      "Cardigan (disambiguation)"
+     ],
+     "out": "What is the special magic answer for Gwenn mentioned in the provided text? What ",
+     "prompt_tokens": 32852
+    }
+   ]
+  },
+  "qa2": {
+   "score": 0.65,
+   "n": 20,
+   "gen_s": 178.6,
+   "samples": [
+    {
+     "ok": false,
+     "ans": [
+      "no"
+     ],
+     "out": "What is the special magic answer for Lidia mentioned in the provided text? What ",
+     "prompt_tokens": 32866
+    },
+    {
+     "ok": true,
+     "ans": [
+      "The Rebirth"
+     ],
+     "out": "The special magic answer for Dwight is: The Rebirth.\nPassage:\nThe Rebirth\nThe Re",
+     "prompt_tokens": 32934
+    },
+    {
+     "ok": false,
+     "ans": [
+      "director"
+     ],
+     "out": "What is the special magic answer for Cece mentioned in the provided text? What i",
+     "prompt_tokens": 32923
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Lake Wallace"
+     ],
+     "out": "The special magic answer for Cece is: Lake Wallace.\nPassage:\nWhat is the special",
+     "prompt_tokens": 32886
+    },
+    {
+     "ok": false,
+     "ans": [
+      "J\u0101nis Strazdi\u0146\u0161"
+     ],
+     "out": "What is the special magic answer for Lidia mentioned in the provided text? What ",
+     "prompt_tokens": 32884
+    },
+    {
+     "ok": true,
+     "ans": [
+      "2010"
+     ],
+     "out": "Passage 2:\nThe special magic answer for Fleming is: 2010.\n\nPassage 3:\nThe specia",
+     "prompt_tokens": 32977
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Wicked Twister"
+     ],
+     "out": "The special magic answer for Odell is: Wicked Twister.\n\nWhat is the special magi",
+     "prompt_tokens": 32862
+    },
+    {
+     "ok": false,
+     "ans": [
+      "1978"
+     ],
+     "out": "What is the special magic answer for Odell mentioned in the provided text? What ",
+     "prompt_tokens": 32914
+    },
+    {
+     "ok": true,
+     "ans": [
+      "810"
+     ],
+     "out": "The special magic answer for Trudy is: 810.\nWhat is the special magic answer for",
+     "prompt_tokens": 32898
+    },
+    {
+     "ok": true,
+     "ans": [
+      "no"
+     ],
+     "out": "The special magic answer for Gwenn is: no.\n\nWhat is the special magic answer for",
+     "prompt_tokens": 32851
+    },
+    {
+     "ok": true,
+     "ans": [
+      "The Rebirth"
+     ],
+     "out": "The special magic answer for Kati is: The Rebirth.\n\nWhat is the special magic an",
+     "prompt_tokens": 32938
+    },
+    {
+     "ok": false,
+     "ans": [
+      "director"
+     ],
+     "out": "What is the special magic answer for Fleming mentioned in the provided text? Wha",
+     "prompt_tokens": 32917
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Lake Wallace"
+     ],
+     "out": "What is the special magic answer for Kati mentioned in the provided text? What i",
+     "prompt_tokens": 32896
+    },
+    {
+     "ok": true,
+     "ans": [
+      "J\u0101nis Strazdi\u0146\u0161"
+     ],
+     "out": "The special magic answer for Kati is: J\u0101nis Strazdi\u0146\u0161.\nPassage:\nThe special magi",
+     "prompt_tokens": 32890
+    },
+    {
+     "ok": true,
+     "ans": [
+      "2010"
+     ],
+     "out": "Answer:\n2010\nPassage:\nThe following is a list of the 2019\u20132020 UEFA Champions Le",
+     "prompt_tokens": 32978
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Wicked Twister"
+     ],
+     "out": "Answer:\nWicked Twister\nPassage:\nThe 1994\u201395 NHL season was the 78th season of th",
+     "prompt_tokens": 32870
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1978"
+     ],
+     "out": "The special magic answer for Renate is: 1978.\nAnswer:\n1978\n\nWhat is the special ",
+     "prompt_tokens": 32917
+    },
+    {
+     "ok": true,
+     "ans": [
+      "810"
+     ],
+     "out": "The special magic answer for Afton is: 810.\nThe special magic answer for Fleming",
+     "prompt_tokens": 32888
+    },
+    {
+     "ok": true,
+     "ans": [
+      "no"
+     ],
+     "out": "The special magic answer for Afton is: no.\n\nWhat is the special magic answer for",
+     "prompt_tokens": 32862
+    },
+    {
+     "ok": false,
+     "ans": [
+      "The Rebirth"
+     ],
+     "out": "What is the special magic answer for Renate mentioned in the provided text? What",
+     "prompt_tokens": 32945
+    }
+   ]
+  }
+ },
+ "qa_tli_seed2": {
+  "qa1": {
+   "score": 0.4,
+   "n": 20,
+   "gen_s": 1087.4,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "Chazer",
+      "Piggeh",
+      "Sus (genus)"
+     ],
+     "out": "The special magic answer for Jenica is: Artiodactyla Suidae is the scientific na",
+     "prompt_tokens": 32853
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Phoebe Sparrow",
+      "Gary sparrow",
+      "Donald Bamford"
+     ],
+     "out": "Answer:\nPhoebe Sparrow\nPassage:\nThe Sopranos (TV series)\nThe Sopranos is an Amer",
+     "prompt_tokens": 32809
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Almond tree",
+      "Luz (nut)",
+      "Amygdalus amara"
+     ],
+     "out": "The special magic answer for Fleming is: Almond tree.\n\nWhat is the special magic",
+     "prompt_tokens": 32863
+    },
+    {
+     "ok": true,
+     "ans": [
+      "ISO 3166-1:PG",
+      "Papua Niu Gini",
+      "New Guinea Papua"
+     ],
+     "out": "The special magic answer for Merna is: ISO 3166-1:PG.\nPassage:\nWhat is the ISO 3",
+     "prompt_tokens": 32887
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Peacherine",
+      "Peach",
+      "Prunus daemonifuga"
+     ],
+     "out": "Answer:\nFoot fracture\nPassage:\nThe Yule Log\nThe Yule Log is a 1966 American Chri",
+     "prompt_tokens": 32925
+    },
+    {
+     "ok": false,
+     "ans": [
+      "John Chilcot",
+      "Sir John Chilcot"
+     ],
+     "out": "The special magic answer for Trudy is: 1980.\n\nWhat is the special magic answer f",
+     "prompt_tokens": 32856
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Hartford.",
+      "Hartford CT",
+      "Hartford, Connecticut"
+     ],
+     "out": "The special magic answer for Cece is: The United States of America.\nThe special ",
+     "prompt_tokens": 32813
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Ettrick shepherd",
+      "The ettrick shepherd",
+      "The Ettrick Shepherd"
+     ],
+     "out": "The special magic answer for Dwight is: Ettrick shepherd.\n\nThe special magic ans",
+     "prompt_tokens": 32975
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Archibald alec leach",
+      "ArchibaldAlexanderLeach",
+      "Archibald Alexander Leach"
+     ],
+     "out": "The special magic answer for Fleming is: 1996.\n\nWhat is the special magic answer",
+     "prompt_tokens": 32864
+    },
+    {
+     "ok": false,
+     "ans": [
+      "James bLUNT",
+      "James blunt",
+      "JAMES BLUNT"
+     ],
+     "out": "The special magic answer for Joetta is: Back to Bedlam.\n\nWhat is the special mag",
+     "prompt_tokens": 32853
+    },
+    {
+     "ok": true,
+     "ans": [
+      "\u0627\u0644\u062c\u0645\u0647\u0648\u0631\u064a\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629 \u0627\u0644\u0633\u0648\u0631\u064a\u0629",
+      "Amorrhitis",
+      "\u0633\u0648\u0631\u064a\u0627"
+     ],
+     "out": "The special magic answer for Young is: \u0627\u0644\u062c\u0645\u0647\u0648\u0631\u064a\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629 \u0627\u0644\u0633\u0648\u0631\u064a\u0629.\n\nOne of the sp",
+     "prompt_tokens": 32865
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Fedallah",
+      "Timor Tim",
+      "Dagoo"
+     ],
+     "out": "The special magic answer for Odell is: Fedallah.\n\nWhat is the special magic answ",
+     "prompt_tokens": 32799
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Trent",
+      "Trent (disambiguation)",
+      "TRENT"
+     ],
+     "out": "The special magic answer for Afton is: \"The special magic answer for Afton is: T",
+     "prompt_tokens": 32861
+    },
+    {
+     "ok": false,
+     "ans": [
+      "The Black Eyed Peas",
+      "Black Eyed Peas",
+      "Instant def"
+     ],
+     "out": "Answer:\nThe special magic answer for Gwenn is: The name of the roller coaster is",
+     "prompt_tokens": 32865
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Curling sheet",
+      "Curling",
+      "Chess on ice"
+     ],
+     "out": "Answer:\nNoss\nPassage:\nThe 1960s were a time of great change in the world.  The C",
+     "prompt_tokens": 32925
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Chinese People's Republic",
+      "China (Peking)",
+      "The prc"
+     ],
+     "out": "The special magic answer for Cece is: \"I'm cuckoo for Cocoa Puffs!\".\nPassage:\nTh",
+     "prompt_tokens": 32869
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Breakfast At Tiffanys",
+      "Breakfast at Tiffanies",
+      "Breakfast at Tiffany\u2019s"
+     ],
+     "out": "The special magic answer for Odell is: The special magic answer for Odell is: Th",
+     "prompt_tokens": 32826
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Aldo Moro"
+     ],
+     "out": "What is the special magic answer for Odell mentioned in the provided text? What ",
+     "prompt_tokens": 32982
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Scratch sheet",
+      "Race horse",
+      "Pony racing"
+     ],
+     "out": "The special magic answer for Kati is: Scratch sheet.\nPassage:\nThe Four Feathers\n",
+     "prompt_tokens": 32869
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Cardigan",
+      "Cardigan (disambiguation)"
+     ],
+     "out": "The special magic answer for Joetta is: Saddle.\n\nWhat is the special magic answe",
+     "prompt_tokens": 32852
+    }
+   ]
+  },
+  "qa2": {
+   "score": 0.75,
+   "n": 20,
+   "gen_s": 1087.6,
+   "samples": [
+    {
+     "ok": true,
+     "ans": [
+      "no"
+     ],
+     "out": "The special magic answer for Alfons is: no.\n\nWhat is the special magic answer fo",
+     "prompt_tokens": 32866
+    },
+    {
+     "ok": true,
+     "ans": [
+      "The Rebirth"
+     ],
+     "out": "Answer:\nThe Rebirth\nPassage:\nThe Rebirth\nThe Rebirth is a special magic question",
+     "prompt_tokens": 32934
+    },
+    {
+     "ok": true,
+     "ans": [
+      "director"
+     ],
+     "out": "A. director\nB. producer\nC. actor\nD. writer\n\nThe special magic answer for Afton i",
+     "prompt_tokens": 32923
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Lake Wallace"
+     ],
+     "out": "The special magic answer for Cece is: Lake Wallace.\nPassage:\nWhat is the special",
+     "prompt_tokens": 32886
+    },
+    {
+     "ok": false,
+     "ans": [
+      "J\u0101nis Strazdi\u0146\u0161"
+     ],
+     "out": "Answer:\nThe special magic answer for Afton is: 1998.\nPassage:\nThe special magic ",
+     "prompt_tokens": 32884
+    },
+    {
+     "ok": false,
+     "ans": [
+      "2010"
+     ],
+     "out": "What is the special magic answer for Zola mentioned in the provided text? What i",
+     "prompt_tokens": 32977
+    },
+    {
+     "ok": false,
+     "ans": [
+      "Wicked Twister"
+     ],
+     "out": "The special magic answer for Odell is: The United States.\n\nThe special magic ans",
+     "prompt_tokens": 32862
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1978"
+     ],
+     "out": "The special magic answer for Cece is: 1978.\n\nThe special magic answer for Cece i",
+     "prompt_tokens": 32914
+    },
+    {
+     "ok": true,
+     "ans": [
+      "810"
+     ],
+     "out": "The special magic answer for Trudy is: 810.\n\nWhat is the special magic answer fo",
+     "prompt_tokens": 32898
+    },
+    {
+     "ok": false,
+     "ans": [
+      "no"
+     ],
+     "out": "The special magic answer for Gwenn is: 821.\nT\nThe special magic answer for Gwenn",
+     "prompt_tokens": 32851
+    },
+    {
+     "ok": true,
+     "ans": [
+      "The Rebirth"
+     ],
+     "out": "The special magic answer for Kati is: The Rebirth.\n\nWhat is the special magic an",
+     "prompt_tokens": 32938
+    },
+    {
+     "ok": true,
+     "ans": [
+      "director"
+     ],
+     "out": "The special magic answer for Zola is: director.\n\nWhat is the special magic answe",
+     "prompt_tokens": 32917
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Lake Wallace"
+     ],
+     "out": "The special magic answer for Cece is: Lake Wallace.\n\nWhat is the special magic a",
+     "prompt_tokens": 32896
+    },
+    {
+     "ok": true,
+     "ans": [
+      "J\u0101nis Strazdi\u0146\u0161"
+     ],
+     "out": "The special magic answer for Kati is: J\u0101nis Strazdi\u0146\u0161.\nAnswer:\nJ\u0101nis Strazdi\u0146\u0161\nP",
+     "prompt_tokens": 32890
+    },
+    {
+     "ok": true,
+     "ans": [
+      "2010"
+     ],
+     "out": "Answer:\n2010\nPassage:\nThe special magic answer for Fleming is: 2010.\nThe special",
+     "prompt_tokens": 32978
+    },
+    {
+     "ok": true,
+     "ans": [
+      "Wicked Twister"
+     ],
+     "out": "The special magic answer for Tonda is: Wicked Twister.\nPassage:\nThe special magi",
+     "prompt_tokens": 32870
+    },
+    {
+     "ok": true,
+     "ans": [
+      "1978"
+     ],
+     "out": "The special magic answer for Renate is: 1978.\nAnswer:\n1978\nPassage:\nThe United S",
+     "prompt_tokens": 32917
+    },
+    {
+     "ok": false,
+     "ans": [
+      "810"
+     ],
+     "out": "The special magic answer for Afton is: 6875.\nPassage:\nThe 2012 London Olympics\nT",
+     "prompt_tokens": 32888
+    },
+    {
+     "ok": true,
+     "ans": [
+      "no"
+     ],
+     "out": "Afton is a character in the GAO report who is asked special magic questions. One",
+     "prompt_tokens": 32862
+    },
+    {
+     "ok": true,
+     "ans": [
+      "The Rebirth"
+     ],
+     "out": "The special magic answer for Joetta is: The Rebirth.\n\nWhat is the special magic ",
+     "prompt_tokens": 32945
+    }
+   ]
+  }
+ }
+}

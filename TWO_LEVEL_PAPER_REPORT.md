@@ -1070,6 +1070,43 @@ seed2=5678 双方法复测（GPU0 一进程一 Engine 顺序跑），合并 n=40
 单任务单 seed 数字不可引，pooled 口径是论文表格的必要形态；④VT 仍
 gap 最大任务族之一（−0.25），与链式追踪 far 区预算上限诊断一致。
 
+### 8b-24. RULER QA 类扩展（2026-09-26，#55——qa1/qa2 双 seed pooled）
+
+**动机**：RULER 覆盖面补检索型事实问答（与被证伪的聚合型 CWE/FWE
+互补，§8b-22 先验证 FullKV 区分度再跑对比的教训落地）。qa1 = TriviaQA
+单跳（189 对）/ qa2 = HotpotQA 两跳（182 对），needle 用 LongBench QA
+真实问答对（"One of the special magic questions for {word} is: {q}
+The special magic answer for {word} is: {a}."×20 针），问指定 word 的
+answer，评分 = 任一答案别名 substring 命中（RULER 官方口径）。
+脚本 `test_tli_ruler_qa.py` + 合并 `merge_ruler_seeds.py`（QA JSON 接入）
++ 失败模式 `analyze_ruler_qa.py`。
+
+**FullKV dry 区分度先行验证**：n=3 dry（qa1 1.000 / qa2 0.667）→
+任务成立才投入全量（CWE 教训流程化）。
+
+**结果（`tli_ruler_qa_results.json`，双 seed 各 n=20 → pooled n=40）**：
+
+| QA 任务 | FullKV s1,s2 | TLI s1,s2 | gap pooled |
+|---|---|---|---|
+| qa1（单跳 TriviaQA） | 0.75, 0.70 | 0.50, 0.40 | −0.275 |
+| qa2（两跳 HotpotQA） | 0.80, 0.65 | 0.55, 0.75 | −0.075 |
+| **QA pooled 均值** | **0.725** | **0.550** | **−0.175** |
+| **RULER 全六任务 pooled** | **0.771** | **0.558** | **−0.21** |
+
+**失败模式（analyze_ruler_qa.py 逐样本交叉）**：①TLI 丢的主模式 =
+检索到**错误 key 的答案**（问 Cece 的答案 TLI 答 1998/Phoebe Sparrow
+——其他针的干扰答案，与 NIAH 干扰数字同机制）；②TLI 独中也存在
+（FullKV 复读 question 退化时 TLI 反而作答）——说明 FullKV 非饱和，
+两方法各有失败面；③共同丢 = 复读 question 不作答（raw prompt 模型
+格式层，两方法同丢不计入稀疏损失）。
+
+**诚实读法**：①qa1 gap −0.275 与 NIAH 单针（−0.375）/ multikey
+（−0.20）同族量级——单跳单针检索是稀疏 worst case 的再现；②qa2
+两 seed 方差大（FullKV 0.80/0.65、TLI 0.55/0.75，±0.15-0.20），
+−0.075 小 gap 在 n=40 下不可单独引用，只能并入六任务均值；③六任务
+pooled gap −0.21 与四任务单 seed −0.21 / 双 seed −0.231 一致——
+RULER 质量损失结论在任务族扩展下稳健。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）

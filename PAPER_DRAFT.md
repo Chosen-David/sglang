@@ -77,9 +77,9 @@ TLI 以 sglang attention backend 形式全链路集成：4bit 三张量索引逐
 2. **系统**：生产级集成——4bit 索引存储、批量 kernel 组合、CUDA graph
    三方法契约，每步配逐位/格点级对拍（§5）；
 3. **双口径诚实评估**：LongBench 均值（49.92 vs FullKV 50.36）+ RULER 多任务
-   （NIAH 单针双 seed 0.625、multikey/multivalue/multiquery/VT 双 seed
-   pooled 均值 0.562 vs 0.794）两端；kernel microbench（同机三方，Quest/DSA
-   官方 kernel 原样接入）+ e2e 吞吐两层都测（§6）；
+   （NIAH 单针双 seed 0.625、niah×3/VT/qa1/qa2 六任务双 seed pooled 均值
+   0.558 vs 0.771）两端；kernel microbench（同机三方，Quest/DSA 官方 kernel
+   原样接入）+ e2e 吞吐两层都测（§6）；
 4. **negative results 护城河**：12 项 No-Go 假设（聚类代表、L1 分区、
    在线 gate、跨层共享 PCA 基、CPU 捞取……）逐项映射到 design
    decisions（§4/§7），加三例测量方法案例（两例主动复测撤回 headline、
@@ -475,8 +475,8 @@ qasper 44.03 / multifieldqa_en 52.98——qasper 与 TIA 精确同值）。诊�
 必须复测（§7 方法论案例二）。
 
 **RULER 多任务扩展（Quest/HISA 论文口径对齐）**：NIAH 之外补 RULER 官方
-模板四任务（S=32K、双 seed 各 n=20 → pooled n=40/任务、同机同权重双方法、
-评分=答案值全命中）：
+模板四任务 + QA 检索型两任务（S=32K、双 seed 各 n=20 → pooled n=40/任务、
+同机同权重双方法、评分=答案值全命中）：
 
 | RULER 任务 | FullKV | TLI@1024 | gap | 失败模式 |
 |---|---|---|---|---|
@@ -484,23 +484,27 @@ qasper 44.03 / multifieldqa_en 52.98——qasper 与 TIA 精确同值）。诊�
 | niah_multivalue（同 key 5 值列举） | 0.775 | 0.525 | −0.25 | 部分值丢失（针多冗余缓冲） |
 | niah_multiquery（4 针 4 问） | 0.850 | 0.625 | −0.225 | 同上 |
 | variable_tracking（5 值×3 链） | 0.625 | 0.375 | −0.25 | 检索到链中段 VAR 名而非赋值源头 |
-| **均值** | **0.794** | **0.562** | **−0.231** | — |
+| qa1（TriviaQA 单跳×20 针） | 0.725 | 0.450 | −0.275 | 抓到干扰 key 的答案（同单针机制） |
+| qa2（HotpotQA 两跳×20 针） | 0.725 | 0.650 | −0.075 | 两 seed 方差大（±0.15-0.20），并入均值 |
+| **六任务均值** | **0.771** | **0.558** | **−0.21** | — |
 
-三点诚实读法：①多任务均值 gap（−0.231）**小于**单针极端 gap（−0.375）——
-多针自带冗余，单针是稀疏检索的 worst case；②VT/multivalue 掉分最大
-（−0.25）——链上针全落 far 区时 0.8% far 预算的物理上限与 NIAH 诊断
-同构，FullKV 基线本身也仅 0.625（Qwen3-8B 链式追踪能力上限）；③双 seed
-pooled n=40 口径（任务×seed 方差 ±0.15 实测——FullKV VT 两 seed 0.70/0.55、
-TLI multiquery 0.70/0.55，单任务单 seed 数字不可引；池化后逐任务 gap
-收窄至 −0.20~−0.25）。
+三点诚实读法：①多任务均值 gap（−0.21）**小于**单针极端 gap（−0.375）——
+多针自带冗余，单针是稀疏检索的 worst case；②qa1/multivalue/VT 掉分最大
+（−0.25~−0.275）——单跳单针检索 worst case 再现 + 链上针全落 far 区时
+0.8% far 预算的物理上限，FullKV 基线本身也仅 0.625-0.725（Qwen3-8B
+链式/列举能力上限），TLI 也有独中样本（FullKV 复读退化时）——两方法
+各有失败面；③双 seed pooled n=40 口径（任务×seed 方差 ±0.15 实测——
+FullKV VT 两 seed 0.70/0.55、TLI multiquery 0.70/0.55、TLI qa2 0.55/0.75，
+单任务单 seed 数字不可引；池化后六任务均值 −0.21 与四任务单 seed −0.21、
+双 seed −0.231 一致——任务族扩展下结论稳健）。
 
 **CWE/FWE（聚合型）不纳入对比的依据**：合成词流任务（common×30 vs
 filler×8 频率沟）四轮诊断显示 Qwen3-8B 在 8K–32K 词流上聚合计数不可解
 ——no-think 模式退化为停用词先验或计数错误、thinking 模式退化为逐词
 抄写（截断）。FullKV 基线本身 0 分，该任务族对任何稀疏方法无区分度
 （0 vs 0 会被误读为「无损」的反向错觉），与 RULER 文献中 CWE/FWE 为
-最难任务族的报告一致。质量对比覆盖面由检索型（niah×3）+ 链式（VT）
-承担。
+最难任务族的报告一致。质量对比覆盖面由检索型（niah×3 + qa1/qa2）+
+链式（VT）承担。
 
 **逐层质量**：36/36 层 mass 覆盖 diff<0.001，far-heavy 层（L03/L05）反超
 TIA（0.9995 vs 0.9990 / 0.9997 vs 0.9929）——B' 近端名额保障的直接逐层
@@ -657,7 +661,7 @@ topk 的算法级近似替换（prefill 剩余 67% 瓶颈）。
 | §4.2 B' | §8b-7/E4c/§8b-16 | fig3、tli_niah_results.json |
 | §4.3 D' | §8/E6/E6b/gate 失败史 | fig4、e6b_heldout_gate.json |
 | §5 Impl | §8b-2~5/8b-8/8b-12/8b-13/8b-15 | — |
-| §6.2 质量 | §4 主表/§8b-16/§8b-22/§8b-23 | fig6、tli_niah_results.json、tli_ruler_results.json、tli_ruler_cwe_results.json |
+| §6.2 质量 | §4 主表/§8b-16/§8b-22~24 | fig6、tli_niah_results.json、tli_ruler_results.json、tli_ruler_cwe_results.json、tli_ruler_qa_results.json |
 | §6.3 kernel | §8b-6 | kernel_comparison_indexers.json |
 | §6.4 e2e | §8b-13/8b-14/8b-15 | fig9、tli_m8_e2e_results.json、tli_m10_bench.json、tli_m8_e2e_long_results.json |
 | §7 测量学 | §8b-14 修正段/§8b-16 修正段/§8b-17 | — |
@@ -667,7 +671,7 @@ topk 的算法级近似替换（prefill 剩余 67% 瓶颈）。
 1. 【缺】H100 主表（S=131K×bs16/32）——§6.4 headline（机器申请中）
 2. ~~held-out gate 验证~~ ✅（E6b LOO 16 trace：TH=0.01 prec mean 0.990，
    narrativeqa 单点 0.923 + 误跳 far 占 0.29% + e2e 不掉分交叉验证——§4.3 已回填）
-3. ~~RULER 多任务~~ ✅（multikey/multivalue/multiquery/VT 四任务双方法双 seed pooled n=40，§6.2 表 gap −0.231）+ NIAH 双 seed ✅；CWE/FWE 已证伪为模型能力上限（FullKV 0 分无区分度，§6.2 脚注）——QA 类视主表需求
+3. ~~RULER 多任务~~ ✅ 全六任务（multikey/multivalue/multiquery/VT/qa1/qa2 双方法双 seed pooled n=40，§6.2 表六任务均值 gap −0.21）+ NIAH 双 seed ✅；CWE/FWE 已证伪为模型能力上限（FullKV 0 分无区分度，§6.2 脚注）
 4. ~~图表升级 fig9/fig10~~ ✅（make_fig9.py：S 收窄链 + M10 prefill 双档 + 44–51K 翻转点外推；make_fig10.py：kernel 阶梯 + 三方微基准 + decode 轨迹）
 5. 多 seed 置信区间（主表 200 样本已有；NIAH 双 seed 已测；e2e 曲线单次——按测量学 §7 原则标注）
 6. ~~正文八节+摘要~~ ✅ 全部【正文 v1】（2026-09-26，b3c10336a→b5c228f75）
