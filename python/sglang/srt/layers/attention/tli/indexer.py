@@ -453,6 +453,15 @@ class TLIIndexer:
         降到次要项。
         """
         p = self.profile
+        # #60 修复跨请求锁死 bug（2026-09-27）：动态 gate 语义 = prefill 测层
+        # / decode 跳 far。此前 skip_far 由 decode 的 select() 置位后跨请求
+        # 残留 → 本条 prefill 走 skip_far 分支（far 区为空）→ 统计代码在
+        # not-skip_far 分支内永不执行 → dyn_far_stat 冻结在低值 → skip_far
+        # 永真 → 自增强锁死（E5b musique 第 8 条起 on 臂全空输出的根因）。
+        # 修法：动态 gate 打开时 prefill 入口强制重置（静态掩码口径由动态
+        # 优先的设计覆盖，见 select() 幂等置位注释）。
+        if getattr(p, "dyn_far_gate", False):
+            self.skip_far = False
         S = index["S"]
         Hkv = index["kmin"].shape[1]
         Nq, H, D = q.shape
