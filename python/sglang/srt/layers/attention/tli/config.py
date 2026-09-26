@@ -107,6 +107,16 @@ class TLIProfile:
         # 30B 崩坏根因，终局诊断（#58）证实真根因是 select_batched 早期
         # 行因果越界，与本聚合无关；留作打分质量消融口径。----
         self.q_agg: str = os.environ.get("SGLANG_TLI_Q_AGG", "sum")
+        # ---- #60 D' 升级：prefill 动态测层 → decode 动态跳 far。
+        # 离线验证（e60_prefill_dynamic_gate.json，32B 7 任务）：prefill
+        # 末段行 per-layer far mass 与 decode far mass corr 0.86-0.99，
+        # 无静态掩码跨任务泛化假设（E5b 已证静态 gate No-Go）。
+        # prefill 末 chunk 统计 per-layer far mass 存 indexer，
+        # decode 侧 select 按阈值置 skip_far。阈值口径 = per-layer
+        # far mass（行×Hkv 平均；8B 实测安全任务 ~0.001-0.008、
+        # 多跳 ~0.015-0.026）。----
+        self.dyn_far_gate: bool = _env_bool("SGLANG_TLI_DYN_GATE", False)
+        self.dyn_far_thresh: float = _env_float("SGLANG_TLI_DYN_GATE_THRESH", 0.01)
 
     def subspace_idx(self, head_dim: int) -> list[int]:
         """position-stable 子空间维度索引（Qwen3 rotate_half 两半的尾维）。

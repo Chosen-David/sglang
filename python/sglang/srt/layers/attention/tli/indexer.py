@@ -84,6 +84,9 @@ class TLIIndexer:
         self.basis = basis
         self.nd2 = int(basis.shape[-1]) if basis is not None else 2 * p.delta
         self.skip_far: bool = False  # D'：由 backend 按 layer 掩码置位
+        # #60：prefill 动态测层——末 chunk 统计的 per-layer far mass
+        # （None = 尚未 prefill，decode 侧不置位）
+        self.dyn_far_stat: float | None = None
 
     def register_buffer_idx(self, _):
         pass
@@ -281,6 +284,11 @@ class TLIIndexer:
         （单 launch/head，E8-2 原型 1.63×）
         """
         p = self.profile
+        # #60 D' 动态 gate：decode 侧按 prefill 统计的 per-layer far mass
+        # 置 skip_far（e60：prefill→decode corr 0.86-0.99，无静态掩码
+        # 泛化假设）。幂等置位，静态掩码存在时优先动态口径（阈值可关）。
+        if getattr(p, "dyn_far_gate", False) and self.dyn_far_stat is not None:
+            self.skip_far = self.dyn_far_stat < p.dyn_far_thresh
         S = index["S"]
         Hkv = index["kmin"].shape[1]
         H = q.shape[1]
@@ -669,6 +677,19 @@ class TLIIndexer:
                 if bool(empty.any()):
                     i_g = torch.topk(fine, min(p.token_budget, S), dim=-1).indices
                     res = torch.where(empty.view(n, 1, 1), i_g, res)
+                # #60：末 row chunk 统计 per-layer far mass（行×Hkv 平均，
+                # softmax 在因果区归一化）→ decode 动态 skip_far 依据。
+                # M10 kernel 慢路径不物化 fine（far_sc 池表口径不同），
+                # 统计仅 eager/fast_path 路径——dyn gate 实验先跑 eager。
+                if getattr(p, "dyn_far_gate", False) and r1 == Nq:
+                    # 滑窗强制位是 +inf（topk 强制语义）→ softmax(inf)=nan，
+                    # 统计前剔除（权重 0；sw=128 << far 区尺度，口径影响 <1%）
+                    fine_s = fine.masked_fill(fine == float("inf"), float("-inf"))
+                    pm = torch.softmax(fine_s, dim=-1)  # [n, Hkv, S]
+                    fm = (pm * in_far.unsqueeze(1)).sum(-1)  # [n, Hkv]
+                    stat = float(fm.mean())
+                    if stat == stat:  # nan 防护：全空 far 行不覆盖
+                        self.dyn_far_stat = stat
                 out.append(res)
             else:
                 out.append(torch.topk(fine, min(p.token_budget, S), dim=-1).indices)
