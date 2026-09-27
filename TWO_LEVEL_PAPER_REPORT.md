@@ -1492,9 +1492,23 @@ smoke（kernel+DS 全开）2/3 逐字一致=历史基线。
 
 **64K 档从追平（1.005×）到 1.285× 领先 dense**——稀疏理论流量收益
 首次在 e2e 净兑现；32K 档从慢 1.91× 收敛到 0.77×（短上下文 select
-固定开销尚未被收益覆盖，符合收益随 S 单调递增预期）。剩余：S=64K×
-bs16 TP2 批量复测（双卡空闲后）+ decode 侧 DS 接入（CUDA graph
-capture 约束）。
+固定开销尚未被收益覆盖，符合收益随 S 单调递增预期）。
+
+**8B e2e 稳态复测（bs16×S=30K×n=256，test_tli_e2e_variance.py，
+kernel+DS 全开 vs 历史基线）**：prefill 733.9→**196.8s（3.73×）**、
+decode step 65.0→**33.5ms（1.94×，已反超 triton dense 的 40.4ms =
+0.83×）**——8B Hkv=8 形态的批量收益区也全面进入净收益区间；
+prefill 对 dense 1.72× 慢（8B 每层双 kernel gather 8 头形态更重，
+30B Hkv=4 已 0.77×，头数是 prefill 差异主变量）。round0 decode
+-11.6s 为差分法已知噪声（§8b-25 记录同款），取 round1。
+
+**decode 侧 DS 定标（#65，commit c3b1cb740）**：select_decode_batched
+L1+far 接 DS（graph 捕获自动回退）。**关键认知修正：decode select
+非瓶颈**——全 kernel 路径 0.95ms/step@bs16/S=64K（2611ms/step 是
+整步开销）。DS 净效果 bs16 +10%/bs64 −9%/bs128 −17%（高并发有益）。
+**near 池 DS = No-Go 负结果**：压缩表 ~2048 有限项挤在 4bit 格点极
+少数分数值（tie 组巨大）→ jaccard 0.72（L1/far 均 0.999）——tie
+打破差异与候选分数离散度强相关，接 DS 前必须按池预判。
 
 ### 8b-32. RULER 官方数据四方法评测（2026-09-27 晚，#66——官方口径对齐，跑批中）
 
