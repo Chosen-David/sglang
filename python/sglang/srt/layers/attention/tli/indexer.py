@@ -1083,6 +1083,18 @@ class TLIIndexer:
             )  # [n, Hkv, NBLK_CAP]
             sc1 = sc1.masked_fill(~valid_blk.unsqueeze(1), float("-inf"))
         cand_blk = torch.topk(sc1, K1, dim=-1).indices  # [n, Hkv, K1]
+        # #65 decode 侧 DS：CUDA graph 捕获中回退 torch.topk（无图路径
+        # ——收益区口径——直用；DS 退化行 pad 泄漏由 clamp+valid_blk 掩码
+        # 吸收，与 prefill L1 同语义）
+        _ds_dec = (
+            getattr(p, "use_ds_topk", False)
+            and _ds_available()
+            and not torch.cuda.is_current_stream_capturing()
+        )
+        if _ds_dec:
+            cand_blk = ds_topk(
+                sc1.reshape(n * Hkv, NBLK_CAP), K1
+            )[0].clamp(max=NBLK_CAP - 1).reshape(n, Hkv, K1)
         onehot = torch.zeros(n, NBLK_CAP, dtype=torch.bool, device=device)
         # 越界 / 非因果 / D' 掩蔽的垃圾块选择剔除在 scatter 源上完成——
         # 不能对 onehot 整体 & 掩码：滑窗强制块（含非对齐 S 的非因果尾块）
@@ -1256,9 +1268,21 @@ class TLIIndexer:
         )
         parts = []
         if W_far > 0:
-            i_f = torch.topk(far_sc, W_far, dim=-1).indices
-            sc_f = torch.gather(far_sc, 2, i_f)
-            sel_f = torch.gather(tok_e, 2, i_f)
+            if _ds_dec:
+                # #65：DS 直用（分数从 pad 后 bf16 xp gather：越界位 -inf
+                # → keep 转哨兵，与 torch.topk 有效集逐位一致）
+                i_f, xp_f = ds_topk(
+                    far_sc.reshape(-1, far_sc.shape[-1]), W_far
+                )
+                i_f = i_f.reshape(n, Hkv, W_far)
+                sc_f = torch.gather(xp_f.view(n, Hkv, -1), 2, i_f)
+                sel_f = torch.gather(
+                    tok_e, 2, i_f.clamp(max=far_sc.shape[-1] - 1)
+                )
+            else:
+                i_f = torch.topk(far_sc, W_far, dim=-1).indices
+                sc_f = torch.gather(far_sc, 2, i_f)
+                sel_f = torch.gather(tok_e, 2, i_f)
             # per-row 配额裁剪：W_far 是静态上界（统一宽度），rank ≥ 该行
             # k2_far 的槽位（topk 降序 = 低分尾部）转哨兵；-inf 槽位（池
             # 不足）同样转哨兵
@@ -1268,6 +1292,10 @@ class TLIIndexer:
             keep_f = (sc_f != float("-inf")) & rank_f
             parts.append(torch.where(~keep_f, torch.full_like(sel_f, SENT), sel_f))
         if W_near > 0:
+            # #65：near 池不接 DS——压缩表 ~2048 有限项挤在 4bit 格点
+            # 极少数分数值上（tie 组巨大），DS 块序 tie 打破使选中集合
+            # 与 torch 索引序差异过大（实测 jaccard 0.72 vs L1/far 的
+            # 0.999）；池仅 WNCAP 宽、torch.topk 本身便宜，保守保留
             i_n = torch.topk(near_sc, W_near, dim=-1).indices
             sc_n = torch.gather(near_sc, 2, i_n)
             # near 压缩路径：gather 源 = near_tok_c（静态宽 WNCAP）；
