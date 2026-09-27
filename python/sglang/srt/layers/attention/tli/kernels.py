@@ -570,7 +570,9 @@ def tli_l2_score_batched_dual(
         near_sc = torch.empty(
             n, Hkv, Tc + out_bf16_pad,
             dtype=torch.bfloat16, device=q2.device)
-        grid = (n, triton.cdiv(Tc + out_bf16_pad, chunk))
+        # #65 sweep：CHUNK=64/nw=4 最优（12.1ms vs 128/8 的 14.9ms，
+        # 池表全宽形态；与 M8-2b compact 路径结论一致）
+        grid = (n, triton.cdiv(Tc + out_bf16_pad, 64))
         _tli_l2_score_batched_dual_kernel[grid](
             q2, kq_q, kq_sc, kq_mn, rows, tok_c,
             far_sc, near_sc, near_sc,  # near_tok 占位（NEARC=0 不写）
@@ -578,12 +580,12 @@ def tli_l2_score_batched_dual(
             sw_lo.to(torch.long).contiguous(),
             rows, rows,  # ps/pf 占位（NEARC=0 不读）
             HKV=Hkv, ND2=nd2, TC=Tc, S_CAP=kq_q.shape[1], FAR_LO=far_lo,
-            CHUNK=chunk, NEARC=False, WNCAP=wncap or 16,
-            OUT_BF16=True, PAD=out_bf16_pad, num_warps=8,
+            CHUNK=64, NEARC=False, WNCAP=wncap or 16,
+            OUT_BF16=True, PAD=out_bf16_pad, num_warps=4,
         )
         return far_sc, near_sc
     near_sc = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=q2.device)
-    grid = (n, triton.cdiv(Tc, chunk))
+    grid = (n, triton.cdiv(Tc, 64))
     _tli_l2_score_batched_dual_kernel[grid](
         q2, kq_q, kq_sc, kq_mn, rows, tok_c,
         far_sc, near_sc, near_sc,  # near_tok 占位（NEARC=0 不写）
@@ -591,8 +593,8 @@ def tli_l2_score_batched_dual(
         sw_lo.to(torch.long).contiguous(),
         rows, rows,  # ps/pf 占位（NEARC=0 不读）
         HKV=Hkv, ND2=nd2, TC=Tc, S_CAP=kq_q.shape[1], FAR_LO=far_lo,
-        CHUNK=chunk, NEARC=False, WNCAP=wncap or 16,
-        OUT_BF16=False, PAD=0, num_warps=8,
+        CHUNK=64, NEARC=False, WNCAP=wncap or 16,
+        OUT_BF16=False, PAD=0, num_warps=4,
     )
     return far_sc, near_sc
 
