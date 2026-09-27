@@ -431,6 +431,7 @@ def _tli_l2_score_batched_dual_kernel(
     TC: tl.constexpr,
     S_CAP, FAR_LO, CHUNK: tl.constexpr,
     NEARC: tl.constexpr, WNCAP: tl.constexpr,
+    OUT_BF16: tl.constexpr, PAD: tl.constexpr,
 ):
     a = tl.program_id(0)
     c0 = tl.program_id(1) * CHUNK
@@ -456,8 +457,20 @@ def _tli_l2_score_batched_dual_kernel(
     in_far = (pos >= FAR_LO) & (pos < far_hi)  # [CHUNK]
     in_near = (pos < sw_lo) & (~in_far)
     far_v = tl.where(in_far[:, None], s, float("-inf"))  # [CHUNK, HKV]
-    o_off = a * HKV * TC + offs_h[None, :] * TC + offs_c[:, None]
-    tl.store(far_ptr + o_off, far_v, mask=cm[:, None])
+    # #65：OUT_BF16=1 时输出宽度 TC+PAD（pad 列 -inf）——DeepSelect 直用，
+    # 消灭 fp32 [n,Hkv,TC]（末 chunk ~2.8GB×2）物化 + ds_topk 的 cast/pad
+    # 复制链（profiling：pad/cast copy 22%）。分数 fp32 累加后单点转 bf16，
+    # 与原「先存 fp32 再整体 cast」rounding 一致。
+    if OUT_BF16:
+        TCW: tl.constexpr = TC + PAD
+        far_v = tl.where(
+            (offs_c >= TC)[:, None], float("-inf"), far_v
+        ).to(tl.bfloat16)
+        o_off = a * HKV * TCW + offs_h[None, :] * TCW + offs_c[:, None]
+        tl.store(far_ptr + o_off, far_v, mask=(offs_c < TCW)[:, None])
+    else:
+        o_off = a * HKV * TC + offs_h[None, :] * TC + offs_c[:, None]
+        tl.store(far_ptr + o_off, far_v, mask=cm[:, None])
     if NEARC:
         # near 池压缩直写（M8-topk）：near 有限项 = tok_c 升序下的
         # 前缀 [0, ps)（sink）∪ 后缀 [pf, pn)（far_hi..sw_lo 带）。
@@ -478,7 +491,14 @@ def _tli_l2_score_batched_dual_kernel(
         tl.store(near_tok_ptr + a * WNCAP + slot, pos, mask=nm)
     else:
         near_v = tl.where(in_near[:, None], s, float("-inf"))
-        tl.store(near_ptr + o_off, near_v, mask=cm[:, None])
+        if OUT_BF16:
+            near_v = tl.where(
+                (offs_c >= TC)[:, None], float("-inf"), near_v
+            ).to(tl.bfloat16)
+            o_off_n = a * HKV * TCW + offs_h[None, :] * TCW + offs_c[:, None]
+            tl.store(near_ptr + o_off_n, near_v, mask=(offs_c < TCW)[:, None])
+        else:
+            tl.store(near_ptr + o_off, near_v, mask=cm[:, None])
 
 
 def tli_l2_score_batched_dual(
@@ -495,17 +515,25 @@ def tli_l2_score_batched_dual(
     near_compact: bool = False,
     wncap: int = 0,       # near 压缩静态宽度（= far_lo + near_len - sliding_window）
     sent: int = 0,        # near_tok pad 哨兵（= S_cap）
+    out_bf16_pad: int = 0,  # #65：>0 时 far/near（NEARC=0）直接输出 bf16
+                            # [n, Hkv, Tc+pad]（pad 列 -inf），DeepSelect 直用
 ):
     """返回 (far_sc, near_sc)。默认 near_sc [n, Hkv, Tc]（池外 -inf，与 eager
     逐位一致）。near_compact=True 时返回 (far_sc [n,Hkv,Tc],
     near_sc_c [n,Hkv,wncap], near_tok_c [n,wncap])——near 有限项以确定性
     slot 压缩（前缀 sink + 后缀近带），pad 为 -inf / sent；topk 在 wncap
     宽度上进行（near 池静态上界 2048 vs Tc 66K，省 near topk ~30×）。
+    out_bf16_pad>0（仅 NEARC=0 路径）：far/near 输出 bf16 宽 Tc+pad（pad
+    列 -inf；须满足 (Tc+pad)%512==0 且 pad≥512 保 DS stride 对齐）——
+    消灭 fp32 大分数表物化 + ds_topk cast/pad 复制链。
     CHUNK=128 实测最优（0.43ms vs 512 的 1.06ms）：双输出 tile 使寄存器
     压力比单输出版更早触顶，512 即溢出到 local memory。"""
     n, Hkv, nd2 = q2.shape
     Tc = tok_c.shape[1]
-    far_sc = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=q2.device)
+    if out_bf16_pad > 0 and not near_compact:
+        pass  # bf16 直出路径在下方统一分配（far_sc 此处不预分配）
+    else:
+        far_sc = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=q2.device)
     if near_compact:
         near_sc = torch.full((n, Hkv, wncap), float("-inf"),
                              dtype=torch.float32, device=q2.device)
@@ -527,9 +555,33 @@ def tli_l2_score_batched_dual(
             sw_lo.to(torch.long).contiguous(),
             ps.to(torch.int32).contiguous(), pf.to(torch.int32).contiguous(),
             HKV=Hkv, ND2=nd2, TC=Tc, S_CAP=kq_q.shape[1], FAR_LO=far_lo,
-            CHUNK=64, NEARC=True, WNCAP=wncap, num_warps=4,
+            CHUNK=64, NEARC=True, WNCAP=wncap,
+            OUT_BF16=False, PAD=0, num_warps=4,
         )
         return far_sc, near_sc, near_tok
+    if out_bf16_pad > 0:
+        # #65：bf16 直出（far/near 同宽 Tc+pad，pad 列 -inf）。要求
+        # (Tc+pad)%512==0（DS stride 1024B 对齐），由调用方保证
+        assert not near_compact, "out_bf16_pad 暂不支持 near_compact"
+        assert (Tc + out_bf16_pad) % 512 == 0 and out_bf16_pad > 0
+        far_sc = torch.empty(
+            n, Hkv, Tc + out_bf16_pad,
+            dtype=torch.bfloat16, device=q2.device)
+        near_sc = torch.empty(
+            n, Hkv, Tc + out_bf16_pad,
+            dtype=torch.bfloat16, device=q2.device)
+        grid = (n, triton.cdiv(Tc + out_bf16_pad, chunk))
+        _tli_l2_score_batched_dual_kernel[grid](
+            q2, kq_q, kq_sc, kq_mn, rows, tok_c,
+            far_sc, near_sc, near_sc,  # near_tok 占位（NEARC=0 不写）
+            far_hi.to(torch.long).contiguous(),
+            sw_lo.to(torch.long).contiguous(),
+            rows, rows,  # ps/pf 占位（NEARC=0 不读）
+            HKV=Hkv, ND2=nd2, TC=Tc, S_CAP=kq_q.shape[1], FAR_LO=far_lo,
+            CHUNK=chunk, NEARC=False, WNCAP=wncap or 16,
+            OUT_BF16=True, PAD=out_bf16_pad, num_warps=8,
+        )
+        return far_sc, near_sc
     near_sc = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=q2.device)
     grid = (n, triton.cdiv(Tc, chunk))
     _tli_l2_score_batched_dual_kernel[grid](
@@ -539,7 +591,8 @@ def tli_l2_score_batched_dual(
         sw_lo.to(torch.long).contiguous(),
         rows, rows,  # ps/pf 占位（NEARC=0 不读）
         HKV=Hkv, ND2=nd2, TC=Tc, S_CAP=kq_q.shape[1], FAR_LO=far_lo,
-        CHUNK=chunk, NEARC=False, WNCAP=wncap or 16, num_warps=8,
+        CHUNK=chunk, NEARC=False, WNCAP=wncap or 16,
+        OUT_BF16=False, PAD=0, num_warps=8,
     )
     return far_sc, near_sc
 

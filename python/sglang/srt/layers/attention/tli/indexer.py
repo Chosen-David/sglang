@@ -90,6 +90,33 @@ def ds_topk(x: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
     return idx, xp
 
 
+def ds_topk_padded(xp: torch.Tensor, C: int, k: int) -> torch.Tensor:
+    """#65：输入已是 pad 后 bf16（宽 C+pad，pad 列 -inf，(C+pad)%512==0，
+    由 tli_l2_score_batched_dual(out_bf16_pad=) 直出）——省去 ds_topk 的
+    xp 物化（末 chunk fp32→bf16 复制链 ~4GB 流量）。返回 idx [R, k]
+    int64（clamp 到 pad 区；调用方从 xp gather 分数使越界位 -inf），
+    有效列数 C 通过 end 传给 kernel（pad 列不参与）。"""
+    R = xp.shape[0]
+    end = torch.full((R,), C, device=xp.device, dtype=torch.int32)
+    _, idx = _DS.topk(xp, k, end=end, return_value=False,
+                      indices_type=torch.int64)
+    if os.environ.get("SGLANG_TLI_DS_DEBUG"):
+        nan = int(torch.isnan(xp).sum())
+        bad = (idx < 0) | (idx >= xp.shape[1])
+        print(f"[ds_debug_padded] R={R} C={C} W={xp.shape[1]} k={k} "
+              f"NaN={nan} idx_bad={int(bad.sum())} "
+              f"idx_max={int(idx.max())}", flush=True)
+        if nan:
+            raise RuntimeError(f"ds_topk_padded debug trip: NaN={nan}")
+    idx = idx.clamp_(min=0, max=xp.shape[1] - 1)
+    return idx
+
+
+def _ds_pad_for(C: int) -> int:
+    """DS 直出 pad 宽：使 C+pad 为 512 倍数且恒 ≥512（对齐也补）。"""
+    return (-C) % 512 or 512
+
+
 def quant4_pack(x: torch.Tensor):
     """M6：kq 真 4bit 存储——量化为 (grid uint8, sc fp32, mn fp32)。
 
@@ -613,6 +640,23 @@ class TLIIndexer:
             # 后每 head 仅选 nblk 的 K1/nblk 比例块，并集 < 100% → 慢路径
             # 必然触发（30K 实测末 chunk 128/128 慢路径，q 是否真实无关）
             fast_path = bool((sel_mask.sum(1) >= t_c + 1).all())
+            # #65：kernel 路径可用时不再走 eager fast path——Tc==S 是 M10
+            # 慢路径的特例（候选并集=全块，Tc_k==S，kernel 语义等价），而
+            # kernel+DS（bf16 直出）已快于 eager 的全宽 einsum + 2×torch.topk
+            # （首 chunk 实测 67ms vs 慢路径 ~24ms 量级）。dyn_far_gate 统计
+            # 仅 eager 路径有 → 开 gate 时保留 fast path
+            _kern_ok = (
+                getattr(p, "use_prefill_kernel", False)
+                and not self.skip_far
+                and not q_agg_max
+                and n >= 2
+                and (Hkv & (Hkv - 1)) == 0
+                and (nd2 & (nd2 - 1)) == 0
+                and index["kq_q"].is_contiguous()
+                and not getattr(p, "dyn_far_gate", False)
+            )
+            if fast_path and _kern_ok:
+                fast_path = False
             if fast_path:
                 if q_agg_max:
                     fine = torch.einsum(
@@ -622,15 +666,7 @@ class TLIIndexer:
                     fine = torch.einsum("ahd,shd->ahs", q2, kq_f)  # [n, Hkv, S]
                 causal_full = pos.view(1, S) <= t_c.view(-1, 1)  # [n, S]
                 fine = fine.masked_fill(~causal_full.unsqueeze(1), float("-inf"))
-            elif (
-                getattr(p, "use_prefill_kernel", False)
-                and not self.skip_far
-                and not q_agg_max  # max 聚合暂走 eager（kernel 内 GEMV 是 sum 口径）
-                and n >= 2
-                and (Hkv & (Hkv - 1)) == 0
-                and (nd2 & (nd2 - 1)) == 0
-                and index["kq_q"].is_contiguous()
-            ):
+            elif _kern_ok:
                 # M10：慢路径 kernel 化（M8 decode 侧全套移植，t_t → per-row
                 # t_c，pool 以 [1,...] 视图 + rows=0 寻址）。消除三处 eager 大头：
                 # ①seq_m where [n,S] + topk 全排序 → tli_compact 块展开；
@@ -651,6 +687,10 @@ class TLIIndexer:
                 far_hi_t = (t_c + 1 - p.near_len).clamp(min=far_lo_k)
                 sw_lo_t = (t_c - p.sliding_window + 1).clamp(min=0)
                 rows0 = torch.zeros(n, dtype=torch.long, device=device)
+                _ds_on = getattr(p, "use_ds_topk", False) and _ds_available()
+                # #65：DS 开时 dual kernel 直出 bf16+pad（消灭 fp32 [n,Hkv,Tc]
+                # ×2 物化 + ds_topk cast/pad 复制链；分数 fp32 累加后单点转
+                # bf16，rounding 与原整体 cast 一致）
                 far_sc, near_sc = tli_l2_score_batched_dual(
                     q2,
                     index["kq_q"][:S].unsqueeze(0),
@@ -661,6 +701,7 @@ class TLIIndexer:
                     far_lo_k,
                     far_hi_t,
                     sw_lo_t,
+                    out_bf16_pad=_ds_pad_for(Tc_k) if _ds_on else 0,
                 )
                 # B'：host 常量宽度（prefill 无 CUDA graph 约束，对齐原版输出
                 # K2 = token_budget：far k2_far + near (k2_near-F) + forced F；
@@ -675,20 +716,18 @@ class TLIIndexer:
                 SENT = S
                 tok_e = tok_ck.unsqueeze(1).expand(n, Hkv, Tc_k)
                 parts = []
-                _ds_on = getattr(p, "use_ds_topk", False) and _ds_available()
                 if W_far > 0:
                     if _ds_on:
-                        i_f, xp_f = ds_topk(
-                            far_sc.reshape(-1, far_sc.shape[-1]), W_far
-                        )
-                        i_f = i_f.reshape(far_sc.shape[0], far_sc.shape[1], W_far)
-                        # 分数从 pad 后 bf16 视图 gather：越界位（-inf 平局
-                        # 选进 pad 列）自动得 -inf → keep 掩码兜住
-                        sc_f = torch.gather(
-                            xp_f.view(far_sc.shape[0], far_sc.shape[1], -1), 2, i_f
-                        )
+                        # #65：far_sc 已是 bf16+pad 直出（宽 Tc_k+pad）——
+                        # DS 直用，分数 gather 越界位自动 -inf → keep 兜住
+                        i_f = ds_topk_padded(
+                            far_sc.reshape(-1, far_sc.shape[-1]), Tc_k, W_far
+                        ).reshape(far_sc.shape[0], far_sc.shape[1], W_far)
+                        sc_f = torch.gather(far_sc, 2, i_f)
+                        # idx 可落 pad 区（≥Tc_k）→ clamp 到候选表末位；
+                        # 该位分数为 -inf，keep_f 会转哨兵，语义不变
                         sel_f = torch.gather(
-                            tok_e, 2, i_f.clamp(max=far_sc.shape[-1] - 1)
+                            tok_e, 2, i_f.clamp(max=Tc_k - 1)
                         )
                     else:
                         i_f = torch.topk(far_sc, W_far, dim=-1).indices
@@ -698,15 +737,12 @@ class TLIIndexer:
                     parts.append(torch.where(~keep_f, torch.zeros_like(sel_f), sel_f))
                 if W_near > 0:
                     if _ds_on:
-                        i_n, xp_n = ds_topk(
-                            near_sc.reshape(-1, near_sc.shape[-1]), W_near
-                        )
-                        i_n = i_n.reshape(near_sc.shape[0], near_sc.shape[1], W_near)
-                        sc_n = torch.gather(
-                            xp_n.view(near_sc.shape[0], near_sc.shape[1], -1), 2, i_n
-                        )
+                        i_n = ds_topk_padded(
+                            near_sc.reshape(-1, near_sc.shape[-1]), Tc_k, W_near
+                        ).reshape(near_sc.shape[0], near_sc.shape[1], W_near)
+                        sc_n = torch.gather(near_sc, 2, i_n)
                         sel_n = torch.gather(
-                            tok_e, 2, i_n.clamp(max=near_sc.shape[-1] - 1)
+                            tok_e, 2, i_n.clamp(max=Tc_k - 1)
                         )
                     else:
                         i_n = torch.topk(near_sc, W_near, dim=-1).indices
@@ -721,17 +757,33 @@ class TLIIndexer:
                     parts.append(forced.unsqueeze(1).expand(n, Hkv, -1))
                 res_k = torch.cat(parts, dim=-1)  # [n, Hkv, K2]（哨兵已转 0）
                 # empty 行（far 区空）：走原版整体 topk 口径（对拍锚定）。
-                # fine 需按行构造——仅 empty 行子集（首 chunk 早段行）计算
+                # #65：fine_e 只对 empty 行子集计算（旧版全 n 行 einsum+
+                # 全宽 topk——首 chunk 41% 行 empty 时 chunk0 67ms vs 其余
+                # 24ms 的主因）；逐行结果不变（纯子集化）
                 empty = far_hi_t <= far_lo_k  # [n] device
+                # t_c < K2 的行末尾被 #58 uniform grid 整行覆盖 → 无需算
                 if bool(empty.any()):
-                    fine_e = torch.einsum("ahd,shd->ahs", q2, kq_f)
-                    causal_full = pos.view(1, S) <= t_c.view(-1, 1)
+                    empty &= t_c >= res_k.shape[-1]
+                if bool(empty.any()):
+                    q2_e = q2[empty]           # [ne, Hkv, nd2]
+                    t_e = t_c[empty]           # [ne]
+                    fine_e = torch.einsum("ahd,shd->ahs", q2_e, kq_f)
+                    causal_full = pos.view(1, S) <= t_e.view(-1, 1)
                     fine_e = fine_e.masked_fill(~causal_full.unsqueeze(1), float("-inf"))
                     sw_off = torch.arange(p.sliding_window, device=device)
-                    f_sw = (t_c.view(-1, 1) - sw_off).clamp(min=0)
-                    fine_e.scatter_(2, f_sw.unsqueeze(1).expand(n, Hkv, -1), float("inf"))
+                    f_sw = (t_e.view(-1, 1) - sw_off).clamp(min=0)
+                    fine_e.scatter_(2, f_sw.unsqueeze(1).expand(-1, Hkv, -1), float("inf"))
                     i_g = torch.topk(fine_e, min(p.token_budget, S), dim=-1).indices
-                    res_k = torch.where(empty.view(n, 1, 1), i_g, res_k)
+                    # 行 scatter 回全宽（i_g 宽 min(budget,S) 与 res_k 的
+                    # parts 拼接宽对齐；正常配置相等=token_budget）
+                    w = res_k.shape[-1]
+                    if i_g.shape[-1] != w:
+                        if i_g.shape[-1] > w:
+                            i_g = i_g[..., :w]
+                        else:
+                            i_g = torch.nn.functional.pad(
+                                i_g, (0, w - i_g.shape[-1]))
+                    res_k[empty] = i_g
                 out.append(res_k)
                 continue
             else:
@@ -817,16 +869,21 @@ class TLIIndexer:
         # 越界数为 0（审计验证），不动。
         early = t_arr < res_all.shape[-1]  # [Nq]
         if bool(early.any()):
+            # #65 向量化：旧版逐行 Python 循环（arange+repeat_interleave+
+            # cat+index_put × 每早期行，首 chunk 1024 行 → ~5K launch +
+            # 3K 次 .item() 同步，chunk0 65ms 的主因）。等价构造：
+            # slot j 的位置 = j//reps（j < reps*L）否则 j - reps*L（尾段）
             K2 = res_all.shape[-1]
             Hkv2 = res_all.shape[1]
-            for r in early.nonzero().squeeze(-1).tolist():
-                t_r = int(t_arr[r])
-                reps = K2 // (t_r + 1)
-                rem = K2 - reps * (t_r + 1)
-                grid = torch.arange(t_r + 1, device=res_all.device).repeat_interleave(reps)
-                if rem > 0:
-                    grid = torch.cat([grid, torch.arange(rem, device=res_all.device)])
-                res_all[r] = grid.view(1, K2).expand(Hkv2, K2)
+            e_idx = early.nonzero().squeeze(-1)  # [ne]
+            L = t_arr[e_idx] + 1                 # [ne] 因果位置数
+            reps = K2 // L                        # [ne]
+            cut = (reps * L).view(-1, 1)          # [ne,1]
+            j = torch.arange(K2, device=res_all.device).view(1, -1)
+            grid = torch.where(
+                j < cut, j // reps.view(-1, 1), j - cut
+            )  # [ne, K2]
+            res_all[e_idx] = grid.unsqueeze(1).expand(-1, Hkv2, K2)
         return res_all
 
     @torch.no_grad()
