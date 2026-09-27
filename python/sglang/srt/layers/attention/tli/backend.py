@@ -664,7 +664,9 @@ class TLISparseAttnBackend(AttentionBackend):
             pool_l["kmax"][row, : index["nblk"]] = index["kmax"]
             pool_l["S"][row] = S
             t_arr = torch.arange(prefix, S, device=q.device)
-            sel = indexer.select_batched(index, q_b, t_arr)  # [nq, Hkv, K2] 逻辑位置
+            sel = indexer.select_batched(
+                index, q_b, t_arr, t_min_hint=prefix
+            )  # [nq, Hkv, K2] 逻辑位置（t_min_hint=prefix 消 empty/early 同步）
             out[starts[b] : ends[b]] = self._sparse_extend_one(
                 q_b, sel, locs, pool, layer_id, Hkv, G,
                 q_raw=q[starts[b] : ends[b]],

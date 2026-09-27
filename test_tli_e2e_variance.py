@@ -63,9 +63,12 @@ def make_prompts(bs):
                 break
         prompts = [r["context"][:32000] + "\n\nSummarize the above text in one sentence:" for r in uniq]
     else:
+        # token 精确口径的 chars 预筛阈值：中文 vcsum ~1.5 chars/token，
+        # TARGET_TOKENS×1.8 保守下探（40K→72K chars 起点；64K→115K）
+        chars_floor = max(100000, int(TARGET_TOKENS * 1.8))
         for r in rows:
             ctx = r.get("context") or ""
-            if len(ctx) < 100000:
+            if len(ctx) < chars_floor:
                 continue
             key = ctx[:10000]
             if key in seen:
@@ -86,6 +89,7 @@ def make_prompts(bs):
     assert len(uniq) == bs, f"only {len(uniq)} unique long contexts"
     n_tok = [len(tok(p)["input_ids"]) for p in prompts]
     print(f"[make_prompts] bs={bs} prompt tokens: {n_tok}")
+    # 模型 context 上限 40960（单卡 8B）；TP2 扩展口径下同模型同上限
     assert max(n_tok) < 40960 - N_DECODE - 8
     return prompts
 
@@ -94,13 +98,19 @@ def main():
     backend = sys.argv[1] if len(sys.argv) > 1 else "tli"
     # tag 必须含 S（TARGET_TOKENS）：否则不同 S 的 run 会互相覆盖 JSON 归档
     # （#57 教训：40K run 差点覆盖 #56 的 30K 仲裁数据）
-    tag = f"var_{MODE}_S{TARGET_TOKENS}_{backend}_bs{BS}_n{N_DECODE}" + (f"_r{N_ROUNDS}" if N_ROUNDS != 2 else "")
+    tp = int(os.environ.get("VAR_TP", 1))
+    tag = (
+        f"var_{MODE}_S{TARGET_TOKENS}_{backend}_bs{BS}_n{N_DECODE}"
+        + (f"_tp{tp}" if tp > 1 else "")
+        + (f"_r{N_ROUNDS}" if N_ROUNDS != 2 else "")
+    )
 
     eng = Engine(
         model_path=MODEL,
         attention_backend=backend,
         dtype="bfloat16",
         device="cuda",
+        tp_size=tp,
         mem_fraction_static=MEM_FRAC,
         trust_remote_code=True,
         disable_radix_cache=True,

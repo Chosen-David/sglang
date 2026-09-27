@@ -517,6 +517,7 @@ class TLIIndexer:
         q: torch.Tensor,
         t_arr: torch.Tensor,
         row_chunk: int = 64,
+        t_min_hint: int | None = None,
     ) -> torch.Tensor:
         """prefill 批量两级选择（M2 稀疏 prefill 用）。
 
@@ -639,12 +640,15 @@ class TLIIndexer:
             # M10 修正认知：nblk > K1（S ≳ 8K×Hkv/K1…即 S>~32K/Hkv 边界附近）
             # 后每 head 仅选 nblk 的 K1/nblk 比例块，并集 < 100% → 慢路径
             # 必然触发（30K 实测末 chunk 128/128 慢路径，q 是否真实无关）
-            fast_path = bool((sel_mask.sum(1) >= t_c + 1).all())
+            fast_path = False
             # #65：kernel 路径可用时不再走 eager fast path——Tc==S 是 M10
             # 慢路径的特例（候选并集=全块，Tc_k==S，kernel 语义等价），而
             # kernel+DS（bf16 直出）已快于 eager 的全宽 einsum + 2×torch.topk
             # （首 chunk 实测 67ms vs 慢路径 ~24ms 量级）。dyn_far_gate 统计
-            # 仅 eager 路径有 → 开 gate 时保留 fast path
+            # 仅 eager 路径有 → 开 gate 时保留 fast path。
+            # （同步坑：fast_path 判定的 .all().item() 是 GPU 同步——生产
+            # 每请求每层每 forward 一次 × 16 req × 36 层 × 60 forward ≈ 3.5 万
+            # 次队列排空；_kern_ok 时直接跳过判定）
             _kern_ok = (
                 getattr(p, "use_prefill_kernel", False)
                 and not self.skip_far
@@ -655,8 +659,8 @@ class TLIIndexer:
                 and index["kq_q"].is_contiguous()
                 and not getattr(p, "dyn_far_gate", False)
             )
-            if fast_path and _kern_ok:
-                fast_path = False
+            if not _kern_ok:
+                fast_path = bool((sel_mask.sum(1) >= t_c + 1).all())
             if fast_path:
                 if q_agg_max:
                     fine = torch.einsum(
@@ -759,31 +763,39 @@ class TLIIndexer:
                 # empty 行（far 区空）：走原版整体 topk 口径（对拍锚定）。
                 # #65：fine_e 只对 empty 行子集计算（旧版全 n 行 einsum+
                 # 全宽 topk——首 chunk 41% 行 empty 时 chunk0 67ms vs 其余
-                # 24ms 的主因）；逐行结果不变（纯子集化）
+                # 24ms 的主因）；逐行结果不变（纯子集化）。
+                # t_min_hint（forward_extend 的 prefix，host int）：t ≥
+                # near_len+far_lo 时无 empty 行、t ≥ K2 时无 early 行——
+                # 跳过 .any() GPU 同步（生产 ~60 forward×16 req×36 层，
+                # 每次同步排空队列 = e2e 隐藏大头）
                 empty = far_hi_t <= far_lo_k  # [n] device
                 # t_c < K2 的行末尾被 #58 uniform grid 整行覆盖 → 无需算
-                if bool(empty.any()):
-                    empty &= t_c >= res_k.shape[-1]
-                if bool(empty.any()):
-                    q2_e = q2[empty]           # [ne, Hkv, nd2]
-                    t_e = t_c[empty]           # [ne]
-                    fine_e = torch.einsum("ahd,shd->ahs", q2_e, kq_f)
-                    causal_full = pos.view(1, S) <= t_e.view(-1, 1)
-                    fine_e = fine_e.masked_fill(~causal_full.unsqueeze(1), float("-inf"))
-                    sw_off = torch.arange(p.sliding_window, device=device)
-                    f_sw = (t_e.view(-1, 1) - sw_off).clamp(min=0)
-                    fine_e.scatter_(2, f_sw.unsqueeze(1).expand(-1, Hkv, -1), float("inf"))
-                    i_g = torch.topk(fine_e, min(p.token_budget, S), dim=-1).indices
-                    # 行 scatter 回全宽（i_g 宽 min(budget,S) 与 res_k 的
-                    # parts 拼接宽对齐；正常配置相等=token_budget）
-                    w = res_k.shape[-1]
-                    if i_g.shape[-1] != w:
-                        if i_g.shape[-1] > w:
-                            i_g = i_g[..., :w]
-                        else:
-                            i_g = torch.nn.functional.pad(
-                                i_g, (0, w - i_g.shape[-1]))
-                    res_k[empty] = i_g
+                _no_empty = (
+                    t_min_hint is not None
+                    and t_min_hint >= p.near_len + far_lo_k
+                )
+                if not _no_empty:
+                    empty &= t_c >= res_k.shape[-1]  # device op 无同步
+                    if bool(empty.any()):
+                        q2_e = q2[empty]           # [ne, Hkv, nd2]
+                        t_e = t_c[empty]           # [ne]
+                        fine_e = torch.einsum("ahd,shd->ahs", q2_e, kq_f)
+                        causal_full = pos.view(1, S) <= t_e.view(-1, 1)
+                        fine_e = fine_e.masked_fill(~causal_full.unsqueeze(1), float("-inf"))
+                        sw_off = torch.arange(p.sliding_window, device=device)
+                        f_sw = (t_e.view(-1, 1) - sw_off).clamp(min=0)
+                        fine_e.scatter_(2, f_sw.unsqueeze(1).expand(-1, Hkv, -1), float("inf"))
+                        i_g = torch.topk(fine_e, min(p.token_budget, S), dim=-1).indices
+                        # 行 scatter 回全宽（i_g 宽 min(budget,S) 与 res_k 的
+                        # parts 拼接宽对齐；正常配置相等=token_budget）
+                        w = res_k.shape[-1]
+                        if i_g.shape[-1] != w:
+                            if i_g.shape[-1] > w:
+                                i_g = i_g[..., :w]
+                            else:
+                                i_g = torch.nn.functional.pad(
+                                    i_g, (0, w - i_g.shape[-1]))
+                        res_k[empty] = i_g
                 out.append(res_k)
                 continue
             else:
@@ -868,7 +880,11 @@ class TLIIndexer:
         # （每位置重复次数差 ≤1，softmax 数学等价 dense 行）。t_r ≥ K2 的行
         # 越界数为 0（审计验证），不动。
         early = t_arr < res_all.shape[-1]  # [Nq]
-        if bool(early.any()):
+        # #65：t_min_hint ≥ K2（输出宽）时无 early 行——跳过 .any() 同步
+        _no_early = (
+            t_min_hint is not None and t_min_hint >= res_all.shape[-1]
+        )
+        if not _no_early and bool(early.any()):
             # #65 向量化：旧版逐行 Python 循环（arange+repeat_interleave+
             # cat+index_put × 每早期行，首 chunk 1024 行 → ~5K launch +
             # 3K 次 .item() 同步，chunk0 65ms 的主因）。等价构造：
