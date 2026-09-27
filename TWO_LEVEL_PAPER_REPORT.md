@@ -1467,6 +1467,161 @@ prefill 双档，DS=0→DS=1）**：
 ms/step）+ prefill 剩余 dual/pad-copy 开销。decode 侧接入受 CUDA
 graph capture 约束（DS host 端 pad/end 分配不可图内），留后续。
 
+**#65 prefill select 三连优化（2026-09-27 晚 ✅，commit a35acf260
++ 0b7d2fcd4）**：①**最大隐藏瓶颈 = #58 早期行修复的逐行 Python 循环**
+（首 chunk ~1024 行 × arange/cat/index_put ≈ 5K launch + 3K 次
+.item() 同步 → chunk0 65ms 主因，e2e 每层每 prefill 都付）→ 向量化
+where(j<cut, j//reps, j-cut) 构造，chunk0 67→16.5ms（4×）；
+②fast_path（Tc==S 全候选）旁路到 M10 kernel+DS 路径（候选集等价
+的特例，kernel+DS 已快于 eager 全宽 einsum+2×torch.topk）；
+③dual kernel `out_bf16_pad` bf16+pad 直出（pad 列 -inf，DeepSelect
+直用 ds_topk_padded）——消灭 fp32 [n,Hkv,Tc]×2 物化 + cast/pad
+复制链（profiling pad/cast elementwise 16.3%→0）；④empty 行子集
+化；⑤CHUNK×nw sweep → 64/4（12.1 vs 14.9ms）。**验证矩阵**：合成
+30B 形态 4 chunks×48 层 6.81→3.52s（**1.93×**），jaccard
+0.9961/0.9903 逐位不变；早期行专项对拍（grid 构造逐位 + eager vs
+kernel+DS 集合 jaccard_min=1.0）PASS；M10 双口径回归 PASS；8B e2e
+smoke（kernel+DS 全开）2/3 逐字一致=历史基线。
+
+**#65 e2e 兑现（单请求双档，同机同臂）——64K 收益区翻正 ✅**：
+
+| 档 | triton dense | tli #64 后 | tli #65 优化 | tli/dense |
+|---|---|---|---|---|
+| 32K | 5.71s | 10.93s | **7.38s** | 0.77×（收敛中） |
+| 64K | 21.06s | 21.20s（追平） | **16.39s** | **1.285× 领先** |
+
+**64K 档从追平（1.005×）到 1.285× 领先 dense**——稀疏理论流量收益
+首次在 e2e 净兑现；32K 档从慢 1.91× 收敛到 0.77×（短上下文 select
+固定开销尚未被收益覆盖，符合收益随 S 单调递增预期）。剩余：S=64K×
+bs16 TP2 批量复测（双卡空闲后）+ decode 侧 DS 接入（CUDA graph
+capture 约束）。
+
+### 8b-32. RULER 官方数据四方法评测（2026-09-27 晚，#66——官方口径对齐，跑批中）
+
+**与 §8b-21~24 的关系 = 口径升级非重复**：旧评测自合成模板 +
+sglang Engine 口径 + 双 seed n=40；本节 = **官方 RULER 预生成数据**
+（KVCache-Factory 镜像 NVIDIA 官方产物，3 长度 × 11 任务 × 500 条，
+零外网依赖）+ **transformers 主表口径**（与 LongBench E5b 完全同一
+monkeypatch 管线：TIA/TLI/Quest/FullKV）+ n=100/任务（确定性 topk，
+论文常用口径；官方 500 条成本 33h×4 方法不可行）。脚本三件套
+`benchmark/RULER/{pred_ruler,score_ruler,run_ruler}.py/sh` +
+接力调度 chain_ruler.sh（FullKV→Quest→TIA 自动）。
+
+**先行发现一（§8b-22 结论修正）**：官方 cwe/fwe 对 Qwen3-8B FullKV
+**有区分度**（L4096：cwe 99.30 / fwe 93.67 / vt 100）——自合成
+「聚合计数无区分度」是构造口径问题（官方词频沟 common×30 /
+uncommon×3 / filler×8 宽，自合成 3≤c≤200 窄），非模型能力上限。
+聚合计数任务族恢复为有效对比口径。
+
+**先行发现二（官方 multiquery 口径严格得多）**：FullKV multiquery
+恒 25.00（L4096/L8192 一致）= 4 问平均中 1 的任务上限，非长度或
+稀疏效应——自合成 multiquery 0.85（全中口径）与官方部分分口径
+不可互比。gap 解读须以 FullKV 同任务值为上限基准。
+
+**先行发现三（TLI 官方 4K 数据近乎无损）**：TLI@1024 L4096
+single×3 + multikey 1/2 全 100、multikey_3 95.65（进行中）——与
+FullKV 持平；对照 sglang 口径 §8b-21 的 0.70，官方 needle 的数字
+串干扰轻于自合成模板（口径差异显著，论文两表并存注明）。
+
+FullKV 基线全表（L4096 完成，L8192 进行中）：single×3/multikey×3/
+vt 全 100；multivalue 89.5；cwe 99.3；fwe 93.7；multiquery 25.0
+（任务上限）。
+
+**L4096 完整 11 任务表（n=100，#66 首个里程碑结果）**：
+
+| task | FullKV | TLI@1024 | gap |
+|---|---|---|---|
+| niah_single_1/2/3 | 100.00 | 100.00 | 0 |
+| niah_multikey_1/2 | 100.00 | 100.00 | 0 |
+| niah_multikey_3 | 100.00 | 93.00 | −7.00 |
+| niah_multiquery | 25.00 | 25.00 | 0（任务上限处持平） |
+| niah_multivalue | 89.50 | 88.00 | −1.50 |
+| cwe | 99.30 | 98.30 | −1.00 |
+| fwe | 93.67 | 94.67 | **+1.00** |
+| vt | 100.00 | 100.00 | 0 |
+| **AVG** | **91.59** | **90.82** | **−0.77** |
+
+**读法**：①官方 4K 数据 TLI@1024 基本无损（AVG −0.77）——与
+§8b-21 sglang 口径（AVG gap −21）的巨大差异 = 口径效应（官方
+needle 数字串干扰轻 + transformers 管线 bf16 与 sglang MoE 路径
+数值差异），论文两表并存须注明；②聚合型 cwe/fwe gap −1/+1、
+vt 零损——**B' far 预算设计在聚合/链式任务族完全够用**，推翻
+§8b-22 自合成口径的悲观预期（该口径问题已单列为方法论发现）；
+③fwe +1 = 稀疏噪声正向扰动（丢 token 降噪）；④唯一显著损失
+multikey_3 −7 与 §8b-21 multikey 诊断一致（干扰数字抓错 key）。
+
+**FullKV 基线 33 任务终表（3 长度完整，n=100×33）——模型长度
+能力梯度**：
+
+| task | L4096 | L8192 | L16384 |
+|---|---|---|---|
+| niah_single_1/2/3 | 100 | 100 | 100 |
+| niah_multikey_1/2/3 | 100 | 100 | 100 |
+| niah_multiquery | 25.00 | 25.00 | 25.00 |
+| niah_multivalue | 89.50 | 69.25 | **44.25** |
+| cwe | 99.30 | 93.00 | **83.60** |
+| fwe | 93.67 | 93.33 | **86.67** |
+| vt | 100 | 100 | 100 |
+
+**基线要点**：①检索型（single/multikey/vt）4K→16K 完全不变——
+gap 随长度变化可直接归因稀疏方法；②**聚合列举类（multivalue/
+cwe/fwe）FullKV 自身随长度显著退化**（multivalue 89.5→44.3）=
+Qwen3-8B 列举能力上限，非稀疏效应——gap 解读必须以同长度 FullKV
+为基线（本管线按此设计）；③multiquery 恒 25 = 任务上限。
+
+**TLI L8192 收官 + Quest L4096 收官（18:34 时点中间表）**：
+
+- **TLI 长度梯度**：AVG gap −0.77@4K → **−2.96@8K**（86.18 vs
+  89.14）；主要贡献 multikey_3 −19.0、cwe −6.4、multivalue −5.25；
+  检索型与 fwe/vt 保持零损级
+- **L4096 三方法终表（n=100×11）**：**Quest 87.91 / TLI 90.82 /
+  FullKV 91.59**——TLI 领先 Quest 2.91 分、距 FullKV 仅 0.77；
+  逐任务 TLI 全面优于或持平 Quest（multikey_3 **93 vs 75**、cwe
+  98.3 vs 92.8、fwe 94.7 vs 86.7）；Quest 唯一反超项无（vt 100
+  持平）
+- **L8192 Quest 收官：AVG 81.76 vs TLI 86.18 vs FullKV 89.14**——
+  TLI 领先 Quest **4.42**@8K（4K 2.91，差距随长度拉大：page-min
+  下界近似在长上下文劣化快于 minmax 上界）；核心差距任务
+  multikey_3 = Quest 58 vs TLI 81；Quest 在 multivalue 65.75 略优
+  TLI 64.00（page 均匀覆盖对列举型有利，逐任务互有攻防如实报告）
+**TLI 33 任务全收官终表（20:56，ALL DONE tli）——RULER 三长度
+完整 gap 梯度**：
+
+| task | F@4K | T@4K | F@8K | T@8K | F@16K | T@16K |
+|---|---|---|---|---|---|---|
+| niah_single_1/2/3 | 100 | 100 | 100 | 100 | 100 | 100 |
+| niah_multikey_1/2 | 100 | 100 | 100 | 100 | 100 | 100 |
+| niah_multikey_3 | 100 | 93 | 100 | 81 | 100 | **52** |
+| niah_multiquery | 25 | 25 | 25 | 25 | 25 | 24.8 |
+| niah_multivalue | 89.5 | 88.0 | 69.2 | 64.0 | 44.2 | 41.2 |
+| cwe | 99.3 | 98.3 | 93.0 | 86.6 | 83.6 | **54.9** |
+| fwe | 93.7 | **94.7** | 93.3 | 92.3 | 86.7 | **94.7** |
+| vt | 100 | 100 | 100 | 99.0 | 100 | 97.8 |
+| **AVG** | **91.59** | **90.82** | **89.14** | **86.18** | **85.41** | **78.67** |
+| gap | | **−0.77** | | **−2.97** | | **−6.74** |
+
+**16K 档逐任务归因（诚实口径）**：①multikey_3 52 = 干扰 key 数
+随长度超线性增长超出 K1 块配额（索引质量边界）；②**cwe 54.9 =
+预算粒度而非索引错误**——逐例诊断 100/100 全部部分命中（平均
+5.5/10 词、无全 miss、pred 长度与 FullKV 同=非截断）：16K 下
+uncommon 词散布更广，K2=1024（6.25% 预算比）内逐词召回 ~55%；
+③fwe 16K 反超 +8（稀疏降噪）；multivalue −3 以同长度基线解读
+= 列举上限主导；④检索型 single/multikey 1/2 三长度全零 gap。
+
+**AVG gap 梯度 −0.77 → −2.97 → −6.74**——主贡献任务（multikey_3
++cwe）的 gap 机制不同（索引质量 vs 预算粒度），后者可通过预算
+自适应（长度感知 K2）改善，前者是 minmax 上界的固有代价。
+
+- **TLI L16384 关键任务**：multikey_3 **52**（93→81→52 长度梯度，
+  干扰 key 数随长度超线性增长超出 K1 块配额）；multivalue 41.25
+  vs 同长度 FullKV 44.25 **仅 −3**（绝对值低是模型列举上限非稀疏
+  损失——同长度基线解读的关键例证）；multiquery 24.75≈任务上限
+
+**【四方法全量对比表待跑批完成后回填（18:23/21:53 检查点）——
+重点观察：①multikey_3/multivalue/cwe/fwe 的 TLI far 预算压力
+表现；②16384 长度下各任务 gap 随 S 的变化；③Quest@1024 同预算
+横向对比】**
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
