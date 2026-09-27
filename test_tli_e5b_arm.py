@@ -17,6 +17,7 @@ if FAR:
     os.environ["SGLANG_TLI_FAR_TOKENS"] = FAR
 TAG = os.environ.get("TAG", BACKEND if not FAR else f"{BACKEND}_far{FAR}")
 TASK = os.environ.get("TASK", "musique")
+CHUNK = int(os.environ.get("CHUNK", "0"))  # >0 时传 chunked_prefill_size（dense 臂防 OOM）
 MAXGEN = {"musique": 32, "qasper": 128, "multifieldqa_en": 64}[TASK]
 OUT_DIR = f"/home/wangyuanshuo02/sglang/pred_e5b_{TAG}"
 MAXLEN = 31500
@@ -40,6 +41,7 @@ def main():
         trust_remote_code=True,
         disable_radix_cache=True,
         watchdog_timeout=1800,
+        **({"chunked_prefill_size": CHUNK} if CHUNK else {}),
         cuda_graph_config={"decode": {"backend": "disabled"}, "prefill": {"backend": "disabled"}},
     )
     from transformers import AutoTokenizer
