@@ -1242,12 +1242,39 @@ skip_far；far_stat 双峰（musique 18 层 <0.01 vs 其余 0.017-0.26），
 阈值切自然间隙。开销 = 末 chunk 一次 softmax+sum，分摊 decode 期可忽略。
 
 验证链：离线 corr 0.86-0.99 GO → 安全任务零损失 → **多跳三任务（静态版
-失败集）全 GO**。全量 E5b 双臂（200 样本×3 任务 × gate on/off，sglang
-`test_tli_dyngate_e5b.py`）进行中；**musique 前 80 条 gate-on/off
-100% 逐字一致**（早期信号：gate 在 far-heavy 任务不跳层，恢复 gate-off
-=TIA 精度基线）。已知限制：dyn_far_stat 为 per-layer 单值，同质 batch
-（评测口径）无害，混合 batch 跨请求污染——正确修法 = stat 存共享 pool
-per-row（TODO，生产语义）。
+失败集）全 GO**。全量 E5b 双臂（200/200/150 样本 × 3 任务 × gate on/off，
+sglang `test_tli_dyngate_e5b.py`）**✅ 全量定稿（2026-09-27，
+pred_dyngate_score.json）**：
+
+| task | gate on | gate off | gate 代价 |
+|---|---|---|---|
+| musique | 27.42 | 27.57 | −0.15 |
+| qasper | 40.20 | 40.37 | −0.17 |
+| multifieldqa_en | 46.41 | 46.59 | −0.18 |
+| **AVG** | **38.01** | **38.18** | **−0.17** |
+
+musique 双臂 95.0% 完全一致、0 空输出。**核心结论：动态 gate 质量代价
+−0.17（三任务一致），远小于写入标准 0.3、远优于静态 D' 版的 −4.8~−5.9
+（musique 单任务 −10.3）——per-request 测层从根上解决静态掩码跨任务
+泛化问题**。期间发现并修复 gate 跨请求自增强锁死 bug（commit c60129c37）。
+已知限制：dyn_far_stat 为 per-layer 单值，同质 batch（评测口径）无害，
+混合 batch 跨请求污染——正确修法 = stat 存共享 pool per-row（TODO，
+生产语义）。
+
+**绝对分口径注意（#61 定界闭环，2026-09-27 ✅）**：sglang 平台 off 臂
+（=TIA 同形态）musique 27.57 / qasper 40.37，比 transformers 同形态
+AB 臂（31.35/44.03）低 ~3.7 分（两任务一致系统差）。样本级 diff 排除
+乱文/空输出/前缀口径——是「不同实体答案」型分歧（greedy 数值噪声被
+短答案放大；bf16 kernel/batch=8 并发/decode 重建缓存路径差异）。
+**五分诊臂定界终局（musique 全量）**：3.78 gap = **1.82 平台差**
+（sglang triton dense 30.32 vs tf FullKV 32.14）+ **0.89 far_tokens**
+（FAR=512 28.46 vs 256 27.57——trace 级「128 饱和」测不出答案翻转，
+e2e 上 far 预算有实贡献）+ **~1.1 选择实现差**（sglang B' 分区 topk
+vs tf 4bit 分区，形态近同实现有差；唯一未深挖项）；M11 kernel 数值
+洗清（PK0 27.91 vs PK1 28.46，45/48 逐字）、dense 数值洗清
+（dense40k 30.53 ≈ triton 30.32）。**论文策略**：质量主表用
+transformers 口径（与 Quest/TIA 对齐），sglang 报速度 + 平台内 AB
+（双口径铁律——绝对分标注平台口径差）。
 
 ### 8b-29. M11：统一稀疏 attention fused kernel（2026-09-27，#58 ext 主力，commit 1a77d0088 + f0f94a6b2）
 
@@ -1278,8 +1305,167 @@ non-coalesced 决定）。对拍 5 形态 + valid 路径全 PASS（≤5e-3，bf1
 
 接入：prefill `_sparse_extend_one`（`SGLANG_TLI_PREFILL_KERNEL` 默认开）
 + decode `_sparse_attn_batched`（`SGLANG_TLI_SPARSE_KERNEL` 默认关，
-graph AB 验证后开）。e2e AB（输出一致性 + 长文 prefill 计时）待 E5b
-双臂让出 GPU。
+graph AB 验证后开）。~~e2e AB（输出一致性 + 长文 prefill 计时）待 E5b
+双臂让出 GPU~~ **✅（2026-09-27）**：**e2e prefill 91.27s(eager) →
+21.25s(fused) = 4.30×**（narrativeqa 38.5K token 端到端总账，含
+select/模型前向——kernel 级 11-19× 的 e2e 兑现值）；输出语义一致
+（同主题总结）措辞有差=预期（kernel 吃 bf16 q_raw vs eager fp32 q_b，
+数值路径差异被 greedy 放大；一致性口径见 PK 分诊臂 45/48 逐字）。
+**e2e bug 已修复**（q_raw 非连续 stride 寻址错 →
+contiguous()，commit 6348aeeea；合成回归 ALL PASS + e2e 输出与
+triton/transformers 一致）。
+
+**decode e2e AB（2026-09-27 ✅，narrativeqa 9.9K token × bs 8/16/32，
+SGLANG_TLI_SPARSE_KERNEL 1 vs 0，无图）**：
+
+| bs | eager 批量 | fused | 加速 | tok/s |
+|---|---|---|---|---|
+| 8 | 100.5 ms/step | 84.7 | 1.19× | 94.5 |
+| 16 | 121.7 | 94.2 | 1.29× | 169.8 |
+| 32 | 154.8 | 101.3 | **1.53×** | 315.8 |
+
+收益随 bs 增大（批量越大 `_sparse_attn` 尾段占比越高）；
+prefill 段两臂一致（43.6/43.9s，decode AB 隔离干净）。M11 双口径
+齐：kernel 级 11-19× / prefill e2e 4.30× / decode e2e 1.19-1.53×。
+**graph 路径验证 ✅（2026-09-27）**：SGLANG_TLI_SPARSE_KERNEL=1 下
+CUDA graph capture（bs 1/2）成功且 replay 与 eager 输出 333 chars
+逐字全等 → **默认开已提交（commit ece6ee5a4）**，
+`SGLANG_TLI_SPARSE_KERNEL=0` 可回退。
+
+**M8-TC L1 打分 TC 化 A/B（negative result，2026-09-27）**：tl.dot
+tf32 版 vs 广播版（bs32/131K 全池 134MB）：广播 39μs @3444GB/s（72%
+HBM3e 峰值）vs TC 62μs @2166GB/s = **0.63× 反慢**——内存受限算子
+（有效带宽已 72% 峰值）算力非瓶颈，MMA 打包反而加延迟链。正确性
+PASS（topk jaccard 0.9996、-inf 逐位）。**结论：广播 mul+sum 已是
+该算子最优形态，保持默认关**（论文 negative result：『短 D'=32 的
+GEMV 算子 TC 化在带宽墙 72% 时不划算』）。
+
+### 8b-30. E63：near/far 预算配比 + near 页级形态消融（2026-09-27，#63，8B/30B trace 重放，n=18 样本）
+
+**口径**：真实全维 softmax 行级 mass coverage（总覆盖口径，含 sink/near）；
+far 细筛离线代理 = 子空间精确分数 top-far_tokens（E4c 已证 ≈ oracle）。
+脚本 `analyze_e63_budget_split.py`，结果 `e63_budget_split.json`。
+
+**A 块（beta 预算让渡：固定总 token 预算 B=sink+near_len+far_tokens=2432，
+K1 页池按 far 预算 4× 超选比例缩放）**：
+
+| 配置（near_len/far_tokens/K1） | mean cov | 说明 |
+|---|---|---|
+| 512 / 1792 / 112 块 | **0.9181** | 预算让渡给 far（beta<alpha） |
+| 1024 / 1280 / 80 | 0.9074 | |
+| 1536 / 768 / 48 | 0.8887 | |
+| 2048 / 256 / 16 | 0.8498 | 基线参数但 K1 池缩水版 |
+| **BASE 2048/256/K1=128（生产配置）** | **0.9094** | 现行滑窗形态 |
+
+两个结论：①**同 token 预算下「小 near 滑窗 + 大 far 池」优于反向分配**
+（0.9181 vs 0.9094，与 E5b e2e far_tokens 512→+0.89 方向互证）；②
+nl2048 臂 K1 16→128 的 0.06 差距说明**页池预算（粗筛候选池）是比
+far_tokens 更敏感的一等预算项**——预算体系应「页池优先保大」。
+
+**B 块（near 页级选择形态：near 区块 topk + token 细筛，
+(m_far,m_near)×页数×gamma 全组合）——No-Go**：最优组合
+（minmax-far, np32, γ=1.0）仅 **0.6154**，远差于滑窗全保留基线 0.9094
+——near 区 mass 分布平缓（近端 token 重要性均匀），页级选择丢弃过多。
+negative result 资产：『near 区必须滑窗全保留，页级预算只适用于 far 区』。
+method 双区结论：far 侧 minmax > max > avg（0.6154/0.6154/0.5522，
+8B 上分化明显 30B 收窄）；near 侧 method 无差异（本身就不该选择）；
+gamma 0.5→1.0 仅 +0.008（细筛折扣在该形态下非敏感项）。
+
+**与 #59 合并的预算体系定稿**：alpha（near 长度）取 1024-2048 饱和
+（e59）；预算让渡方向 = far 池优先（e63-A）；near 页级形态 No-Go
+（e63-B）；far_tokens 128-256 饱和但 e2e 上 512 更优（e5b）——
+生产配置 near2048/K1=128/far256 已接近帕累托前沿，near512/far1792
+是备选激进点（trace +0.9pt，e2e 待验证）。
+
+**DeJAVU 式 far 预测 + top& 短路信号**（`analyze_e63_dejavu_topand.py`，
+`e63_dejavu_topand.json`，7 个 8B/30B trace）：
+
+- **DeJAVU 式 far 预测 No-Go**：prefill 中段行 far top-256 集合对
+  decode 末尾行 far oracle 的 mass recall 仅 **0.076-0.217**（IoU
+  0.026-0.058）——far 选择是 query/content 相关的，跨时间位置几乎
+  不重叠；与 E5「在线信号相关≈0」、E6b 跨任务轮廓低 corr 互证。
+  DeJAVU 的预测器路线需要训练（=DSA 方向），在 training-free 框架
+  下无信号可用（negative result 资产）。
+- **top& 短路（sink 信号）规模相关**：sink_mass 与 far_mass 行级
+  Pearson corr −0.14(8B)~−0.38(30B)；条件分布（sink 十分位分桶）：
+  **30B 上单调递减、最高十分位 far 条件均值仅 0.023 vs 最低分位
+  0.37-0.39（16× 差距）→「sink>P90 → 跳 far」短路在 30B 高度可行**
+  （比 D' 的 per-layer 更细的 per-(layer,head) 粒度）；8B 上非单调
+  U 型、比值仅 0.4-0.79，信号弱。与 32B 泛化复验「D' 更强」构成
+  一致的「规模↑ → 稀疏结构更干净」叙事（论文正向资产）。
+
+### 8b-31. 竞争论文扫描（2026-09-27，#63 期间发现，/tmp/two_level/related/）
+
+- **IndexCache**（清华+Z.ai，arXiv 2603.12201）：DSA **跨层索引复用**——
+  相邻层 top-k IoU 70-100% → 只留 1/4 indexer，prefill 1.82×/decode
+  1.48×（30B H100 200K）；GLM-5 744B 生产验证 1.2×。**与 TLI 的关系**：
+  ①他们测 DSA（有参 indexer，训练后层间趋同）而我们测 TIA 无参 minmax
+  上界**跨层 IoU 仅 0.33**（E5 negative result）——跨层复用在
+  training-free 上界索引上不可行，这是口径差异而非矛盾，答辩须主动讲；
+  ②他们「200K 时 indexer 占 prefill 81%」与我们 30B 归因 select(81%)
+  惊人一致（indexer 瓶颈普遍性的外部佐证）；③我们的 D' 跳 far 层是
+  预算维度、IndexCache 是计算维度，正交可叠加。
+- **DeepSelect**（DeepSeek 官方，2026-09-10 v1.0.0）：DSA topk 专用
+  kernel（阈值过滤 + radix-select 压缩 + 随机块序），vs torch.topk
+  **2-20×**，bf16 topk≤4096 场景。**与 TLI 的关系**：select_batched
+  （30B 瓶颈 81%）现行用 torch.topk——DeepSelect 是低成本替换/对比
+  候选，且按「打过官方 kernel」铁律应纳入 kernel 对比表（同 harness
+  口径）。**H20 编译+实测已完成（2026-09-27 ✅，#64）**：官方只发
+  sm_100a/103a（Blackwell），补 sm_90a 编译成功（三处适配：cutlass
+  submodule SSH 克隆 + py3.12 f-string 语法降级 + GCC10 无 std::format
+  + wheel 版本时间戳跨秒 bug）；**TLI 场景 microbench（H20，统一
+  harness test_deepselect_bench.py）**：
+
+| 场景（bf16） | torch.topk | DeepSelect | 加速 | jaccard |
+|---|---|---|---|---|
+| L1 块级 [256, 2048] k128 | 49μs | 11μs | **4.45×** | 1.0000 |
+| L2 far [256, 131K] k256 | 517μs | 51μs | **10.08×** | 0.9882 |
+| L2 K2 [256, 131K] k1024 | 531μs | 60μs | **8.83×** | 0.9956 |
+| L2 far [2048, 131K] k256 | 3272μs | 320μs | **10.23×** | 0.9865 |
+
+per-row end（对应 per-request nblk）越界检查 PASS。bf16 tie 区
+jaccard 0.986-1.0 → L1 能容忍（L2 吸收）。**select 内部归因
+（2026-09-27 ✅，test_tli_sel_profile.py，30B 形态合成复现
+4chunks×48 层 8.08s vs 生产 10.95s 同量级）**：末 chunk op 级
+CUDA 分布 = **aten::topk 62%**（radixFindKthValues 31.8% +
+gatherTopK 16.8% + radixSort 5.3%）/ 自有 kernel
+`_tli_l2_score_batched_dual` 24.3% / einsum+gather+scatter 全部
+<2%。**结论：topk 是 select 的绝对大头（推翻早前 ~3% 误判），
+DeepSelect 替换直攻 62%**——三处调用点（L1 块级 [n·Hkv,nblk]k128
++ B' far [n·Hkv,Tc]k256 + near k768）按 microbench 10× 折算
+select 有望 2.5× 级整体加速。
+
+**#64 集成落地（2026-09-27 ✅）**：indexer.py 三处替换 +
+`SGLANG_TLI_DS_TOPK=1` 开关。合成 A/B：末 chunk 1.64×、jaccard
+0.9961@21K、4chunks×48 层总账 6.61s（1.22×）；DS op 表 topk
+22.7→3.2ms（7.1×）但 pad/cast copy 新增 3.5ms（22%），剩余瓶颈转
+`_tli_l2_score_batched_dual`（43%）。**集成踩坑两连（64K 崩溃，
+CUDA_LAUNCH_BLOCKING+插桩定位）**：①pad 区 torch.empty 垃圾撞
+NaN bit → kernel abort；②**行有限值 < k 时阈值退化到 -inf，随机
+块序把 pad 列 -inf 选进输出，idx 实测可超 padded 宽度（33307 >
+33280）——32K 不崩纯属侥幸（Tc_k=32768 恰 512 倍数 pad=0）**。
+修复 = 恒 pad≥512 + 显式 -inf + 返回前统一 clamp(0, C+pad-1)
+（pad 区恒 -inf，下游 keep 掩码转哨兵，**有效集与 torch.topk 逐位
+一致**：jaccard 0.9939@21K / 0.9742@64K）。教训：第三方 kernel
+的「end 排除 pad」承诺不可信，凡 pad 必须假设索引泄漏。
+
+**#64 e2e 定标（test_tli_30b_bench.py，30B-A3B narrativeqa 纯
+prefill 双档，DS=0→DS=1）**：
+
+| 档 | triton dense | tli DS=0 | tli DS=1 | DS 加速 | tli/dense |
+|---|---|---|---|---|---|
+| 32K | 5.71s | 13.50s | **10.93s** | 1.24× | 1.91× |
+| 64K | 21.06s | 28.97s | **21.20s** | **1.37×** | **1.005×（追平）** |
+
+**64K 档 tli+DS 追平 dense attention（1.005×）**——从 DS=0 的
+1.38× 慢追平；稀疏理论流量收益被剩余 select 开销（dual kernel 43%
++ pad/cast copy 22%）抵消，进一步 kernel 化才有净收益空间。
+
+**#58 收益区复测（S=64K×bs16 TP2，DS=1）**：207.53s → **167.12s
+（1.24×）**，vs triton 106.24s 从慢 1.95× 收敛到 **1.57×**——未
+翻正，剩余瓶颈 = decode 侧 select_decode_batched 未接 DS（2611
+ms/step）+ prefill 剩余 dual/pad-copy 开销。decode 侧接入受 CUDA
+graph capture 约束（DS host 端 pad/end 分配不可图内），留后续。
 
 ## 9. 待办（优先级序）
 
@@ -1305,15 +1491,40 @@ graph AB 验证后开）。e2e AB（输出一致性 + 长文 prefill 计时）�
    需 310/620GB > 141GB 显存（h100_pool_budget.py）；主表须改 TP2 或 bs8 档。
    且 Qwen3-8B max_position=40960，S≥64K 收益区点须换 256K-context 模型
    （本地平台有 Qwen3-30B-A3B-Instruct-2507，验证中）。另一成果：tli TP2
-   兼容已打通（num_kv_heads per-rank bug 修复 + 双 backend smoke 全过）——
+   兼容已打通（num_kv_heads per-rank bug 修复 + 双 backend smoke 全过。
+   **2026-09-27 M11 代码态复验 PASS**：tli/triton 双臂短 prompt 逐字一致
+   （"Paris..."），含 CUDA graph bs=4 capture 成功；长稀疏路径 Jacob's
+   Ladder 摘要语义等价——TP2+graph 全链路对 M11 后代码无回归）——
    H20 双卡即可测 S=64K×bs16（pool +28%）】**
+   **【2026-09-27 #58 收官：S=64K×bs16 收益区首测完成（Qwen3-30B-A3B-
+   Instruct-2507 256K context，TP2，narrativeqa 260K chars ≈60K token，
+   16 请求真实长文，无图）：tli 207.53s vs triton 106.24s = 慢 1.95×
+   （prefill 占主导，粗估 prefill 比 ~2.05×；单请求口径 64K 为 1.38×，
+   批量下恶化=select_batched 未 kernel 化的线性项）。输出质量：首
+   40 字符一致 4/16、样本 0（Jacob Singer）双臂同主题措辞有差=稀疏
+   噪声级。**诚实结论：当前形态在 S≈60K×bs16 收益区点上仍慢 2×——
+   瓶颈不在 ext（M11 已 8.5×）而在 select 批量路径**；select 批量
+   kernel 化（DeepSelect 4-10× 替换 / fused 移植）是收益区翻正的
+   唯一路线（与 #64 合流）。脚本 test_tli_64k_tp2.py，结果
+   tli_64k_tp2_{tli,triton}.json】**
 9. ~~消融表~~ ✅ 已完成（§7，trace 级）；LongBench 级消融（A/B'/D' 逐个关）视主表结果决定是否补跑
 10. ~~Qwen3-32B 泛化复验~~ ✅（§8：A Go/D' Go 且更强/gate 判据修正为 negative result）+ 论文写作（骨架已定，主表已齐）
 11. ~~PCA 投影集成（M9）~~ ✅（§8b-8：同成本口径投影比选择 +27% far recall、存储 40→24B/token-head、六路径对拍全过、e2e smoke 通过；eager 延迟持平=launch 掩盖，FLOP 收益留待 M8）
 12. ~~#58 30B 崩坏根因~~ ✅（select_batched 早期行因果越界→均匀重复 grid 修复，commit 2d6b0e4be；8B 无回归；#59 双消融 §8b-27 完成；30B prefill 归因 ext 61%）
-13. #60 全量 E5b 多跳复验（进行中：双臂 200×3 任务，musique 前 80 条 100% 一致早期信号 §8b-28）+ M11 e2e AB（kernel 11-19× §8b-29，e2e 待 GPU）
-14. M11 后续：decode e2e AB + graph 路径验证（SGLANG_TLI_SPARSE_KERNEL 开默认）+ 30B prefill 端到端复测（预期 ext 61%→大幅收窄）
-15. 最终 PPT + 论文写作（用户指示：全部任务完成后产出新版）
+13. ~~#60 全量 E5b 多跳复验 + #61 质量定界~~ ✅ 全部收官（§8b-28 gate 定稿
+    on 38.01 vs off 38.18；§8b-30 前置的定界闭环 3.78=1.82+0.89+~1.1；
+    质量主表 transformers 口径、sglang 报速度+平台内 AB）
+14. ~~M11 全链~~ ✅ 收官（kernel 11-19× / prefill e2e 4.30× / decode e2e
+    1.19-1.53×@bs8-32 / graph 逐字一致 / **默认开 commit ece6ee5a4**；
+    30B 归因转移 ext 61%→select 81%；#58 收官 S=64K×bs16 TP2 首测：
+    tli 慢 1.95×——收益区翻正须 select 批量 kernel 化）
+14b. **#64 select 批量 kernel 化（当前主攻，与高并发吞吐主表合流）**：
+    DeepSelect H20 实测 4.45-10.23× 已就位 → profile 30B select 10.95s
+    内 topk/精筛/scatter 占比 → 替换或 fused 移植 → S=64K×bs16 复测
+    目标翻正；竞争论文防御（IndexCache 跨层复用 vs TIA IoU 0.33）已入 §8b-31
+15. 最终 PPT + 论文写作（用户指示：全部任务完成后产出新版）；RULER/NIAH
+    补评测对齐 Quest/SnapKV/HISA 口径（#62 调研确认 LongBench 全量已有、
+    NIAH/RULER 为第二标配待补）
 
 ## 10. 答辩防御清单（更新版）
 

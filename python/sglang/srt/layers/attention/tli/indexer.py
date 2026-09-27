@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import os
+
 import torch
 import torch.nn.functional as F
 
@@ -25,6 +27,67 @@ def quant4(x: torch.Tensor) -> torch.Tensor:
     mn = x.amin(-1, keepdim=True)
     sc = (mx - mn).clamp(min=1e-9) / 15
     return torch.clamp(torch.round((x - mn) / sc), 0, 15) * sc + mn
+
+
+# ---- #64：DeepSelect 官方 topk kernel 替换（torch.topk 占 select 62%）----
+_DS = None
+_DS_TRIED = False
+
+
+def _ds_available() -> bool:
+    """deep_select 编译装在 ~/.local/pylibs（H20 sm_90a 版）；懒加载。"""
+    global _DS, _DS_TRIED
+    if not _DS_TRIED:
+        _DS_TRIED = True
+        try:
+            import deep_select  # noqa: F401
+
+            _DS = deep_select
+        except Exception:
+            _DS = None
+    return _DS is not None
+
+
+def ds_topk(x: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """torch.topk(x, k, dim=-1).indices 的 DeepSelect 替代。
+    x: [R, C] fp32（内部 cast bf16——4bit 量化的分数本就粗粒度，tie 容忍
+    口径见 §8b-31 microbench jaccard 0.986-1.0）；返回 (idx, xp)：
+    idx [R, k] int64、xp = pad 后 bf16 张量（pad 列 -inf）。
+    约束：DeepSelect 要求 stride(0) 1024B 对齐（bf16 = 512 列倍数）→
+    列 pad 到 512 倍数，且**恒 pad ≥ 512**（对齐时也补）——保证 clamp
+    出口落在 -inf 区；k ≤ 4096。
+    **坑一（30B 64K 崩溃真根因）：行有限值 < k 时阈值退化到 -inf，
+    kernel 随机块序会把 pad 列的 -inf 选进输出，实测 idx 甚至可超
+    C+pad（33307 > 33280）——32K 活是因 Tc_k=32768 恰为 512 倍数
+    （pad=0），非真安全。故返回前统一 clamp(0, C+pad-1)**。
+    **坑二：pad 区必须显式填 -inf**（torch.empty 垃圾撞 NaN bit
+    pattern → abort_when_nan_found 中止 kernel → 输出不写）。
+    调用方约定：只要 idx → 自行 clamp(max=C-1)；要 gather 分数 →
+    从 xp（而非原 x）gather，越界位得 -inf 由下游 keep 掩码转哨兵，
+    有效集与 torch.topk 逐位一致。
+    """
+    R, C = x.shape
+    pad = (-C) % 512 or 512
+    xp = torch.empty((R, C + pad), device=x.device, dtype=torch.bfloat16)
+    xp[:, C:] = float("-inf")
+    xp[:, :C] = x
+    end = torch.full((R,), C, device=x.device, dtype=torch.int32)
+    _, idx = _DS.topk(xp, k, end=end, return_value=False, indices_type=torch.int64)
+    if os.environ.get("SGLANG_TLI_DS_DEBUG"):
+        # 诊断插桩：NaN 输入 / kernel 退化行越界索引在这暴露（clamp 前）
+        nan = int(torch.isnan(xp).sum())
+        bad = (idx < 0) | (idx >= C + pad)
+        nb = int(bad.sum())
+        print(f"[ds_debug] R={R} C={C} pad={pad} k={k} NaN={nan} "
+              f"idx_bad={nb} idx_min={int(idx.min())} idx_max={int(idx.max())}",
+              flush=True)
+        if nan:
+            raise RuntimeError(f"ds_topk debug trip: NaN={nan}")
+    # 30B 64K 实测：退化行（有限值<k、阈值=-inf）会输出 [C, C+pad) 乃至
+    # > C+pad 的越界索引（idx_max 观测 33307 > 33280）——统一 clamp 到
+    # pad 区（恒 -inf），下游 keep 掩码转哨兵，有效集不受影响
+    idx = idx.clamp_(min=0, max=C + pad - 1)
+    return idx, xp
 
 
 def quant4_pack(x: torch.Tensor):
@@ -514,7 +577,20 @@ class TLIIndexer:
                 keep[:, : min(2, nblk)] = True
                 sc1 = sc1.masked_fill(~keep.unsqueeze(1), float("-inf"))
                 K1 = min(K1, max(1, int(keep.sum(1).max().item())))
-            cand_blk = torch.topk(sc1, K1, dim=-1).indices  # [n, Hkv, K1]
+            # #64：L1 块 topk → DeepSelect（torch.topk 占 select CUDA 62%）。
+            # bf16 cast 的 tie 翻转由候选池并集语义吸收（onehot 展开多选无害）
+            if getattr(p, "use_ds_topk", False) and _ds_available():
+                n_hkv, nb = sc1.shape[0] * sc1.shape[1], sc1.shape[2]
+                # clamp：首 chunk 早段行 finite<K1 时 DS 会选进 pad 列
+                # （-inf 垃圾块位），clamp 到末块语义同 torch.topk 选
+                # in-range -inf——并集多一块由 fast path 吸收
+                cand_blk = ds_topk(
+                    sc1.reshape(n_hkv, nb), K1
+                )[0].clamp(max=nb - 1).reshape(
+                    sc1.shape[0], sc1.shape[1], K1
+                )
+            else:
+                cand_blk = torch.topk(sc1, K1, dim=-1).indices  # [n, Hkv, K1]
 
             # ---- 候选块并集（select 的 blk_onehot.any(0) 语义）----
             # topk 块 ∪ 滑窗块（per row），跨 head 展开为共享 token 池
@@ -599,16 +675,43 @@ class TLIIndexer:
                 SENT = S
                 tok_e = tok_ck.unsqueeze(1).expand(n, Hkv, Tc_k)
                 parts = []
+                _ds_on = getattr(p, "use_ds_topk", False) and _ds_available()
                 if W_far > 0:
-                    i_f = torch.topk(far_sc, W_far, dim=-1).indices
-                    sc_f = torch.gather(far_sc, 2, i_f)
-                    sel_f = torch.gather(tok_e, 2, i_f)
+                    if _ds_on:
+                        i_f, xp_f = ds_topk(
+                            far_sc.reshape(-1, far_sc.shape[-1]), W_far
+                        )
+                        i_f = i_f.reshape(far_sc.shape[0], far_sc.shape[1], W_far)
+                        # 分数从 pad 后 bf16 视图 gather：越界位（-inf 平局
+                        # 选进 pad 列）自动得 -inf → keep 掩码兜住
+                        sc_f = torch.gather(
+                            xp_f.view(far_sc.shape[0], far_sc.shape[1], -1), 2, i_f
+                        )
+                        sel_f = torch.gather(
+                            tok_e, 2, i_f.clamp(max=far_sc.shape[-1] - 1)
+                        )
+                    else:
+                        i_f = torch.topk(far_sc, W_far, dim=-1).indices
+                        sc_f = torch.gather(far_sc, 2, i_f)
+                        sel_f = torch.gather(tok_e, 2, i_f)
                     keep_f = sc_f != float("-inf")  # 池不足槽位 → 哨兵 → 0
                     parts.append(torch.where(~keep_f, torch.zeros_like(sel_f), sel_f))
                 if W_near > 0:
-                    i_n = torch.topk(near_sc, W_near, dim=-1).indices
-                    sc_n = torch.gather(near_sc, 2, i_n)
-                    sel_n = torch.gather(tok_e, 2, i_n)
+                    if _ds_on:
+                        i_n, xp_n = ds_topk(
+                            near_sc.reshape(-1, near_sc.shape[-1]), W_near
+                        )
+                        i_n = i_n.reshape(near_sc.shape[0], near_sc.shape[1], W_near)
+                        sc_n = torch.gather(
+                            xp_n.view(near_sc.shape[0], near_sc.shape[1], -1), 2, i_n
+                        )
+                        sel_n = torch.gather(
+                            tok_e, 2, i_n.clamp(max=near_sc.shape[-1] - 1)
+                        )
+                    else:
+                        i_n = torch.topk(near_sc, W_near, dim=-1).indices
+                        sc_n = torch.gather(near_sc, 2, i_n)
+                        sel_n = torch.gather(tok_e, 2, i_n)
                     keep_n = sc_n != float("-inf")
                     parts.append(torch.where(~keep_n, torch.zeros_like(sel_n), sel_n))
                 if W_forced > 0:

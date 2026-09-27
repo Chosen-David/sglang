@@ -106,6 +106,9 @@ class TLIProfile:
         # 与 eager 逐字一致（333 chars）+ E5b PK 分诊 45/48 逐字 + decode
         # e2e AB 1.19-1.53×@bs8-32；旧行为可 SGLANG_TLI_SPARSE_KERNEL=0 回退
         self.use_sparse_attn_kernel: bool = _env_bool("SGLANG_TLI_SPARSE_KERNEL", True)
+        # #64：select_batched 三处 torch.topk（占 select CUDA 62%）换
+        # DeepSeek 官方 DeepSelect topk kernel（microbench 4.4-10.2×）
+        self.use_ds_topk: bool = _env_bool("SGLANG_TLI_DS_TOPK", False)
         # 共享 index pool 初始行数（请求行数不足时自动扩）
         self.pool_rows: int = _env_int("SGLANG_TLI_POOL_R", 32)
         # 短序列退 dense
