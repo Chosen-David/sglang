@@ -102,8 +102,10 @@ class TLIProfile:
         # 约定，原版 -inf 垃圾位行为近似；对拍口径=有效集一致）----
         self.use_prefill_kernel: bool = _env_bool("SGLANG_TLI_PREFILL_KERNEL", True)
         # M11-decode：_sparse_attn_batched 走 fused kernel（哨兵=per-lane
-        # valid 掩码，与 eager 语义一致）；独立开关便于 graph 路径 AB
-        self.use_sparse_attn_kernel: bool = _env_bool("SGLANG_TLI_SPARSE_KERNEL", False)
+        # valid 掩码，与 eager 语义一致）。2026-09-27 默认开：graph replay
+        # 与 eager 逐字一致（333 chars）+ E5b PK 分诊 45/48 逐字 + decode
+        # e2e AB 1.19-1.53×@bs8-32；旧行为可 SGLANG_TLI_SPARSE_KERNEL=0 回退
+        self.use_sparse_attn_kernel: bool = _env_bool("SGLANG_TLI_SPARSE_KERNEL", True)
         # 共享 index pool 初始行数（请求行数不足时自动扩）
         self.pool_rows: int = _env_int("SGLANG_TLI_POOL_R", 32)
         # 短序列退 dense
