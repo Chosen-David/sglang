@@ -572,6 +572,28 @@ L2 topk 结果     : [B, H_kv, K2]                 int32（token id）→ 喂稀
 2. 级联 topk fused kernel 原型（创新点 C 主线）+ E1 对拍；
 3. sglang tli/ 集成（§5）后跑 E5b 精度/e2e。
 
+### E64 — 用户一般化框架接入（2026-09-27~28，transformers 侧 tli_indexer.py 全参数化）
+
+E64a 48 臂网格（method×alpha×beta）+ E64b 冠军细扫（bp/gamma）+ E64c 速度成本模型 + E64d 可视化（详见 #69-#72 完成记录）。关键产出：α/β/γ 三参数框架（α=near 区占 mid 长度比、β=near 块预算占 K1 比、γ=near 细筛 token 折扣）+ sup_wsvd 投影基（注意力加权 PCA top-r，full-D [36,Hkv,128,8] 存储尾维 32 子空间 scatter）。**重大口径发现：E64 trace 系 B_TOK=2048 vs 主表 K2=1024 错位**——γ 按总预算等比缩放 0.5→0.25，E64 绝对质量数字（0.9300 mono / 0.9102）是 2× 预算口径，论文必须标注。
+
+### E71 — 主表重跑 + B（d8 投影）e2e 崩坏终局定案（2026-09-28，**B 降级 negative result，C0 为主推**）
+
+transformers 侧 tli_indexer.py 接入 E64 框架（--tli_alpha/beta/gamma/proj_basis；L1 双池 far=minmax 上界/near=avg；L2 γ 预算；投影基惰性提取 [Hkv,32,r]）。C 冒烟 hotpotqa **F1=54.93 > TIA 53.89 > FullKV 53.48**（纯 A 单池 bp128 K2=1024 超基线）。
+
+**B 配置（bp128+sup_wsvd d8+α.125/β.25/γ.25）e2e 崩坏，逐项修复均无效**：
+- B0（γ0.5）F1=13.51 → 口径错位（γ 预算吃光 K2，far 仅保底 64）；
+- B2（γ0.25 缩放修正后）仍 21.55；B3（投影+单池）47.73 vs C0 54.93——投影本身掉 7.2 分；
+- bf16 三环节（k/特征/分数）trace 复测全部无损；fp32 score_fine 修复（8 维点积幅度 ~O(0.5)，bf16 折叠 top-K 边界 gap）后 B4 冒烟仍全错。
+
+**终极对拍定案（/tmp/tli_ref_diff.py，hook e2e 全链路 q/k/mask vs trace 参考实现）三连证据**：
+1. mass_ref(d8 连续投影)=0.2753 ≈ mass_ref2(e2e 同构 softmax+group-mean 细筛打分、无量化)=0.2751——细筛打分口径与 4bit 量化都不是分歧源；
+2. **C0 判决臂：ref(32 维连续直取) mass 也只有 0.3028**，而 e2e C0 mask=0.9941、IoU 仅 0.64——trace 参考口径（group-sum q 点积选择+连续 minmax 池+排除 sink）**在 e2e decode 上系统性不成立**，无论 32 维/d8、连续/量化，mass 恒 ~0.28-0.31；
+3. decode 第一步（q 未漂移）所有 mask mass=1.0 → 第二步起参考全崩——**注意力加权 PCA 基对 decode q 分布漂移脆弱（分布外适用域问题），位置稳定尾维子空间恒稳**；e2e 高 mass 主要由 sink/swa/当前块强制区贡献，GQA group-sum 评估口径本身有畸变。
+
+**论文叙事**：离线投影口径无损（0.9466）vs e2e 崩（47.73）的口径鸿沟本身是 negative result——training-free 投影基没有在线适应，decode q 漂移即失效；与「位置稳定子空间」的鲁棒性形成对照，反向支撑创新点 A 的子空间选择依据。C0 已放量 12 任务（双 GPU，postfix _c0）。
+
+**对拍工程坑（复现必读）**：e2e 的 k 带 batch 维 [1,S,Hkv,D]（trace 是 3D）；compute_mask 的 L2 是 softmax(score_fine)→group-mean→topk 而 trace 是 group-sum 点积直接 topk（GQA 下 group-sum 分数与各 head 真实分布相关性低）；prefill q 时间维 >1 须 decode-only 守卫；hook 用 runpy.run_path 跑 pred.py + monkeypatch load_dataset 截样本。
+
 ### 实验纪律（对 proposal 数据观的继承与强化）
 
 proposal 的做法值得肯定：所有图标注 synthetic/expected、Go/No-Go 前置、要求替换为实测。我们的强化：(1) 每张对拍图同时报告本机 H20 与（如可用）H100 数字——异构结论必须带硬件标注；(2) selector-fidelity 与 end-quality 双口径分开报告，不允许用 recall 替代下游精度；(3) 聚类类实验必须含 build/update overhead 单列，不许只报 query latency。
