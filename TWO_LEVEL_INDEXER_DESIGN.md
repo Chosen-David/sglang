@@ -414,7 +414,7 @@ E5b 已证明静态全局掩码跨任务不泛化（musique/qasper/multifieldqa_
 - **离线 corr GO**：prefill far_stat 与 decode 真实 far 质量相关 0.86-0.99；
 - **安全任务零损失**（gov_report/narrativeqa，far_stat 低 → 跳层，输出与 gate-off 语义一致）；
 - **多跳三任务 GO**（musique/qasper/multifieldqa_en——静态版正是在这批任务崩的）：gate-on 输出与 gate-off（= TIA 精度基线）语义等价，静态版失败模式（掉 4.8-5.9 分）未复现；
-- 全量 E5b 三任务 200 样本/任务双臂对照进行中（`test_tli_dyngate_e5b.py`，sglang 版）。
+- **全量 E5b 双臂定稿（2026-09-27，`pred_dyngate_score.json`，sglang 版）**：musique/qasper/multifieldqa_en（200/200/150 样本）gate-on AVG **38.01** vs gate-off **38.18**——**dyngate 代价 −0.17（噪声级），动态 gate e2e 无损成立**；vs E5b transformers 主表 TIA 参考 43.17 的绝对差为 sglang↔transformers 推理栈口径差（同臂内部对比不受影响，`sglang_triton_dense_musique` 30.32 对照臂同性质）。已知限制：dyn_far_stat 跨请求污染（indexer per-layer 单值，最后写入者覆盖同批全部请求的 decode 决策）——同质 batch 无害，混合 batch 须迁到共享 index pool per-row（TODO）。
 
 设计权衡（写论文时明确）：动态测层的开销 = prefill 末 chunk 一次 softmax+sum（O(S·Hkv)，与一次 L2 打分同量级，分摊到整个 decode 期可忽略）；收益 = 跳层层的 far 检索（L1 topk + L2 gather + attention far 部分）全部省掉。
 
