@@ -2338,6 +2338,22 @@ last1 corr 0.924 感知型正中要害）。
 negative results、B7s 12 任务终表（GPU0）+L16384（GPU1）为准。
 脚本 `analyze_e64i_same_method.py` / `analyze_e64i_tight.py`。
 
+**预算约束视角的无效格分析（2026-09-29 用户洞察补充）**：形式约束
+`near_budget_token = near_pages·page_size ≤ near_L`、
+`far_budget_token = B_TOK − near_budget ≤ far_L`（两侧均按实际区长 clip）。
+9×9 网格上的退化/无效区远多于 4 个 ∅ 角：
+- **β=1 整列**（α<1）：nt_near=4096 吃光预算 → far 只剩 max(64,...) 保底
+  → far 区 ~28K token 只选 64 个，实测塌到 0.74-0.76——热力图右缘深谷的真根因
+  （该保底是显式安全约束，无它 far_budget 为负直接崩）；
+- **小 α × 大 β**（如 0.125/0.875）：near 预算 3584 > near_L≈3.5K → clip 成
+  「选满整区」（变 dense：浪费预算但不伤精度）；
+- **clip 方向不对称**：near 超界无害 clip vs far 超界伤精度 clip——右下三角系统性
+  塌陷的机制解释；
+- 冠军点（α=0.125, β=0.25-0.375）离全部约束边界远（nt_near 512-768 << near_L，
+  far_budget 1280-1536 << far_L），最优配置不受 clip 影响；
+- 结论：全网格保留（退化格即「预算让渡过度=far 饿死」的边界展示，是消融故事的
+  一部分），论文图上标 clip 边界线即可，无需裁剪重跑。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
