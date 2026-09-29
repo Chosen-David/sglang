@@ -110,8 +110,15 @@ E64 用户一般化框架（α/β/γ + sup_wsvd 投影基）接入 transformers 
 commit 7ea756c）后全量重跑 B7（α.125/β.25/γ.125，TS=09291030）。
 旧口径输出备份 pred_b7_v1caliber（swa 曾占 near 配额 + sink 曾走管线）。
 干跑验证：K2=1024 → K2_mid=768=256(near)+512(far)，+128+128 保送恒 1024。
-- LongBench 12 任务（GPU0+GPU1 双卡拆分，守卫自动打分）：__PENDING__
-- RULER 三长度（GPU1，自动 relay 打分 ruler_b7s.json）：__PENDING__
+- LongBench 12 任务（GPU0+GPU1 双卡拆分，守卫自动打分）：__PENDING__（8/12 落盘：
+  局部 AVG 47.49 vs C0 同 8 任务 47.16（+0.33），musique +3.08 主导、
+  hotpotqa −0.70 为严格口径去 sink 双计的已知效应）
+- RULER 三长度（GPU1，自动 relay 打分 ruler_b7s.json）：**终值（17:25，33 任务全）**
+  L4096 91.49（C0 91.63，−0.14）/ L8192 88.62（88.87，−0.25）/
+  **L16384 83.68（82.77，+0.91）**；**三长度总 87.93 vs C0 87.76（+0.17）反超**。
+  增量全部集中在 L16384 难任务：multikey_3 +5.0 / cwe +5.4 / fwe −0.33 其余 7 任务
+  全平——**长度梯度干净成立（−0.14 → −0.25 → +0.91），分区 far 检索收益区 =
+  超长上下文，与「near 区覆盖大半 mid 的短 S 分区无增益」机制一致**。
 - 口径差叙事（v1caliber vs 严格）：__PENDING__
 判决规则（与 E64h/E64g 合看）：若严格口径 e2e B7s ≤ C0（50.16）——与
 trace mass 口径（mono 全胜 16/16）一致——分区转 negative result，
