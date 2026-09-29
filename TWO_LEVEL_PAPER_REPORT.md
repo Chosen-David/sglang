@@ -105,6 +105,19 @@ E64 用户一般化框架（α/β/γ + sup_wsvd 投影基）接入 transformers 
 诚实口径：TLI_C0 87.76，距 TIA −0.59、距 FullKV −0.95（掉分点 multikey_3 −4.67 / cwe −2.0；与 LongBench +0.10 互有胜负）；per-length L4096 91.63（=TIA）/ L8192 88.87（−0.03）/ L16384 85.04（+0.51 超 TIA）——**长度越长越占优**，与稀疏收益随 S 放大的主线一致。niah_multiquery 25.0 为全方法含 FullKV 的模型能力上限（无区分度）。表存 `exp/results_ruler/ruler_table_e71.{json,md}`；B7 分区臂 RULER 在跑（对比列）。
 - 打分脚本 `exp/trace/run_e71_eval.py`（glob 按目录对齐：pred_postfix 只进目录名）。E64 绝对质量数字是 B_TOK=2048 的 2× 预算口径，论文须标注。
 
+**B7s 严格口径重跑（2026-09-29 晚，进行中）**：用户终局澄清区域预算口径
+（sink/swa 完全保送不进粗筛细筛、mid 预算 K2_mid = K2 − sink_L − swa_L，
+commit 7ea756c）后全量重跑 B7（α.125/β.25/γ.125，TS=09291030）。
+旧口径输出备份 pred_b7_v1caliber（swa 曾占 near 配额 + sink 曾走管线）。
+干跑验证：K2=1024 → K2_mid=768=256(near)+512(far)，+128+128 保送恒 1024。
+- LongBench 12 任务（GPU0+GPU1 双卡拆分，守卫自动打分）：__PENDING__
+- RULER 三长度（GPU1，自动 relay 打分 ruler_b7s.json）：__PENDING__
+- 口径差叙事（v1caliber vs 严格）：__PENDING__
+判决规则（与 E64h/E64g 合看）：若严格口径 e2e B7s ≤ C0（50.16）——与
+trace mass 口径（mono 全胜 16/16）一致——分区转 negative result，
+主线转「同 method + per-request 感知砍 far」（E67）；若 B7s > C0 显著，
+则 e2e 存在 mass 不可见的分区收益，双口径诚实并列报告。
+
 D'-gate 机制（本轮发现并修复）：
 - **问题**：D' 全局掩码（5 任务校准，跳 13/36 层）在三个多跳任务上掉分（musique −4.83 / qasper −5.31 / multifieldqa_en −5.86 vs TIA）——三任务 far 总量 0.55–0.95（far 高度集中），层轮廓与校准集错位（E5 跨任务 corr 0.05–0.89 的直接后果）
 - **消融定位（3/3）**：关 D' 后 musique 31.35 / qasper 44.03（=TIA 精确恢复）/ multifieldqa_en 52.98——D' 是唯一掉分来源
@@ -2188,6 +2201,142 @@ boundary_vs_interior}.{png,pdf}`。
    α=0.125 是结构收益近无损端点；
 3. far_method 排序在全网格不变：mavg > cavg > aavg（0.898 /
    0.884 / 0.797）。
+**Addendum（2026-09-29，用户问「热力图上 near+far 打不过 baseline？」）**：
+- 新增可视化 `figs/e64g_ab_grid.{png,pdf}`（3 方法族 9×9 热力图，无意义角点 ∅ 标注，
+  冠军红星）+ `e64g_ab_grid_table.md`（16 样本均值 9×9 全表 + per-dataset 最优配比列，
+  逐样本 mono vs (0.125,0.25) Δ 全负 −0.007~−0.040，14/16 样本最优即 α=0）；
+- **口径限定（防误读）**：本网格 B_TOK=2048 为宽松预算——mono 池足以顺带覆盖 near 区，
+  分区价值主张（预算保护）在宽松预算下天然不可见；e2e 主表 K2=1024（mid 仅 768）
+  为紧张预算。E64h 预算桥接（B_TOK=768+γ=0.25 复刻 e2e 语义）首样本 gov_report
+  mono 0.889 仍 > 分区 0.843——若全量确认，则质量维度结论维持 α=0 最优，
+  分区价值主张完全落到结构侧（near 免打分带宽）+ e2e 实测（B7 vs C0 待严格口径重跑定谳）。
+
+
+### 8b-41. E67：感知型 per-request gate——prefill(last1) 信号 corr 0.924，跳 near 空间(31%层/2.3% mass)大于跳 far(12%/1.7%)（2026-09-29，#75 同期用户指令「感知型 gate：prefill 决策→decode 加速」，8B trace 重放 n=14 样本×12 层）
+
+**设计**：用户设想 = 测完一条数据的 prefill 就得到哪些层跳 far/跳 near，应用到
+decode 全程（决策成本≈0，比 dyngate 逐步在线更省）。信号 = 每层 prefill chunk
+末 q 的 far/near mass 占比（prefill 本来就要算，免费）；校准双变体：
+avg16（16 chunk 均值）vs last1（仅最后 chunk，最接近 decode 分布）；
+τ 扫描 0.01-0.20；验证 = decode q（步长 1 段抽样 16 个）真实 mass 损失。
+严格区域口径（sink128/swa1024/near 靠 q 4096）。
+
+**判决数据（168 层）**：
+
+| 决策 | 校准 | τ | 跳层率 | decode mass 损失 |
+|---|---|---|---|---|
+| skip_far | last1 | 0.20 | 11.9% (20/168) | 1.7% |
+| skip_near | last1 | 0.05 | 14.3% (24/168) | 0.8% |
+| skip_near | last1 | 0.10 | **30.9% (52/168)** | 2.3% |
+| skip_near | avg16 | 0.10 | 50.6% (85/168) | 5.6% |
+
+**三个结论**：
+1. **prefill(last1) ↔ decode far corr = 0.924**（avg16 仅 0.754——早期 chunk 混入
+   浅层注意力稀释信号；校准信号用最后一个 chunk 就够）——同请求内预测可行性
+   直接验证，正中 E5b 痛点（静态跨任务 corr 0.05-0.89 崩、同任务 0.93-1.00 稳）；
+2. **跳 near 空间 > 跳 far**（far 层均 0.44 中位，纯跳 far 上限 ~12-31%；near 在
+   一半层里占比 <0.1）——双方向 gate（far 高阈 + near 低阈）合计可免算 40-60%
+   层的其中一个区域计算，速度卖点新弹药；
+3. 用户预判「筛不满 topk 无害」机制确认：mask+softmax 归一化语义 + sink/swa
+   恒保送（任何层 ≥256 tok 兜底），跳层只省算不破坏生成。
+
+**后续**：最优 τ 接入 tli_indexer（per-request prefill 决策层掩码，复用 D' 的
+skip_far 代码路径）→ e2e F1+速度双测（精度用 F1 不用 mass 说话）→
+与静态 D'/dyngate 三方对比。脚本 `analyze_e67_perrequest_gate.py`，
+结果 `e67_perrequest_gate.json`。
+
+### 8b-42. E64h：预算桥接终判——紧预算（768）下 mono 仍胜分区，热力图结论的预算条件假说被否定（2026-09-29，8B trace 重放 n=16 样本）
+
+**设计**：桥接「trace 热力图 mono 赢（B_TOK=2048 宽松）vs e2e B7 赢（K2=1024 紧张）」
+的预算口径错位假说。B_TOK=768 + γ=0.25 精确复刻 e2e B7 严格口径预算语义
+（nt_near=256、far=512、K2_mid=768）。3×3 缩格（α∈{0,.125,.25}×β∈{0,.125,.25}）。
+
+**结果（16 样本 AVG mass）**：mono mavg(0,0)=**0.9050** vs 分区冠军
+mavg(0.125,0.25)=0.8877（**Δ=−0.0173**）——紧预算下 trace mass 口径 mono 仍胜，
+**预算条件假说被否定**。质量维度结论与 8b-40 合并终判：α=0 单池最优在
+宽松/紧张两种预算下均成立。分区（若 e2e 有增益）的价值主张只能落在
+mass 不可见的维度（生成流畅性/近端上下文利用/结构带宽节省）——待 B7s
+严格口径 e2e 终表裁决；若 e2e 也无增益，分区按用户预判转 negative result，
+主线转「同 method + per-request 感知砍 far」（8b-41）。
+脚本 `analyze_e64h_budget_bridge.py`，结果 `e64h_budget768.json`。
+
+### 8b-43. E66：训练投影 LOTO 终判——d8 跨数据集 0.744-0.757（92-94% 基线），「各数据集都可行」部分成立但不及截维（2026-09-29，#75 用户指令「粗筛细筛都引入训练后降维、跨数据集泛化」，LOTO 8 折×3 臂×3 维度）
+
+**设计（调研→设计→代码，用户指定顺序）**：调研本地论文仓库（DSA KL 蒸馏
+wq/wk 投影 + warm-up、NSA 多任务联合、Linformer 学习投影、ITQ 监督哈希、
+SnapKV training-free 校准）→ 三训练臂：kl_distill（DSA 式分布蒸馏，主推）、
+mse_multi（E65b sup_grad 多样本升级）、wsvd_multi（混合加权 PCA 闭式）。
+LOTO leave-one-task-out 8 折 = 训练排除目标任务全部样本、在其上评估——
+直接回答「训练出的投影在各数据集上是否可行」。
+
+**工程修正记录（干跑抓的 bug）**：①KL 温度 1 下原始点积分 ±300 → softmax
+饱和成 argmax 监督（loss 假性收敛 0.002 但 top64 IoU 仅 0.141）→ 自适应温度
+（per-head std）IoU 0.422；②全量 far 区每 iter 太慢（12min/层/臂）→
+DSA 式 mini-batch MB=2048 + 200 iter（26× 加速，9.2s/层/臂）。
+
+**LOTO_AVG（D_full 全链）**：
+
+| 方法 | d=4 | d=8 | d=16 | trunc_d32 基线 |
+|---|---|---|---|---|
+| kl_distill | 0.698 | 0.744 | 0.664 | 0.804 |
+| wsvd_multi | **0.758** | **0.757** | 0.751 | 0.804 |
+| mse_multi | 0.659 | 0.735 | 0.722 | 0.804 |
+
+**结论**：
+1. d8 维度 4× 压缩：wsvd 0.757 / kl 0.744 = 基线的 94%/92%——**跨数据集
+   泛化部分成立**（LOTO 协议下最差样本 narrativeqa 0.61-0.66 不崩，far 语义弱
+   任务天然难）；d4 维度 8× 压缩掉到 87-94%；
+2. 但**全面不及 E65b 单样本校准的 sup_wsvd（0.788@d8）**——多任务混合训练
+   稀释了任务特异性、LOTO 严格性高于 E65b 的 7 held-out 协议，两因子叠加；
+3. 三臂排序 wsvd ≥ kl > mse：闭式加权 PCA（免训练、稳定性最优）仍是
+   训练族最优形态；KL 蒸馏在 d4（0.698 vs mse 0.659）显示分布对齐优势
+   但随维度升不放大；
+4. **论文定位**：训练投影 = E65b+E66 合并叙事「离线投影可训练且跨任务
+   92-94%，但 decode q 漂移使 e2e 崩（E71-B）」——training-free 方法
+   固有局限的 negative result 资产（与 DSA 必须训练的动机形成对照论证）。
+   e2e decode 判决实验待 B7s 完后 GPU 接入。
+脚本 `analyze_e66_trained_proj.py`，结果 `e66_trained_proj.json`。
+
+### 8b-44. E64i：同/异 method 分区判决——near 侧 method 自由度 ≤0.003，「不同 method 组合」创新点判无增益（2026-09-29，用户指令「不同method分区不如同method的话创新点或许可删」）
+
+E64g 的盲区：三族（mavg/cavg/aavg）只枚举 far 侧 method、near 侧恒 aavg——全部是异
+method 分区臂，缺 far=near 同 method 直接对照。E64i 补齐 3×3 far/near method 全组合
+（α=0.125 分区冠军点 × β∈{0.25, 0.375}，16 真实样本，γ=1/B_TOK=2048 宽预算协议）：
+
+| far\near | mavg | cavg | aavg | 单池(α=0) |
+|---|---|---|---|---|
+| mavg | **0.9100** | 0.9068 | 0.8999 | **0.9166** |
+| cavg | **0.9118** | 0.9085 | 0.9017 | 0.9093 |
+| aavg | 0.8135 | 0.8103 | 0.8033 | 0.8109 |
+
+**三个判决**：
+1. **「不同 method 组合」无增益（可删）**：far=mavg 时最优 near 是 mavg（同 method 胜）；
+   far=cavg 时换 near=mavg 仅 +0.0031 噪声级——「far 用聚类上界、near 用 minmax 上界」
+   互补假说在 trace 口径不成立。near 侧 method 对结果几乎无贡献，分区臂应简化为
+   far=near 同 method；
+2. **任何分区组合打不过 mono 单池**：给分区 per-sample oracle 选择权（16 样本各自挑
+   3×3 最优）也只 1/16 胜，最优分区臂 cavg+mavg 0.9118 vs mono mavg 0.9166（−0.005）；
+   一切由 far 侧 method 主导（mavg/cavg ≈0.91-0.92 vs aavg 0.81，差 10pt）；
+3. **β 最优恒 ≥ α**（E64g 9×9 逐行检验，3 族一致）：近端预算份额宜超过区域份额
+   （gap +0.0008~+0.0142）——「不让渡（α=β）最优」假设不成立，但行内差异 <1pt
+   且整个分区输 α=0，实义有限；(α,β)=(1,0)/(0,1) 角实测深谷 0.74-0.77（零预算区）。
+
+**far 砍预算的安全性机制核实**（问题 3 判据）：L1 far 块 -inf 后 topk 只填有效块数
+（跳层省算真兑现）；L2 -inf 并列按 index 破碎落 sink 区（强制置位区，无害重复）；
+mask+softmax 重归一化 + sink/swa 保送 ≥256 token——**筛不满 K2 本身不掉精度**；
+真风险 = 跳错层（被跳层 far mass 大，层均中位 0.44；E5b 静态 D' 多跳掉 4.8-5.9 分
+实证），判据是跳层准确率（E6 静态 precision 0.92-1.00 仅安全任务成立；E67 per-request
+last1 corr 0.924 感知型正中要害）。
+
+**双口径汇总判决**（trace vs e2e 分歧终版）：trace mass 口径（E64g/E64h/E64i 三连）
+分区不可行（mono 15/16 胜）；e2e F1 口径（B7s 严格口径 6 任务 +0.47、musique +3.08
+首次超 TIA、RULER 中性）分区小幅正且任务依赖（多跳增益）。trace 口径 GQA group-sum
+评估畸变（mask 间 mass 差大头来自强制区）是分歧根因（E71-B 终极对拍）。论文叙事：
+「不同 method 组合」创新点删除（本节数据）；分区降级为「多跳精度保险」次要贡献
+（α=0.125/β≥α/γ=0.25，musique +3.08 核心论据）；速度主线转 E67 感知型砍 far。
+紧预算（B_TOK=768/γ=0.25）复测 `e64i_tight.json` 自动跑中，终表翻负则分区整体进
+negative results、B7s 12 任务终表（GPU0）+L16384（GPU1）为准。
+脚本 `analyze_e64i_same_method.py` / `analyze_e64i_tight.py`。
 
 ## 9. 待办（优先级序）
 
