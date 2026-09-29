@@ -415,6 +415,7 @@ E5b 已证明静态全局掩码跨任务不泛化（musique/qasper/multifieldqa_
 - **安全任务零损失**（gov_report/narrativeqa，far_stat 低 → 跳层，输出与 gate-off 语义一致）；
 - **多跳三任务 GO**（musique/qasper/multifieldqa_en——静态版正是在这批任务崩的）：gate-on 输出与 gate-off（= TIA 精度基线）语义等价，静态版失败模式（掉 4.8-5.9 分）未复现；
 - **全量 E5b 双臂定稿（2026-09-27，`pred_dyngate_score.json`，sglang 版）**：musique/qasper/multifieldqa_en（200/200/150 样本）gate-on AVG **38.01** vs gate-off **38.18**——**dyngate 代价 −0.17（噪声级），动态 gate e2e 无损成立**；vs E5b transformers 主表 TIA 参考 43.17 的绝对差为 sglang↔transformers 推理栈口径差（同臂内部对比不受影响，`sglang_triton_dense_musique` 30.32 对照臂同性质）。已知限制：dyn_far_stat 跨请求污染（indexer per-layer 单值，最后写入者覆盖同批全部请求的 decode 决策）——同质 batch 无害，混合 batch 须迁到共享 index pool per-row（TODO）。
+- **证据强度警示（2026-09-29 监督轮复核）**：逐样本比对 on/off 两臂输出，550 样本中仅 6 条（1.1%）不同——τ=0.01 下 gate 触发率极低（E67 trace 级数据同阈值跳层率 ~12%、far mass 损失 1.7%），「−0.17 无损」实为**近 no-op 无损**，不能作为「gate 有效且无损」的强证据，只能证明「低触发率下无害」。真正有信息量的判决须升 τ（E67：τ≥0.2 才有可观跳层空间；跳 near 空间更大 31% 层/2.3% mass@τ0.1）→ 已排入 E67 e2e（B7s GPU 空闲后，per-request last1 信号 corr 0.924 版本，F1+速度双测）。另：早期诊断日志（00:40 版本）出现的 `far_stat=nan` 为 nan 防护提交（2f9b10f03, 01:05）之前的旧代码，scored run（07:27 修复后）不受影响。
 
 设计权衡（写论文时明确）：动态测层的开销 = prefill 末 chunk 一次 softmax+sum（O(S·Hkv)，与一次 L2 打分同量级，分摊到整个 decode 期可忽略）；收益 = 跳层层的 far 检索（L1 topk + L2 gather + attention far 部分）全部省掉。
 
