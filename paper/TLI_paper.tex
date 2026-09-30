@@ -88,11 +88,17 @@ attention fused kernel / DS topk）。
 
 拼接 0.796 $>$ 任一（+0.22 组合增益）；进一步降维以无监督
 
-细筛 PCA d16 近无损（E65：0.766 vs 0.804）；\textbf{训练投影的
+细筛 PCA d16 近无损（E65：0.766 vs 0.804），且跨 kv-head 共享
+SVD 基 d16 同样近无损并优于 per-head 基（E76：8/8 样本追平
+tail32，GQA head 冗余 $\Rightarrow$ MLA 式单投影缓存的 training-free
+代理，投影矩阵跨 head 存一份）；\textbf{训练投影的
 
 口径鸿沟}（E66 trace 成立 92-94\% vs E71-B e2e 崩坏——投影基
 
-对 decode q 分布漂移脆弱，尾维位置先验分布无关恒稳）——
+对 decode q 分布漂移脆弱，尾维位置先验分布无关恒稳）；非线性
+流形学习双判否定（E76：UMAP 保邻域不保选择排序 $-$4pt，fit
+成本 80-167s vs 增量索引 0.128ms/token 四个数量级不可行；t-SNE
+BH 16 维 OOM/病态）——
 
 training-free 路线的降维自由度来自位置先验而非学习/自适应。
 
@@ -723,7 +729,15 @@ recall 0.729 $\approx$ 全维 0.732；random 0.32 / highfreq 0.137 崩溃
 
 相关 $\approx$0、E72 cavg e2e 垫底、E75 自适应 oracle 上限
 
-$\approx$0）。
+$\approx$0）。补充（E76）：跨 kv-head 共享 SVD 基 d16 8/8 样本
+
+追平 tail32 且优于 per-head 基——GQA head 冗余使 MLA 式单投影
+
+缓存 training-free 可行（投影矩阵跨 head 存一份）；非线性降维
+
+（UMAP/t-SNE）质量无增益（保邻域不保选择排序）且 fit 成本
+
+80-167s/层-样本 vs 增量索引 0.128ms/token，四个数量级不可行。
 
 - \textbf{B' far/near 分区}（E4c 严格 token 预算 + per-head 加权口径）：
 
