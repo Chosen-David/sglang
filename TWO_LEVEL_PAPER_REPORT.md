@@ -2681,6 +2681,18 @@ E74 边界判据（任务形态二选一）共同构成 α/β 的完整故事**�
 
 ### 8b-53. E76：非线性降维 + MLA 式共享投影 trace 重放判决（2026-09-30 13:20，用户指令「t-SNE/UMAP/最新降维方法都试试，或者 MLA 自己有投影矩阵缓存了 k 的都探索」）
 
+**E73b 数据落袋补注（13:35）**：§8b-48 的两段互补数字（0.5759/
+0.3826/拼接 0.7958）当时未存 JSON，本轮用 E76 同框架重导出
+`e73b_seg_complementarity.json`（far 全链同特征口径）：
+rope16 **0.5759**（与报告一致）/ nope16 0.387 / tail32 **0.8113**
+/ random32 0.3011。注意口径差：报告的 0.7958 = E65
+`C_fine_trunc_d32`（粗筛固定尾维+细筛 trunc32），E73b 0.8113 =
+粗细同特征全链——**论文引用两段互补时统一用 E73b JSON**
+（rope 0.576 + nope 0.387 → 0.811，互补增益 +0.24）。终版 Fig2
+（`fig2_dim_reduction_story.{pdf,png}`，plot_fig2_dim_story.py：
+panel A 两段互补 / panel B 8 样本 shared SVD d16 逐点追平 tail32 /
+panel C 方法族均值含 UMAP negative）已生成入库。
+
 `e76_nonlinear_reduce.json`（8 样本×8 层，E65 组 C 协议：细筛降维、
 粗筛固定尾维32 minmax，真值 = 全维 softmax per-head far mass 加权捕获）：
 
