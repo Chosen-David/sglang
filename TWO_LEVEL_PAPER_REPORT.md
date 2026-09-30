@@ -2958,8 +2958,23 @@ suptitle 内部代号（E3/E65/E73/E76）清除；输出补 sglang/paper/figures
 目录（旧版只写 two-level）。
 
 **机械门通过**：英文版 em-dash/禁用词零命中（中文「——」为中文
-破折号正常标点不计）。**审稿人 agent 已启动**（NeurIPS/ICLR 级
-evidence-gated 批判，后台运行中），完成后接归档步骤。
+破折号正常标点不计）。**审稿人 agent 完成并快修四项**：
+weak reject 倾向、9 条 Major（完整意见存
+paper/archive/2026-10-01_round1/reviewer_report.md）。立即修复
+（双语十处，sglang 6e63eef28）：M1「首个超 FullKV」→「持平
+（+0.18 噪声级边缘）」；M2 +3.08/+5.02 矛盾→统一主表口径
++5.02 且单池臂 29.74 可见；M4「随长度单调增长」→「16K 才转正」；
+M8 +7.98 混杂归因→家族级 +8.40（TIA vs Quest 隔离数字）。
+**下轮遗留按优先级**：M2 完整版（partition vs single-pool 逐任务
+消融表）、M3（β 2×2 交叉表——E72 mavg/B7s 双臂数据已有只差打分
+回填）、M5（Abstract 速度句含 Quest 对比与 0.77×/0.92× 形状
+边界）、M6（KV 压缩三家 sink-guard 修正版重跑）、M7（三套 recall
+口径协议定义表）、M9（单模型族正面承认）。
+
+**归档完成**：paper/archive/2026-10-01_round1/（双语 tex 快照 +
+56 文件图快照（cp -rL 解引用，避免 symlink 不自包含）+ 完整审稿
+意见 + ROUND_LOG 六步循环日志）。PDF 编译待有 LaTeX 环境的机器
+（中文版须 xelatex）。
 E85f 进度：musique/qasper/hotpotqa 完成，2wikimqa 在跑，
 ave_budget 969-1021 健康。
 
