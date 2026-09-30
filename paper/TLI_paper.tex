@@ -14,7 +14,7 @@
 % we propose+命名+key advantage → 部署声明）。
 % =====================================================================
 \begin{abstract}
-扩展大语言模型的有效上下文长度需要突破 KV 缓存带宽的制约：在 131K 上下文的 8B 模型上，decode 每步的全量 KV 读取远超计算量，成为吞吐上限。现有方案面临一个困难权衡：training-free 的稀疏索引依赖下界近似，在长上下文检索任务上质量崩塌（我们实测 Quest 在 RULER 16K 的 multikey\_3 上仅 21 分，FullKV 为 100）；训练类索引（DSA）引入可学习参数与上千步 warm-up 成本，且选择质量依赖训练分布。本文提出 TLI，一个两级 training-free 稀疏注意力索引：第一级用 4bit 量化子空间上的块级 minmax \textbf{上界}粗筛保证无漏选，第二级用 far/near 分区的 token 级精筛保护远端关键 token 不被近端高分挤出。在 Qwen3-8B 的 LongBench 13 任务上，TLI 取得 50.54，与 FullKV（50.36）在噪声级差距内持平；多跳 far-heavy 任务 musique 达到 34.76，为全部方法（含 FullKV）最高。RULER 上 87.93 逼近 FullKV 的 88.71，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91），增益集中于多干扰检索与词表任务。速度侧，TLI 选择链相对 dense 打分取得 1.46$\times$@32K $\rightarrow$ 5.09$\times$@128K 的 kernel 级加速，64K 单请求 e2e 1.285$\times$；全部精度代价与负结果在同机同协议下如实报告。TLI 已在 sglang 生产形态（paged 寻址、增量索引、CUDA graph）下集成。
+扩展大语言模型的有效上下文长度需要突破 KV 缓存带宽的制约：在 131K 上下文的 8B 模型上，decode 每步的全量 KV 读取远超计算量，成为吞吐上限。现有方案面临一个困难权衡：training-free 的稀疏索引依赖下界近似，在长上下文检索任务上质量崩塌（我们实测 Quest 在 RULER 16K 的 multikey\_3 上仅 21 分，FullKV 为 100）；训练类索引（DSA）引入可学习参数与上千步 warm-up 成本，且选择质量依赖训练分布。本文提出 TLI，一个两级 training-free 稀疏注意力索引：第一级用 4bit 量化子空间上的块级 minmax \textbf{上界}粗筛保证子空间口径下无漏选，第二级用 far/near 分区的 token 级精筛保护远端关键 token 不被近端高分挤出。在 Qwen3-8B 的 LongBench 13 任务上，TLI 取得 50.54，与 FullKV（50.36）在噪声级差距内持平；多跳 far-heavy 任务 musique 达到 34.76，为全部方法（含 FullKV）最高。RULER 上 87.93 逼近 FullKV 的 88.71，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91），增益集中于多干扰检索与词表任务。速度侧，TLI 选择链相对 dense 打分取得 1.46$\times$@32K $\rightarrow$ 5.09$\times$@128K 的 kernel 级加速，64K 单请求 e2e 1.285$\times$；全部精度代价与负结果在同机同协议下如实报告。TLI 已在 sglang 生产形态（paged 寻址、增量索引、CUDA graph）下集成。
 \end{abstract}
 
 % =====================================================================
@@ -37,13 +37,13 @@
 由此产生一个关键问题：能否设计一个 training-free、零 warm-up 的稀疏注意力索引，在不引入任何可学习参数的前提下，同时保住长上下文检索质量并兑现带宽收益？
 
 % P5（we introduce + 机制完整段）。
-本文提出 TLI（Two-Level Indexer）回答这个问题。TLI 是一个两级级联的索引：第一级把 KV 缓存组织为 64-token 块，在 position-stable 低频子空间（$d'{=}32$）上维护每块的 min/max 上界并以 4bit 量化存储，query 打分取块上界的乐观侧——上界保证无漏选，任何真实高分 token 所在块必然入选；第二级把 token 预算划分为 far/near 两个池，近端滑窗强制覆盖局部性，远端池对 L1 入选块做 token 级精筛，独立配额使远端关键 token 不被近端高分挤出。两级之间以离线层跳过 gate 收尾：prefill 末段的一次 softmax 统计识别 far mass 近零的层，decode 侧安全跳过其远端检索。整个选择链 kernel 化为 fused L1 块打分、L2 级联 dual topk 与统一稀疏 attention kernel，O(n) 增量索引使块界维护与序列长度无关。
+本文提出 TLI（Two-Level Indexer）回答这个问题。TLI 是一个两级级联的索引：第一级把 KV 缓存组织为 64-token 块，在 position-stable 低频子空间（$d'{=}32$）上维护每块的 min/max 上界并以 4bit 量化存储，query 打分取块上界的乐观侧——上界保证无漏选，任何真实高分 token 所在块必然入选；第二级把 token 预算划分为 far/near 两个池，近端滑窗强制覆盖局部性，远端池对 L1 入选块做 token 级精筛，独立配额使远端关键 token 不被近端高分挤出。两级之间以感知型 per-request gate 收尾：prefill 末段的一次 softmax 统计识别 far mass 近零的层，decode 侧安全跳过其远端检索。整个选择链 kernel 化为 fused L1 块打分、L2 级联 dual topk 与统一稀疏 attention kernel，O(n) 增量索引使块界维护与序列长度无关。
 
 % P6（贡献列表，claim-first）。
 本文的贡献如下：
 \begin{enumerate}
 \item \textbf{training-free 降维自由度的系统刻画}。位置稳定低频子空间在索引质量上无损失（子空间选择对全维 top-1024 的 mass 覆盖为 0.729，全维打分自身 0.732，随机子空间 0.32）；tail32 的机理经三重判决确证为\textbf{16 个完整最低频 RoPE 旋转对}（far 全链 mass recall 口径：频率单调——低频对 0.811 / 中频对 0.360 / 高频对 0.004；配对完整性——错位配对崩至 0.567；16 对即饱和——8 对仅 0.473）。选取方法学四象限给出可行域边界：逐维谱（0.759）与训练投影均败于配对纠缠；query 自适应 pair 选取（0.865）不可索引化；per-layer 静态 pair（0.849）兼容索引——tail32 是零信号成本最优解。无监督 PCA 可将细筛再压至 $d{=}16$ 近无损（0.766 vs 0.804），且跨 kv-head 共享 SVD 基在 8/8 样本上追平 tail32；而训练投影在 trace 重放中成立（92--94\%）、e2e 崩坏——投影基对 decode 查询分布漂移脆弱，旋转对频率先验与查询分布无关恒稳。降维自由度来自位置先验，而非学习或自适应。
-\item \textbf{far/near 分区预算}。GQA 下远端 attention mass 在 kv-head 间极不均（单 head 可独占 0.804），全池 top-k 使远端关键 token 被近端高分挤出。分区独立配额在双基准 e2e 上成立（LongBench +0.25 / RULER +0.17 vs 单池），多跳 far-heavy 任务增益最纯粹（musique 34.76 vs 同预算单池臂 29.74，$+5.02$）；聚类代表方案在严格 token 预算下无一致优势，降级为消融负结果。
+\item \textbf{far/near 分区预算}。选择索引建在 kv-head 级：同组 query head 共享同一份 kv-head 级选择，无需聚合。GQA 下远端 attention mass 在 kv-head 间极不均（单 kv-head 可独占 0.804），全池 top-k 使远端关键 token 被近端高分挤出。分区独立配额在双基准 e2e 上成立（LongBench +0.25 / RULER +0.17 vs 单池），多跳 far-heavy 任务增益最纯粹（musique 34.76 vs 同预算单池臂 29.74，$+5.02$）；聚类代表方案在严格 token 预算下无一致优势，降级为消融负结果。
 \item \textbf{感知型 per-request gate}。静态层掩码跨任务不泛化（多跳任务掉 4.8--5.9 分）；prefill 末段动态信号与 decode 侧 far 质量相关性 0.924，真实触发区间（$\tau{=}0.005$）下 far-heavy 任务微损不崩（musique +0.23 / qasper $-$0.41）。gate 的定位是安全省算力的保守开关，而非精度增益点。
 \item \textbf{双口径评测方法论}。trace 重放 mass 排名与 e2e F1 排名在五个方法组合臂上系统性反转（重放排名第 4 的近端平均分臂是 e2e 冠军）——离线快筛判决不可替代 e2e，kernel microbench 与 e2e 必须都测都报告。
 \end{enumerate}
@@ -83,7 +83,7 @@
 \begin{equation}
 s_{\mathrm{blk}}(q, i) \;=\; \sum_{d=1}^{d'} \max\!\big(q_d\, k^{\min}_{i,d},\; q_d\, k^{\max}_{i,d}\big)\;\geq\; \max_{j\in I_i}\; \langle q, k_j \rangle.
 \end{equation}
-这个上界保证\textbf{无漏选}：真实高分 token 所在块的分数必然不低于该 token 的真实分数，必然进入 top-$K_1$。这与 Quest 的 page-min 下界近似形成对照——下界会低估真实高分页，漏选随干扰项增多而加剧。取 top-$K_1{=}128$ 块进入 L2。
+这个上界在\textbf{子空间打分口径下}保证无漏选：真实高分 token 所在块的子空间分数必然不低于该 token 的子空间真实分数，必然进入 top-$K_1$（子空间相对全维点积是有损的，损失由 §2.3 的选取方法学单独刻画）。这与 Quest 的 page-min 下界近似形成对照——下界会低估真实高分页，漏选随干扰项增多而加剧。取 top-$K_1{=}128$ 块进入 L2。
 
 \textbf{L2：far/near 分区精筛。}sink 与滑窗（最近 $sw_{lo}$ 个 token，局部性由滑窗语义天然保证，无需打分）构成强制保留区、不占分区预算；剩余 mid 预算划分为两个池。far 池对 L1 入选块做 token 级 4bit 精筛，取 far 配额 $F$（128--256 饱和）；near 池对近端区做同口径精筛。分区防挤出的机理：GQA 下远端 mass 在 kv-head 间极不均（trace 实测单 head 独占 0.804 而同组其余 head 近零），全池 top-k 时 far 候选与近端高分 token 在同一池竞争，far-heavy 层的远端关键 token 会被系统性挤出。分区给 far 独立配额，近端扣减带 near\_floor 保护防边界回退。
 
@@ -95,7 +95,7 @@ I_{\mathrm{L1}\rightarrow\mathrm{L2}} &= I_{\mathrm{sink}}\ \cup\ \big[\,S-sw_{l
 \end{align}
 其中 mid 预算 $K_2^{\mathrm{mid}}=K_2-|I_{\mathrm{sink}}|-sw_{lo}$，far 配额 $F=\max\big(64,\ K_2^{\mathrm{mid}}-\lfloor\gamma\,\lceil\ell_{\mathrm{near}}/B\rceil B\rfloor\big)$：$\gamma$ 经近端块数折算近端细筛配额，far 取剩余预算并保底 64；$\beta$ 作用于 L1 的近端页预算。
 
-\textbf{维持因果性的两个设计。}自回归语言模型要求查询不能访问未来 token。TLI 通过两个具体设计维持因果性：其一，\textbf{池边界即因果边界}——far 池的上界位置 $\leq t+1-\mathrm{near\_len}$、near 池 $< sw_{lo}$，两池的并集天然落在因果范围内，无需显式因果 mask（L1 的垃圾块也天然落池外）；其二，\textbf{早期行均匀覆盖}——首个 prefill chunk 内，行位置 $t_r$ 小于 $K_2$ 的早期行候选不足，若放任 topk 返回的哨兵/未来位置混入，非因果泄漏会逐层传播（我们在 30B 模型上实测到生成重复循环崩坏，根因正是此处；8B 对同 bug 耐受未崩，如实报告）。早期行改用均匀重复 grid，等价 dense。
+\textbf{维持因果性的两个设计。}自回归语言模型要求查询不能访问未来 token。TLI 通过两个具体设计维持因果性：其一，\textbf{池边界即因果边界}——far 池的上界位置 $\leq t+1-\ell_{\mathrm{near}}-sw_{lo}$、near 池 $< sw_{lo}$，两池的并集天然落在因果范围内，无需显式因果 mask（L1 的垃圾块也天然落池外）；其二，\textbf{早期行均匀覆盖}——首个 prefill chunk 内，行位置 $t_r$ 小于 $K_2$ 的早期行候选不足，若放任 topk 返回的哨兵/未来位置混入，非因果泄漏会逐层传播（我们在 30B 模型上实测到生成重复循环崩坏，根因正是此处；8B 对同 bug 耐受未崩，如实报告）。早期行改用均匀重复 grid，等价 dense。
 
 \textbf{与 sink 和滑窗注意力的关系。}sink（StreamingLLM~\cite{streamingllm}）与滑窗注意力（Longformer/BigBird~\cite{longformer,bigbird}）是两种成熟的静态稀疏结构，本文将它们作为已知组件沿用：sink token 承载 0.37--0.71 的 attention mass，滑窗承载近端局部性——两者共同构成 TLI 的强制保留区，不占分区预算。本文的创新不在保留区本身，而在\textbf{剩余预算在 far 检索与 near 精筛之间的分配}。作为旁证，我们在 baseline 适配中实测：SnapKV/H2O/PyramidKV 无显式 sink 保送时在 Qwen3-8B 上首 token 即 EOS（末层 sink 权重 mean 0.592 而浅层选择信号不指向 sink，逐层恶性畸变）——任何不显式处理 sink 的稀疏方案在该模型族上都会失真。
 
@@ -203,7 +203,7 @@ musique & 32.14 & 27.09 & 32.28 & \textbf{34.76} & 8.61 & 0.63 & 8.99 \\
 
 \subsection{Kernel 级 Microbench}
 
-选择链相对 dense 全维打分的加速比：32K 1.46$\times$、64K 2.77$\times$、128K 5.09$\times$（合成数据已标注，trace 重放口径）。同机三方对比（官方 kernel 原样接入统一 harness，131K cudaEvent）：Quest 0.107ms / DSA 0.503ms / TLI 0.787ms。延迟排名 Quest $<$ DSA $<$ TLI，如实报告——TLI 当前的优势在算法结构侧：每 token 索引 MAC $\approx$258（DSA 的 1/32）、索引存储 3$\times$ 低于 Quest、质量 +2.2 分。131K 下三家都远离 HBM bound，排名反映实现成熟度而非算法上界。
+选择链相对 dense 全维打分的加速比：32K 1.46$\times$、64K 2.77$\times$、128K 5.09$\times$（合成数据已标注，trace 重放口径）。同机三方对比（官方 kernel 原样接入统一 harness，131K cudaEvent）：Quest 0.107ms / DSA 0.503ms / TLI 0.787ms。延迟排名 Quest $<$ DSA $<$ TLI，如实报告——TLI 当前的优势在算法结构侧：每 token 索引 MAC $\approx$258（DSA 的 1/32）、索引存储 3$\times$ 低于 Quest、质量 vs Quest LongBench +2.82 / RULER +7.98。131K 下三家都远离 HBM bound，排名反映实现成熟度而非算法上界。
 
 \subsection{端到端速度}
 
