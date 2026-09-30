@@ -2892,6 +2892,77 @@ run_e71_eval.py 补 TLI_E85F/SnapKV/H2O/PyramidKV 四打分臂。
 崩 → E66 同构口径鸿沟第三案，q 统计静态化对 decode 漂移同样
 脆弱，频率先验坐实零信号成本最优）。
 
+### 8b-57. 论文优化轮询首轮（10-01 00:00 监督器触发）：tab:longbench 双语落盘 + 预算符号形式化（2026-10-01）
+
+**① MoBA 对照**（WebSearch 连接黑洞，回退本地 MoBA PDF pypdf 提取）：
+发现 TLI 与 MoBA §2.2 的结构化差距——far/near 池参数（F、sw_lo、
+K1、K2、α/β/γ）全在散文里从未形式化。本轮补齐（见下）。
+
+**② tab:longbench 双语落盘**：LongBench 段从散文升级为正式表格
+（双语同步）。表列 = FullKV/Quest/TIA/TLI/SnapKV/H2O/PyramidKV，
+行 = 总分 + musique；SnapKV 27.70 / H2O 14.49†（12 任务均值，
+multifieldqa_en 数据集本身只有 150 行非残缺）/ PyramidKV 跑批中。
+正文补 KV 压缩三 baseline 全量崩坏叙述（musique 0.63、hotpotqa
+2.68、仅 lcc 67.19/54.06 部分幸存），坐实 §2.2 sink 论断。
+内部代号转译：TLI_E72 →「50.54 行」、TLI_B7 →「87.93 行」。
+
+**③ 预算符号形式化**（代码核对 tli_indexer.py L494-L539 严格口径）：
+§2.2 L2 段后新增「预算的形式定义」align 块——I_far/I_near/I_L1→L2
+三式 + F = max(64, K2_mid − ⌊γ·⌈ℓ_near/B⌉·B⌋)；同步修正 L2 散文
+near 池与滑窗区口径不一致（旧文把滑窗写成 near 池的一部分）。
+英文版同步 + fig:arch 补正文引用（消 unused label）。结构自检双语
+全过（花括号/环境配平/label 零悬空）。
+
+**④ E81 打分两 bug 修复**（上轮遗留收尾）：run_e71_eval.py pattern
+改 `{task}*-method-*.jsonl`（兼容 repobench-p 完整 dataset 名）+
+缺任务时 scorer 除零防御。
+
+**读者 agent 后台审读中**（基础→高级两级），完成后接审稿人 agent
+与归档。E85f GPU0 链在跑（musique/qasper 前置）。
+
+### 8b-58. 读者 agent 审读意见全量落实：Top-5 清单完成 + 英文版收尾三件 + fig7/fig2 重画（2026-10-01 01:30）
+
+**读者 agent 审读 Top-5 判决与落实**：
+1. **「16K 反超 FullKV (+0.91)」基线张冠李戴**（CRITICAL，数字源头核实：
+   TLI−FullKV = −0.10/−0.52/−1.73 差距扩大；+0.91 实为 vs 单池消融臂）——
+   双语 Abstract/观察二改为「分区相对单池消融臂的增益随长度单调增长
+   （−0.14→−0.25→+0.91@16K）」；
+2. **内部代号全清**：B7s/TLI_E72/TLI_B7/L03/mavg/M8/P1D1P2D2/
+   TWO_LEVEL_PAPER_REPORT.md 全部转语义描述（双语）；
+3. **TIA 无定义 + 全文零参考文献**——中文版 13 处 \cite + 17 条
+   thebibliography 挂接；TIA 定义补入 §3.1（双语）；
+4. **fig7 重画**（画的是已废弃静态 D' 掩码、q 箭头错接、L1 跳过 L2）+
+   fig2 panel (a) 重画（旧两段互补数据 vs caption 承诺三判决）；
+5. **musique delta 标注基线 + mass recall 0.729/0.811 双口径命名**（双语三处）。
+
+**英文版收尾三件**：① L1 构造式替换（Σ_d max(q_d·k^min, q_d·k^max)
+≥ max⟨q,k_j⟩，逐维按符号取端值，与代码 L316-317 逐位核对）；
+② 18 处 \cite 批量挂接（脚本 assert 唯一锚点，23/23→18/18 全过）；
+③ thebibliography 17 条插入（正则坑：`\small` 在 re 中匹配空白，
+须 `\\small`）。结构自检五项全过（花括号/环境/label/cite-bibitem 对账
+零悬空，22 个 cite 实例无重复误插）。
+
+**E81 终局收官（#86 completed）**：PyramidKV 28.82 / H2O 14.87
+（13 任务全量，multifieldqa_en 补跑完成后）——双语 tab:longbench
+回填，占位脚注删除。
+
+**fig7 重画细节**：数据流修正为 q→L1/L2 打分、主链
+块索引→L1→L2→稀疏注意力（原文 L1 直连 partition 跳过 L2）；D' 改为
+论文现行设计（per-request far-stat 感知 gate，corr 0.924，安全开关
+叙事）；sink/swa 强制通道虚线绕行不占分区预算；渲染器 bbox 程序化
+检查（文本互不重叠/无框外溢出，L1 公式行溢出 106px → 框加宽+fs 7.0
+修复）。**fig2 panel (a) 重画**：E85b 三判决（配对数饱和 8/16/24/32 =
+0.473/0.811/0.813/0.802、频率单调 low/mid/high = 0.811/0.360/0.004、
+配对完整性 aligned/misaligned = 0.811/0.567）九 bar 三分组图；
+suptitle 内部代号（E3/E65/E73/E76）清除；输出补 sglang/paper/figures
+目录（旧版只写 two-level）。
+
+**机械门通过**：英文版 em-dash/禁用词零命中（中文「——」为中文
+破折号正常标点不计）。**审稿人 agent 已启动**（NeurIPS/ICLR 级
+evidence-gated 批判，后台运行中），完成后接归档步骤。
+E85f 进度：musique/qasper/hotpotqa 完成，2wikimqa 在跑，
+ave_budget 969-1021 健康。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
