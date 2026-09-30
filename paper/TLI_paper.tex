@@ -82,11 +82,11 @@ attention fused kernel / DS topk）。
 
 位置稳定低频子空间质量不打折（E3：0.729 vs 全维 0.732），
 
-\textbf{两段互补机理}（E73）：tail32 = rope 低频尾 16 维（位置
+\textbf{两段互补机理}（E73/E73b）：tail32 = rope 低频尾 16 维（位置
 
-感知段，单独 0.576）+ nope 尾 16 维（内容稳定段，单独 0.383），
+感知段，单独 0.576）+ nope 尾 16 维（内容稳定段，单独 0.387），
 
-拼接 0.796 $>$ 任一（+0.22 组合增益）；进一步降维以无监督
+拼接 0.811 $>$ 任一（+0.24 组合增益，全链同特征口径）；进一步降维以无监督
 
 细筛 PCA d16 近无损（E65：0.766 vs 0.804），且跨 kv-head 共享
 SVD 基 d16 同样近无损并优于 per-head 基（E76：8/8 样本追平
@@ -144,6 +144,14 @@ PyramidKV（observation-based 压缩）、H2O（累积重要性）。TLI 的
 FP8 top-2048，warm-up 1000 步）、MoBA（gated block 稀疏）。
 
 TLI training-free/weight-free，与其在 kernel 级统一 harness 对比。
+
+两者构成方法论分界：DSA 用训练（KL 对齐 attention 分布）换选择
+
+能力，可学任意投影；training-free 只能依赖与 q 分布无关的位置
+
+先验——trace 离线成立 $\leftrightarrow$ e2e 崩坏的口径鸿沟（E66$\rightarrow$E71-B）
+
+正是这条分界线的实证刻画，而非实现失误。
 
 - \textbf{两级结构}：HISA（COLM 2026，block-coarse + token-refine）
 
@@ -224,9 +232,9 @@ lowfreq mass recall 0.729 $\approx$ 全维 0.732，random 0.32 / highfreq 0.137
 
 \textbf{子空间的两段互补性机理（E73 机制分解）}：tail32 = rope 低频
 
-尾 16 维 + nope 尾 16 维。单独做 far 全链各捕获 0.576 / 0.383，
+尾 16 维 + nope 尾 16 维。单独做 far 全链各捕获 0.576 / 0.387，
 
-\textbf{拼接 0.796 > 任一}（互补组合增益 +0.22）——32 维子空间的
+\textbf{拼接 0.811 > 任一}（互补组合增益 +0.24）——32 维子空间的
 
 威力不是「低频连续段」，而是\textbf{位置感知段（rope 低频，长程检索
 
@@ -713,9 +721,9 @@ launch-bound}：16 请求逐请求 Python 循环 $\times$ 36 层 $\times$ 数十
 
 recall 0.729 $\approx$ 全维 0.732；random 0.32 / highfreq 0.137 崩溃
 
-——位置稳定子空间存在。tail32 两段互补机理（E73）：rope 低频
+——位置稳定子空间存在。tail32 两段互补机理（E73/E73b）：rope 低频
 
-尾 16（0.576）+ nope 尾 16（0.383）拼接 0.796，组合增益 +0.22。
+尾 16（0.576）+ nope 尾 16（0.387）拼接 0.811，组合增益 +0.24。
 
 降维三段判决：无监督细筛 PCA d16 近损耗（E65）为唯一推荐；
 
@@ -799,7 +807,17 @@ per-request 信号的最佳用途是 D' gate（安全价值）而非 $\beta$
 
 分派（无精度价值），静态双臂按任务形态二选一（E74 边界判据）
 
-为收益/复杂度最优解。
+为收益/复杂度最优解。粒度细化到层同样无杠杆（E79a：per-layer
+
+oracle 每层独立选最优配置——含逐层可选 mono/分区与网格内任意
+
+点——增益均值仅 +0.0008，8 样本全部噪声级；逐层最优 74/96 选
+
+mono 且与层 far mass 无可用规律）——任务与层两粒度的双重否定
+
+本身构成 observation：\textbf{分区预算对配置误差鲁棒、不需要精调
+
+$\Rightarrow$ 部署简单性论据}。
 
 - \textbf{规模泛化}（Qwen3-32B，§8）：A 机制存在强度递减（如实报告）、
 
