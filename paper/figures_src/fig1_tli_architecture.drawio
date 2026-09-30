@@ -1,0 +1,99 @@
+<mxfile host="app.diagrams.net" agent="TLI paper Fig1" version="24.7.8">
+  <diagram id="tli-arch" name="TLI Architecture">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="8" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1160" pageHeight="720" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <!-- ================= 样式常量 =================
+             蓝主色 #2F6F9F（L1）、绿 #3A7D44（L2 far）、紫 #7B5AA6（分区）、
+             橙 #D98E32（子空间）、红 #C1443C（gate/边界）、灰 #8A8A8A（IO） -->
+        <!-- ============ 顶部：输入 ============ -->
+        <mxCell id="kv" value="KV Cache&#10;[S, H_kv, 128]&#10;S up to 131K" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#8A8A8A;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="130" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="q" value="Query q&#10;GQA: H = 4·H_kv" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#8A8A8A;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="220" y="40" width="120" height="64" as="geometry" />
+        </mxCell>
+        <!-- 子空间 A（右侧竖长条） -->
+        <mxCell id="sub" value="A: Position-Stable Subspace&#10;d' = 32 (tail dims)&#10;rope-low16 + nope-tail16&#10;complementary (E73)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FDF3E1;strokeColor=#D98E32;fontSize=10.5;align=center;" vertex="1" parent="1">
+          <mxGeometry x="390" y="40" width="200" height="64" as="geometry" />
+        </mxCell>
+        <!-- ============ L1 行 ============ -->
+        <mxCell id="l1" value="L1: Block Upper-Bound Coarse&#10;min/max per 64-tok block&#10;4-bit quantized (40 B/token-head)&#10;interval-arithmetic score → no false miss" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEF3F8;strokeColor=#2F6F9F;fontSize=10.5;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="160" width="250" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="dp" value="D': Gated Layer Skip&#10;prefill far-stat → τ&#10;skip far on low-far layers&#10;conservative switch (corr 0.924)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBEDEB;strokeColor=#C1443C;fontSize=10.5;align=center;" vertex="1" parent="1">
+          <mxGeometry x="330" y="160" width="210" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="l1top" value="Top-K1 = 128 blocks&#10;(upper-bound scores)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEF3F8;strokeColor=#2F6F9F;fontSize=10.5;" vertex="1" parent="1">
+          <mxGeometry x="580" y="160" width="180" height="80" as="geometry" />
+        </mxCell>
+        <!-- ============ L2 行 ============ -->
+        <mxCell id="far" value="far pool (own budget)&#10;token-level 4-bit refine&#10;≈ oracle (E4c: 0.999)&#10;anti-eviction quota" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E9F2EC;strokeColor=#3A7D44;fontSize=10.5;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="300" width="200" height="84" as="geometry" />
+        </mxCell>
+        <mxCell id="near" value="near pool (sliding window)&#10;causal window, exact by construction&#10;no scoring needed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E9F2EC;strokeColor=#3A7D44;fontSize=10.5;align=center;" vertex="1" parent="1">
+          <mxGeometry x="290" y="300" width="200" height="84" as="geometry" />
+        </mxCell>
+        <mxCell id="part" value="B': Partitioned Budgets&#10;K2 = 1024 tokens&#10;α=0.125 / β=0.25 / γ=0.125&#10;far 128–256 saturates" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2ECF7;strokeColor=#7B5AA6;fontSize=10.5;align=center;" vertex="1" parent="1">
+          <mxGeometry x="530" y="300" width="230" height="84" as="geometry" />
+        </mxCell>
+        <!-- ============ 输出行 ============ -->
+        <mxCell id="out" value="Sparse Attention&#10;K2 = 1024 selected tokens&#10;fused kernel: 1.46×→5.09×&#10;e2e 64K: 1.285×" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EFE9E2;strokeColor=#2A9D8F;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="450" width="240" height="84" as="geometry" />
+        </mxCell>
+        <!-- 系统栈注记 -->
+        <mxCell id="sys" value="System stack (sglang):&#10;· paged addressing, zero-copy&#10;· O(n) incremental index&#10;· shared per-layer index pool&#10;· CUDA-graph capture" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#8A8A8A;fontSize=10;align=left;spacingLeft=8;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="450" width="200" height="110" as="geometry" />
+        </mxCell>
+        <!-- 质量注记 -->
+        <mxCell id="qual" value="Quality (Qwen3-8B):&#10;LongBench 50.54 &gt; FullKV 50.36&#10;RULER 87.93 vs 88.71&#10;musique 34.76: new high" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#8A8A8A;fontSize=10;align=left;spacingLeft=8;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="860" y="450" width="200" height="110" as="geometry" />
+        </mxCell>
+        <!-- ============ 箭头 ============ -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#555555;strokeWidth=1.4;" edge="1" parent="1" source="kv" target="l1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#555555;strokeWidth=1.4;" edge="1" parent="1" source="sub" target="l1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="365" y="130" /><mxPoint x="165" y="130" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#555555;strokeWidth=1.4;" edge="1" parent="1" source="q" target="dp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="rounded=1;strokeColor=#555555;strokeWidth=1.4;" edge="1" parent="1" source="l1" target="l1top">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="gate" style="rounded=1;strokeColor=#C1443C;strokeWidth=1.2;dashed=1;fontSize=9;fontColor=#C1443C;" edge="1" parent="1" source="dp" target="l1top">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#555555;strokeWidth=1.4;" edge="1" parent="1" source="l1top" target="part">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="670" y="270" /><mxPoint x="645" y="270" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#555555;strokeWidth=1.4;" edge="1" parent="1" source="l1" target="far">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#555555;strokeWidth=1.4;" edge="1" parent="1" source="part" target="near">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="390" y="270" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#555555;strokeWidth=1.4;" edge="1" parent="1" source="far" target="out">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#555555;strokeWidth=1.4;" edge="1" parent="1" source="near" target="out">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="160" y="420" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <!-- 标题 -->
+        <mxCell id="title" value="TLI: Two-Level Training-Free Sparse Attention Indexer" style="text;html=1;align=center;fontSize=14;fontStyle=1;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="240" y="610" width="680" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
