@@ -733,6 +733,26 @@ precision 0.92-1.00；prefill 动态 gate 升 $\tau$ 真判决微损不崩
 
 - \textbf{预算敏感性}：far_tokens 128-256 饱和；near 配比消融见 E63。
 
+- \textbf{自适应 $\alpha/\beta$ 不可行（negative result，E75）}：per-request
+
+快速估计 attention mass 在线分派 $\alpha/\beta$ 的方案判 No-Go——
+
+oracle 上限（每任务完美选 $\beta$）仅 LongBench +0.08 / RULER
+
++0.00，且 +0.08 全部可由噪声正向选择偏差解释（非 musique 12
+
+任务 $|\Delta|$ 中位 0.17）；信号本身可得且零成本（prefill 末
+
+chunk far\_stat，corr 0.924），但参数面平坦（$\alpha$ 单调至
+
+边界 0.125、$\beta$ 0.25-0.75 平坦）使自适应无杠杆；同一
+
+per-request 信号的最佳用途是 D' gate（安全价值）而非 $\beta$
+
+分派（无精度价值），静态双臂按任务形态二选一（E74 边界判据）
+
+为收益/复杂度最优解。
+
 - \textbf{规模泛化}（Qwen3-32B，§8）：A 机制存在强度递减（如实报告）、
 
 D' 更强（41/64 层 precision 0.993）、far 双峰复现。
