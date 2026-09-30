@@ -556,7 +556,25 @@ TLI\_E72 保持 LongBench 最优行 + RULER 87.59 诚实并报——差距
 
 预算配比的任务形态依赖性（LongBench 多跳 $\beta$.375 占优 vs
 
-RULER 合成 needle $\beta$.25 占优）本身是消融结论。\textbf{与 RULER
+RULER 合成 needle $\beta$.25 占优）本身是消融结论。逐任务族
+
+分解（E74）给出其定量边界：\textbf{far 让渡预算的合理性边界 =
+
+far 关键 token 稀疏度}——真实任务全族成立（多跳 QA +0.77，
+
+最 far-heavy 的 musique 反而增益最大 +1.94；far 关键 token
+
+极稀疏（far\_tokens 128-256 饱和、分区配额已防挤出），让渡给
+
+near 边际收益高；其余族 ±0.2 噪声级无反例）；合成 far-dense
+
+任务族失效（multikey\_3 $-$2.00 / cwe $-$1.23，far 候选数量
+
+爆炸使 far 侧预算粒度主导，且随长度放大 $-$0.15$\rightarrow$$-$0.60）
+
+——far-dense 检索是稀疏索引器全族难区（Quest 同任务崩塌
+
+同构），非 $\beta$ 配比独有问题。\textbf{与 RULER
 
 单跳口径互补}：单跳检索放大 4bit 粒度代价、多跳放大 far 分区
 
