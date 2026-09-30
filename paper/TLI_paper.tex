@@ -8,7 +8,7 @@
 \date{2026-09-30}
 \begin{document}
 \maketitle
-\section{1. Introduction / Abstract / 5. Related Work / 6. Limitations（论文正文草稿，2026-09-28 晨）}
+% [草稿组织注记] 章节顺序：Abstract → 1. Introduction → 5. Related Work → 6. Limitations → 2. 方法 → 3. kernel → 4. 实验 → 附录
 % 事实锚点：PAPER_OUTLINE.md §0/§1/§5/§6 + §8b-31 竞争扫描 + 各章草稿。
 \section{Abstract（草稿 v2，终局数字）}
 长上下文推理中，KV 缓存访问同时制约 decode 与 prefill。现有
@@ -230,7 +230,7 @@ lowfreq mass recall 0.729 $\approx$ 全维 0.732，random 0.32 / highfreq 0.137
 
 40B/token-head，M6）。
 
-\textbf{子空间的两段互补性机理（E73 机制分解）}：tail32 = rope 低频
+\textbf{子空间的两段互补机理（E73b 机制分解）}：tail32 = rope 低频
 
 尾 16 维 + nope 尾 16 维。单独做 far 全链各捕获 0.576 / 0.387，
 
