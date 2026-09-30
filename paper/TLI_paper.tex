@@ -78,11 +78,27 @@ attention fused kernel / DS topk）。
 
 \textbf{贡献}（与实验编号一一对应）：
 
-1. \textbf{上界粗筛的实证依据}：位置稳定低频子空间质量不打折
+1. \textbf{training-free 降维自由度的系统刻画（子空间选择）}：
 
-（E3：0.729 vs 全维 0.732），上界保证与 Quest 下界近似的
+位置稳定低频子空间质量不打折（E3：0.729 vs 全维 0.732），
 
-长上下文质量分化（RULER 终局 +7.98@16K vs Quest）；
+\textbf{两段互补机理}（E73）：tail32 = rope 低频尾 16 维（位置
+
+感知段，单独 0.576）+ nope 尾 16 维（内容稳定段，单独 0.383），
+
+拼接 0.796 $>$ 任一（+0.22 组合增益）；进一步降维以无监督
+
+细筛 PCA d16 近无损（E65：0.766 vs 0.804）；\textbf{训练投影的
+
+口径鸿沟}（E66 trace 成立 92-94\% vs E71-B e2e 崩坏——投影基
+
+对 decode q 分布漂移脆弱，尾维位置先验分布无关恒稳）——
+
+training-free 路线的降维自由度来自位置先验而非学习/自适应。
+
+上界保证与 Quest 下界近似的长上下文质量分化（RULER 终局
+
++7.98@16K vs Quest）；
 
 2. \textbf{far/near 分区预算（B'）}：GQA far 集中特性下的防挤出设计，
 
@@ -687,9 +703,27 @@ launch-bound}：16 请求逐请求 Python 循环 $\times$ 36 层 $\times$ 数十
 \caption{D' 层跳过轮廓（E6）}
 \end{figure}
 
-- \textbf{A 子空间}（E3）：lowfreq d'=32 mass recall 0.729 $\approx$ 全维
+- \textbf{A 子空间}（E3 + E73 + E65/E66/E71-B）：lowfreq d'=32 mass
 
-0.732；random 0.32 / highfreq 0.137 崩溃——位置稳定子空间存在。
+recall 0.729 $\approx$ 全维 0.732；random 0.32 / highfreq 0.137 崩溃
+
+——位置稳定子空间存在。tail32 两段互补机理（E73）：rope 低频
+
+尾 16（0.576）+ nope 尾 16（0.383）拼接 0.796，组合增益 +0.22。
+
+降维三段判决：无监督细筛 PCA d16 近损耗（E65）为唯一推荐；
+
+监督投影 trace 成立（E66 LOTO 92-94\%）但 e2e 崩（E71-B，投影
+
+基对 decode q 漂移脆弱）——\textbf{training-free 降维自由度 =
+
+位置先验，非学习/自适应}（near 侧 d4$\approx$d64 平坦 + 滑窗
+
+兜底，可压；q 自适应基继承漂移脆弱性，三路否定：E5 在线信号
+
+相关 $\approx$0、E72 cavg e2e 垫底、E75 自适应 oracle 上限
+
+$\approx$0）。
 
 - \textbf{B' far/near 分区}（E4c 严格 token 预算 + per-head 加权口径）：
 
