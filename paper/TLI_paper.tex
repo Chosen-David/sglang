@@ -216,8 +216,8 @@ TIA）下实现 kernel 级 1.3-5.1$\times$ 与收益区 e2e 加速。
 
 \section{2.1 L1：块级 minmax 上界粗筛（子空间）}
 \begin{figure}[h]\centering
-\includegraphics[width=0.85\linewidth]{figures/fig2_e3_subspace.pdf}
-\caption{子空间选择（E3）：低频维 recall 持平全维}
+\includegraphics[width=0.95\linewidth]{figures/fig2_dim_reduction_story.pdf}
+\caption{降维自由度来自位置先验：(a) tail32 两段互补（E73b）；(b) 共享 SVD d16 八样本逐点追平 tail32（E76）；(c) 线性优于非线性、共享优于 per-head（E65/E76）}
 \end{figure}
 
 将 KV 缓存按块组织（block=64）。对每块每 kv-head 维护低频尾维子空间
@@ -815,9 +815,9 @@ oracle 每层独立选最优配置——含逐层可选 mono/分区与网格内�
 
 mono 且与层 far mass 无可用规律）——任务与层两粒度的双重否定
 
-本身构成 observation：\textbf{分区预算对配置误差鲁棒、不需要精调
+本身构成 observation：\textbf{分区预算对配置误差不敏感（oracle 与固定
 
-$\Rightarrow$ 部署简单性论据}。
+最优差 $\leq$0.001 量级）、不需要精调 $\Rightarrow$ 部署简单性论据}。
 
 - \textbf{规模泛化}（Qwen3-32B，§8）：A 机制存在强度递减（如实报告）、
 
