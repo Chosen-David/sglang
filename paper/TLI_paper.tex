@@ -1,7 +1,7 @@
 \documentclass[11pt]{article}
 \usepackage[UTF8]{ctex}
 \usepackage{booktabs,amsmath,amssymb,graphicx}
-\usepackage{margin=1in]{geometry}
+\usepackage[margin=1in]{geometry}
 \usepackage[hidelinks]{hyperref}
 \title{TLI：两级 Training-Free 稀疏注意力索引器\\
 \large 块级上界粗筛与 far/near 分区精筛}
@@ -64,7 +64,7 @@
 \end{equation}
 稀疏索引的问题是：为 $q$ 选出大小为 $K_2$ 的位置集合 $I\subseteq[N]$，使 $\mathrm{Attn}(q, K[I], V[I])$ 逼近全量结果。本文关注单 head 情形以保持清晰，多头与 GQA 的扩展在第~\ref{sec:l2} 节处理。与训练类索引不同，training-free 索引不允许任何参数——选择质量完全取决于用什么信号打分、以什么组织方式分配预算。
 
-\subsection{TLI 架构}
+\subsection{TLI 架构}\label{sec:l2}
 
 \begin{figure}[h]\centering
 \includegraphics[width=0.85\linewidth]{figures/fig7_tli_architecture.pdf}
