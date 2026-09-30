@@ -2726,6 +2726,31 @@ training-free 最优解 = tail32 位置先验（默认）或共享 SVD d16/d8
 （MLA 式，跨 head 存储更省）**，非线性不进入论文主线（negative
 result 资产）。tex §4.4 降维段补共享投影发现。
 
+### 8b-54. E78 论文正文润色两轮（paper-writing skill 机械门 + Integration pass，2026-09-30 14:00，#82）
+
+**第一轮（机械门 + 语义红队）**：中文适配 grep 门
+（hedging/填充形容词/清嗓/contentless opener/em-dash/浮夸词六类）
+——基线质量高，仅 1 处「对配置误差鲁棒」改为具体数字表述
+（「oracle 与固定最优差 ≤0.001 量级」）；§2.1 图引用从旧
+fig2_e3_subspace 换为终版 Fig2 三 panel 合并图（claim 式图注）；
+6/6 图文件存在性校验通过；数字回溯——两段互补三处旧数字
+（0.796/0.383/+0.22）统一为 E73b JSON（0.811/+0.24）。
+
+**第二轮（Stage 4 Integration）**：术语漂移审计（两段互补 4 变体→
+统一；口径鸿沟/防挤出/保守开关零漂移）；claim-evidence 映射
+（Abstract 九个核心数字全文均有 ≥2 次正文支撑）；23 个 section
+首句 claim-bearing 审计通过；meta section 标题转注释防渲染。
+结构自检（花括号/begin-end）平衡。
+
+**skill 缺件说明**：paper-writing 的 author_profile/
+writing_checklists 子目录未随 clone 落地，用 SKILL.md 内联
+Non-Negotiable Voice Rules 完整执行；观察兑现检查清单
+（observation_design.md §5 七条）已逐条核对：三处 tex 更新
+（E73b 数字 / E79a 入 §4.4 / DSA 流派分界句入 Related Work）。
+
+**遗留（待用户拍板）**：主表「双臂并报」vs「B7s 单一定稿 +
+β.375 消融行」——两版数据均齐。
+
 ## 9. 待办（优先级序）
 
 1. ~~E5b 完成后~~ ✅ 主表已填（TLI 49.92，§4）；far_tokens 预算敏感性已测（128–256 饱和，§7）
