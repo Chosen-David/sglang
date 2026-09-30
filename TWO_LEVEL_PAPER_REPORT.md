@@ -2874,8 +2874,23 @@ cos(Δpos·ωⱼ)+(qⱼkⱼ₊₆₄−qⱼ₊₆₄kⱼ)sin(Δpos·ωⱼ)]，�
   窗口含被评估尾 query）；真实 e2e 中 decode 多步后 q 漂移是否
   保住增益须 e2e 判决（E66 投影基 trace 成立 e2e 崩的前车之鉴；
   但 pair 选取只选 16 个频率不拟合投影基，结构上比 E71-B 稳）。
-  **E85f（e2e 静态 pair）待 GPU 空闲后跑**：transformers 侧
-  tli_indexer.py 加 per-layer pair 选取 → LongBench 13 任务。
+
+**E85f 实现落盘（2026-09-30 18:55 轮，two-level-attention 提交）**：
+e2e 静态 pair 判决管线全链路就绪——①`--tli_static_pair` 参数 +
+`observe_prefill_q`（qwen3_attn_patch prefill dense 分支旁路采集
+post-RoPE 尾 256 q，prefill 不经过 indexer 的管线结构恰好使
+「query 到达前可定」成立）；②`clear()` 跨请求重置防 pair 残留
+（每请求重选）；③**口径修正**：L2 细筛 k_qat 从硬编码 tail32 改
+为 idx_sub——与 L1 粗筛同子空间（E85e 重放口径），tail 臂
+cmp_ratio=4 下逐位不变（干跑回归⑤验证）；④干跑单测五项 PASS
+（pair 受控选取/clear 重置/L1L2 同维/预算恒 1024/tail 回归）；
+⑤run_e85f_gpu1.sh 挂 KVCF_GPU1_DONE 尾标自动跑 13 任务（E72
+mavg 冠军配置 + static_pair，musique/qasper 前置出判决信号）；
+run_e71_eval.py 补 TLI_E85F/SnapKV/H2O/PyramidKV 四打分臂。
+**判决问题**：静态 pair 相对 tail32 的 +3.8pt 重放增益在 e2e
+是否保住（保住 → 论文升级 per-layer 静态 pair 为推荐配置；
+崩 → E66 同构口径鸿沟第三案，q 统计静态化对 decode 漂移同样
+脆弱，频率先验坐实零信号成本最优）。
 
 ## 9. 待办（优先级序）
 
