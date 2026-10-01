@@ -7,9 +7,9 @@
 | ① 顶会逐句对照 | ✅（上轮 8b-57） | 预算符号形式化（MoBA §2.2 对照）、tab:longbench 双语落盘 |
 | ② 架构图精进 | ✅ | fig7 重画（见下） |
 | ③ 可视化精进 | ✅ | fig2 panel(a) 重画为 E85b 旋转对三判决九 bar 图 |
-| ④ 读者 agent 审读 | ✅ | Top-5 清单全部落实（见下） |
+| ④ 读者 agent 审读 | ✅ | Top-5 清单全部落实（见下）；本轮追加 reader_report.md（修复后版本重审，3 CRITICAL / 8 MAJOR，下轮主攻） |
 | ⑤ 审稿人 agent 批判 | ✅ | reviewer_report.md（weak reject 倾向，9 条 Major，M1/M2/M4/M8 已快修） |
-| ⑥ 收尾归档 | ✅ | 本目录（PDF 待有 LaTeX 环境的机器编译） |
+| ⑥ 收尾归档 | ✅ | 本目录 + **双语 PDF 已编译落盘**（用户目录 TeX Live，见下） |
 
 ## 读者 agent Top-5 落实明细
 
@@ -41,7 +41,16 @@ SnapKV 27.70 / H2O 14.87（13 任务全量）/ PyramidKV 28.82
 
 ## 文件清单
 
-- TLI_paper.tex / TLI_paper_en.tex：本轮终版双语源（sglang 070a8d09a + 快修提交）
-- figures_snapshot/：fig7/fig2 重画版 + 全部图资产
+- TLI_paper.tex / TLI_paper_en.tex：本轮终版双语源（sglang 070a8d09a + 快修提交 + 标题/表述修订 8ca537aa4）
+- **TLI_paper.pdf（12 页，xelatex）/ TLI_paper_en.pdf（13 页，pdflatex）**：本机用户目录 TeX Live 2018 编译（内网镜像 RPM 解包装 ~/texlive，`~/.local/bin/texenv` 包装器）；逐页文本检查零缺字零坏引用
+- figures_snapshot/：fig7/fig2 重画版 + 全部图资产（fig7 为 v3 管线+数据可视化混合版）
 - reviewer_report.md：审稿人完整意见（12984 字符）
-- 编译说明：中文版须 xelatex（CJK）；英文版 pdflatex 即可；本机无 LaTeX 环境
+- reader_report.md：读者 agent 意见（修复后版本重审：C1 单池消融臂不可见 / C2 mass 指标未形式化 / C3 主表仅 2 行 + 8 MAJOR）
+
+## 本轮追加改动（用户四项批评落实）
+
+1. 标题弃用 two-level → 「面向长上下文稀疏注意力的免训练轻量索引」/ Training-Free Lightweight Indexing
+2. 贡献#4 重写：删「双口径评测方法论/五臂反转」内部行话 → 「免调参的轻量配置选择」（平坦面 + oracle +0.08/+0.0008 + 在线净 0 → 一组默认配置）
+3. 贡献#3 gate 加参照系（gate-on vs gate-off 差分）
+4. fig7 架构图 v3 完全重画（管线+数据可视化混合，程序化布局检查 0 越界）
+5. 双语 PDF 首次本机产出并归档
