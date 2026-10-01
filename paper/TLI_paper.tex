@@ -14,7 +14,7 @@
 % we propose+命名+key advantage → 部署声明）。
 % =====================================================================
 \begin{abstract}
-扩展大语言模型的有效上下文长度需要突破 KV 缓存带宽的制约：在 131K 上下文的 8B 模型上，decode 每步的全量 KV 读取远超计算量，成为吞吐上限。现有方案面临一个困难权衡：training-free 的稀疏索引依赖下界近似，在长上下文检索任务上质量崩塌（我们实测 Quest 在 RULER 16K 的 multikey\_3 上仅 21 分，FullKV 为 100）；训练类索引（DSA）引入可学习参数与上千步 warm-up 成本，且选择质量依赖训练分布。本文提出 TLI，一个两级 training-free 稀疏注意力索引：第一级用 4bit 量化子空间上的块级 minmax \textbf{上界}粗筛保证子空间口径下无漏选，第二级用 far/near 分区的 token 级精筛保护远端关键 token 不被近端高分挤出。在 Qwen3-8B 的 LongBench 13 任务上，TLI 取得 50.54，与 FullKV（50.36）在噪声级差距内持平；多跳 far-heavy 任务 musique 达到 34.76，为全部方法（含 FullKV）最高。RULER 上 87.93 逼近 FullKV 的 88.71，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91），增益集中于多干扰检索与词表任务。速度侧，TLI 选择链相对 dense 打分取得 1.46$\times$@32K $\rightarrow$ 5.09$\times$@128K 的 kernel 级加速，64K 单请求 e2e 1.285$\times$；全部精度代价与负结果在同机同协议下如实报告。TLI 已在 sglang 生产形态（paged 寻址、增量索引、CUDA graph）下集成。
+扩展大语言模型的有效上下文长度需要突破 KV 缓存带宽的制约：在 131K 上下文的 8B 模型上，decode 每步的全量 KV 读取远超计算量，成为吞吐上限。现有方案面临一个困难权衡：training-free 的稀疏索引依赖下界近似，在长上下文检索任务上质量崩塌（我们实测 Quest 在 RULER 16K 的 multikey\_3 上仅 21 分，FullKV 为 100）；训练类索引（DSA）引入可学习参数与上千步 warm-up 成本，且选择质量依赖训练分布。本文提出 TLI，一个两级 training-free 稀疏注意力索引：第一级用 4bit 量化子空间上的块级 minmax \textbf{上界}粗筛保证子空间口径下无漏选，第二级用 far/near 分区的 token 级精筛保护远端关键 token 不被近端高分挤出。在 Qwen3-8B 的 LongBench 13 任务上，TLI 取得 50.54，与 FullKV（50.36）在噪声级差距内持平；多跳 far-heavy 任务 musique 达到 34.76，为全部方法（含 FullKV）最高。RULER 上 87.93 逼近 FullKV 的 88.71，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91），增益集中于多干扰检索与词表任务。速度侧，选择链相对 dense 打分取得 1.46$\times$@32K $\rightarrow$ 5.09$\times$@128K 的 kernel 级加速；同机三方对比中 Quest 单 kernel 延迟更低（0.107ms vs TLI 0.787ms），TLI 的速度优势在索引计算量（DSA 的 1/32）与索引存储（Quest 的 1/3）而非延迟；e2e 收益有形状边界：64K 单请求 1.285$\times$，32K 档 0.77$\times$、高并发档 0.92$\times$（固定开销与 launch-bound 所致）。全部精度代价与负结果在同机同协议下如实报告。TLI 已在 sglang 生产形态（paged 寻址、增量索引、CUDA graph）下集成。
 \end{abstract}
 
 % =====================================================================
@@ -42,7 +42,7 @@
 % P6（贡献列表，claim-first）。
 本文的贡献如下：
 \begin{enumerate}
-\item \textbf{training-free 降维自由度的系统刻画}。位置稳定低频子空间在索引质量上无损失（子空间选择对全维 top-1024 的 mass 覆盖为 0.729，全维打分自身 0.732，随机子空间 0.32）；tail32 的机理经三重判决确证为\textbf{16 个完整最低频 RoPE 旋转对}（far 全链 mass recall 口径：频率单调——低频对 0.811 / 中频对 0.360 / 高频对 0.004；配对完整性——错位配对崩至 0.567；16 对即饱和——8 对仅 0.473）。选取方法学四象限给出可行域边界：逐维谱（0.759）与训练投影均败于配对纠缠；query 自适应 pair 选取（0.865）不可索引化；per-layer 静态 pair（0.849）兼容索引——tail32 是零信号成本最优解。无监督 PCA 可将细筛再压至 $d{=}16$ 近无损（0.766 vs 0.804），且跨 kv-head 共享 SVD 基在 8/8 样本上追平 tail32；而训练投影在 trace 重放中成立（92--94\%）、e2e 崩坏——投影基对 decode 查询分布漂移脆弱，旋转对频率先验与查询分布无关恒稳。降维自由度来自位置先验，而非学习或自适应。
+\item \textbf{training-free 降维自由度的系统刻画}。位置稳定低频子空间在索引质量上无损失（子空间选择对全维 top-1024 的 mass 覆盖为 0.729，全维打分自身 0.732，随机子空间 0.32）；tail32 的机理经三重判决确证为\textbf{16 个完整最低频 RoPE 旋转对}（far 全链 mass recall 口径：频率单调——低频对 0.811 / 中频对 0.360 / 高频对 0.004；配对完整性——错位配对崩至 0.567；16 对即饱和——8 对仅 0.473）。选取方法学四象限给出可行域边界：逐维谱（0.759）与训练投影均败于配对纠缠；query 自适应 pair 选取（0.865）不可索引化；per-layer 静态 pair（0.849）兼容索引但 e2e 反转（重放 $+3.8$pt、e2e $-0.50$）——tail32 是经 e2e 验证的零信号成本最优解。无监督 PCA 可将细筛再压至 $d{=}16$ 近无损（0.766 vs 0.804），且跨 kv-head 共享 SVD 基在 8/8 样本上追平 tail32；而训练投影在 trace 重放中成立（92--94\%）、e2e 崩坏——投影基对 decode 查询分布漂移脆弱，旋转对频率先验与查询分布无关恒稳。降维自由度来自位置先验，而非学习或自适应。
 \item \textbf{far/near 分区预算}。选择索引建在 kv-head 级：同组 query head 共享同一份 kv-head 级选择，无需聚合。GQA 下远端 attention mass 在 kv-head 间极不均（单 kv-head 可独占 0.804），全池 top-k 使远端关键 token 被近端高分挤出。分区独立配额在双基准 e2e 上成立（LongBench +0.25 / RULER +0.17 vs 单池），多跳 far-heavy 任务增益最纯粹（musique 34.76 vs 同预算单池臂 29.74，$+5.02$）；聚类代表方案在严格 token 预算下无一致优势，降级为消融负结果。
 \item \textbf{感知型 per-request gate}。静态层掩码跨任务不泛化（多跳任务掉 4.8--5.9 分）；prefill 末段动态信号与 decode 侧 far 质量相关性 0.924，真实触发区间（$\tau{=}0.005$）下，开启 gate 相对关闭 gate 的差分：musique 微升 $+0.23$、qasper 微降 $-0.41$，far-heavy 任务均不崩。gate 的定位是安全省算力的保守开关，而非精度增益点。
 \item \textbf{免调参的轻量配置选择}。分区参数 $\alpha/\beta/\gamma$ 的质量面在任务与层两个粒度上都高度平坦：逐任务最优选择的 oracle 上限仅 $+0.08$（13 任务）、逐层最优仅 $+0.0008$，prefill 端一次 far 统计驱动的逐样本在线选择净增益为 0。因此部署只需一组默认配置，far-heavy 多跳任务可选一次 $\beta$ 上调；参数不需精调本身构成部署优势（对比 DSA 的千步 warm-up）。
@@ -104,9 +104,9 @@ I_{\mathrm{L1}\rightarrow\mathrm{L2}} &= I_{\mathrm{sink}}\ \cup\ \big[\,S-sw_{l
 % MoBA 式：Next, we discuss some additional key design choices...
 接下来讨论 TLI 的三个关键设计选择。
 
-\textbf{子空间选择。}L1 为什么取低频尾维 32 维。索引信号必须在降维后保住对全维分数排序的区分力。Qwen3 的 rotate\_half RoPE 使低频维上的点积与全维点积排序高度一致（子空间选择对全维 top-1024 的 mass 覆盖 0.729，全维打分自身 0.732），随机子空间崩至 0.32、高频维 0.137。机理经三重判决确证（图~\ref{fig:dim}）：Qwen3 的 128 维全部参与 RoPE，rotate\_half 布局下频率 $j$ 施加在维度对 $(j, j{+}64)$ 上，tail32 = 维度 48..63 与 112..127 = \textbf{16 个完整最低频旋转对}。点积按频率分解为 $\sum_j [(q_j k_j + q_{j+64} k_{j+64})\cos(\Delta\,\omega_j) + (q_j k_{j+64} - q_{j+64} k_j)\sin(\Delta\,\omega_j)]$，远端大 $\Delta$ 上低频项平滑高相关、高频项震荡相消——低频对承载长程检索信号。三个判决支持这个结构解释：其一，频率单调（低频 16 对 0.811 / 中频 0.360 / 高频 0.004）；其二，配对完整性（前半取低频 16 维、后半换成中频对来源的错位配对崩至 0.567，段位几乎重合仅元素来源错位）；其三，对数饱和（16 对即 0.811 近饱和，8 对仅 0.473）。32B 上方向复现（完整对 0.829 > 错位 0.645 > 单半 0.54），饱和宽度后移至 24 对（0.904）。
+\textbf{子空间选择。}L1 为什么取低频尾维 32 维。索引信号必须在降维后保住对全维分数排序的区分力。Qwen3 的 rotate\_half RoPE 使低频维上的点积与全维点积排序高度一致（子空间选择对全维 top-1024 的选择覆盖 $C{=}0.729$，全维打分自身 0.732），随机子空间崩至 0.32、高频维 0.137。机理经三重判决确证（图~\ref{fig:dim}）：Qwen3 的 128 维全部参与 RoPE，rotate\_half 布局下频率 $j$ 施加在维度对 $(j, j{+}64)$ 上，tail32 = 维度 48..63 与 112..127 = \textbf{16 个完整最低频旋转对}。点积按频率分解为 $\sum_j [(q_j k_j + q_{j+64} k_{j+64})\cos(\Delta\,\omega_j) + (q_j k_{j+64} - q_{j+64} k_j)\sin(\Delta\,\omega_j)]$，远端大 $\Delta$ 上低频项平滑高相关、高频项震荡相消——低频对承载长程检索信号。三个判决支持这个结构解释：其一，频率单调（far 区召回 $R_{\mathrm{far}}$：低频 16 对 0.811 / 中频 0.360 / 高频 0.004）；其二，配对完整性（前半取低频 16 维、后半换成中频对来源的错位配对崩至 0.567，段位几乎重合仅元素来源错位）；其三，对数饱和（16 对即 0.811 近饱和，8 对仅 0.473）。32B 上方向复现（完整对 0.829 > 错位 0.645 > 单半 0.54），饱和宽度后移至 24 对（0.904）。
 
-选取方法学的完整刻画（表~\ref{tab:select}）：静态（索引兼容）与自适应（逐 query）两个可行域交叉出四个象限。逐维谱 top-32 仅 0.759——旋转对两元素在点积中纠缠，逐维重要性原理上无法恢复配对结构。SparQ~\cite{sparq} 式逐 query $|q|$ 幅值 top-32 选取达 0.848，pair 感知自适应（按 $|q_j|+|q_{j+64}|$ 取完整对）达 0.865——自适应选取确有小增益，但其子空间逐 query 变化，与 query 到达前建好的增量 minmax 块索引结构性不兼容（SparQ 为此付出逐 query 维度随机读取代价，不建索引）。中间点是 per-layer 静态化：prefill 末段 $q$ 统计的 pair 幅值 top-16 完整对，层固定、可索引化，0.849——保住自适应增益的七成，比 tail32 高 3.8pt，代价是每层一次 $q$ 统计。\textbf{tail32 的准确定位是零信号成本可行域的最优解}，而非全局最优；pair 静态选取是可索引化的升级路径。训练投影可以做得更准（trace 重放 92--94\%），但 e2e 崩坏：投影基对 decode 查询分布漂移脆弱，而旋转对频率先验与查询分布无关恒稳。这条 trace 成立而 e2e 崩坏的口径鸿沟，是 training-free 与训练流派之间分界线的实证刻画。
+选取方法学的完整刻画（表~\ref{tab:select}）：静态（索引兼容）与自适应（逐 query）两个可行域交叉出四个象限。逐维谱 top-32 仅 0.759——旋转对两元素在点积中纠缠，逐维重要性原理上无法恢复配对结构。SparQ~\cite{sparq} 式逐 query $|q|$ 幅值 top-32 选取达 0.848，pair 感知自适应（按 $|q_j|+|q_{j+64}|$ 取完整对）达 0.865——自适应选取确有小增益，但其子空间逐 query 变化，与 query 到达前建好的增量 minmax 块索引结构性不兼容（SparQ 为此付出逐 query 维度随机读取代价，不建索引）。中间点是 per-layer 静态化：prefill 末段 $q$ 统计的 pair 幅值 top-16 完整对，层固定、可索引化，0.849——保住自适应增益的七成，比 tail32 高 3.8pt，代价是每层一次 $q$ 统计。\textbf{tail32 的准确定位是零信号成本可行域的最优解}，而非全局最优；pair 静态选取是可索引化的升级路径。升级路径的 e2e 验证我们已做：static pair 臂（同配置换 prefill $q$ 统计选 pair）在重放口径 +3.8pt，e2e 却为 $-0.50$（50.04 vs 50.54，musique $-5.27$）——prefill 统计派生的选择基与训练投影同构，在 decode 查询分布漂移下同样失效，重放增益不可外推。训练投影可以做得更准（trace 重放 92--94\%），但 e2e 崩坏：投影基对 decode 查询分布漂移脆弱，而旋转对频率先验与查询分布无关恒稳。这条 trace 成立而 e2e 崩坏的口径鸿沟，是 training-free 与训练流派之间分界线的实证刻画。
 
 \begin{figure}[h]\centering
 \includegraphics[width=0.95\linewidth]{figures/fig2_dim_reduction_story.pdf}
@@ -152,38 +152,63 @@ TLI 在 sglang 生产形态下实现，选择链由四个 kernel 组件构成：
 % =====================================================================
 \section{实验}
 
+\subsection{评测指标}
+
+\textbf{端到端质量。}RULER 用官方 string\_match\_all $\times$100；LongBench 用各任务官方口径（F1 / Rouge / 准确率）平均。
+
+\textbf{注意力质量（mass 类指标）。}对解码步 $t$、层 $\ell$，设全维稠密注意力权重 $a_j = \mathrm{softmax}(\langle q, k_j\rangle / \sqrt{d})_j$。定义两个口径：
+\begin{itemize}
+\item \emph{选择覆盖}（selection coverage，记 $C$）：以全维打分选出的 top-$K$ 参考 token 集 $M^\ast$ 为分母，$C(M) = \sum_{j \in M} a_j \,/\, \sum_{j \in M^\ast} a_j$，衡量子空间打分替代全维打分后选中集合的信息保留。贡献 \#1 的 0.729 即此口径（$K{=}1024$）。
+\item \emph{far 区召回}（far-region mass recall，记 $R_{\mathrm{far}}$）：分母限定 far 区（sink 与滑窗之外的 token），$R_{\mathrm{far}}(M) = \sum_{j \in M \cap F} a_j \,/\, \sum_{j \in F} a_j$，衡量稀疏选择对远端检索信号的捕获。三重判决的 0.811 与消融 A 的 0.804 均为此口径，数值差异来自实验批次不同（前者为旋转对判决实验的 8 样本均值，后者为降维实验的 8 样本均值，样本集不完全重合）；两处都以同一批次内的 tail32 基线做内部对照，跨批次不直接比较。
+\end{itemize}
+全部 mass 指标按 GQA kv-head 级分布加权平均（组内各 query head 的 $a_j$ 分别计算后聚合），避免 head 平均掩盖 far mass 的头部集中。
+
 \subsection{端到端质量}
 
 % MoBA 3.1 式：In this section, we conduct... to validate...
 本节在双基准上验证 TLI 的质量：RULER~\cite{ruler}（3 长度 $\times$ 11 任务 $\times$ n=100，NVIDIA 官方预生成）考察长上下文检索，LongBench~\cite{longbench} 13 子集考察真实任务混合口径。对比方法中，TIA 是与本文同一管线下的第一代 training-free 块上界索引器（块 min/max 上界 + 4bit 子空间量化，无分区预算与感知 gate），作为 TLI 最直接的结构消融对照；Quest 为下界近似的代表；KV 压缩三 baseline 走统一 monkeypatch 管线。全部实验用 Qwen3-8B~\cite{qwen3} 真实权重；TLI 用终局配置（sink/swa 强制保留不计入预算的严格口径）。
 
 \begin{table}[h]\centering
-\caption{RULER 四方法终表（string\_match\_all $\times$100；TLI 为分区配置：(minmax, avg) 打分、$\alpha{=}0.125$、$\beta{=}0.25$、$\gamma{=}0.125$、$K_2{=}1024$）。}
-\begin{tabular}{lllll}
+\caption{RULER 终表（string\_match\_all $\times$100；TLI 为分区配置：(minmax, avg) 打分、$\alpha{=}0.125$、$\beta{=}0.25$、$\gamma{=}0.125$、$K_2{=}1024$；TLI-单池 = 同预算 $\alpha{=}0$ 单池消融臂）。}
+\begin{tabular}{llllll}
 \toprule
- & FullKV & TIA@1024 & TLI@1024 & Quest@1024 \\
+ & FullKV & TIA@1024 & TLI-单池 & TLI@1024 & Quest@1024 \\
 \midrule
-4K & 91.59 & \textbf{91.63} & 91.49 & 87.91 \\
-8K & \textbf{89.14} & 88.90 & 88.62 & 81.76 \\
-16K & \textbf{85.41} & 84.53 & 83.68 & 70.18 \\
-总 AVG & \textbf{88.71} & 88.35 & 87.93 & 79.95 \\
+4K & 91.59 & \textbf{91.63} & 91.63 & 91.49 & 87.91 \\
+8K & \textbf{89.14} & 88.90 & 88.87 & 88.62 & 81.76 \\
+16K & \textbf{85.41} & 84.53 & 82.77 & 83.68 & 70.18 \\
+总 AVG & \textbf{88.71} & 88.35 & 87.76 & 87.93 & 79.95 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 如表所示，三个观察成立。其一，TLI 对 Quest 的领先随长度超线性扩大（+3.58 $\rightarrow$ +6.86 $\rightarrow$ +13.50）：16K 档 Quest 在多干扰检索任务上崩塌，TLI 同任务保持量级正确——根因是下界近似漏选随干扰项增多加剧，上界粗筛无此劣化。其二，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91）：超长上下文是分区 far 检索的收益区，16K 的分区增益集中于 multikey\_3（+5.0）与 cwe（+5.4），均为 vs 同配置单池臂的差分。其三，绝对值解读须以同长度 FullKV 为基线——聚合列举类任务 FullKV 自身随长度退化（multivalue 89.5 $\rightarrow$ 69.25 $\rightarrow$ 44.25 是模型列举能力上限），稀疏方法在同长度上的差距才是稀疏效应。
 
-LongBench 13 子集上（表~\ref{tab:longbench}），TLI \textbf{50.54}——与 FullKV 50.36 持平（+0.18，噪声级边缘，Limitations 一节如实标注），vs Quest +2.82。增益的结构清晰：多跳 far-heavy 任务 musique 34.76 为全部方法最高（vs FullKV +2.62、vs 同预算单池臂 +5.02），是分区 far 检索的直接证据；其余 12 任务在 $0\sim-0.44$ 噪声级互有胜负。KV 压缩三 baseline 的全量崩坏坐实 sink 论断：SnapKV 27.70 / H2O 更崩（musique 0.63、hotpotqa 2.68）——无显式 sink 保送时 Qwen3-8B 首 token 即 EOS（§2.2 末段机理），三者中仅代码类任务（lcc 67.19 / 54.06）部分幸存。预算配比的任务形态依赖性如实并报：LongBench 多跳任务 $\beta{=}0.375$ 占优（50.54 行），RULER 合成 needle $\beta{=}0.25$ 占优（87.93 行）——两行并报，使用者按任务形态选择。逐任务族分解给出 $\beta$ 让渡的边界判据：真实任务全族成立（最 far-heavy 的 musique 反而增益最大 +1.94），合成 far-dense 族失效（multikey\_3 $-$2.00：far 候选数量爆炸使预算粒度主导）——far-dense 检索是稀疏索引器全族难区（Quest 同任务同构崩塌），非 $\beta$ 配比独有问题。
+LongBench 13 子集上（表~\ref{tab:longbench}），TLI \textbf{50.54}——与 FullKV 50.36 持平（+0.18，噪声级边缘，Limitations 一节如实标注），vs Quest +2.82。增益的结构清晰：多跳 far-heavy 任务 musique 34.76 为全部方法最高（vs FullKV +2.62、vs 同预算单池臂 +5.02），是分区 far 检索的直接证据；其余 12 任务互有胜负（$-1.78$ 至 $+0.94$；narrativeqa 为最大损失点 $-1.78$，hotpotqa/2wikimqa/lcc 为正向）。KV 压缩三 baseline 的全量崩坏坐实 sink 论断：SnapKV 27.70 / H2O 更崩（musique 0.63、hotpotqa 2.68）——无显式 sink 保送时 Qwen3-8B 首 token 即 EOS（§2.2 末段机理），三者中仅代码类任务（lcc 67.19 / 54.06）部分幸存。预算配比的任务形态依赖性如实并报：LongBench 多跳任务 $\beta{=}0.375$ 占优（50.54 行），RULER 合成 needle $\beta{=}0.25$ 占优（87.93 行）——两行并报，使用者按任务形态选择。逐任务族分解给出 $\beta$ 让渡的边界判据：真实任务全族成立（最 far-heavy 的 musique 反而增益最大 +1.94），合成 far-dense 族失效（multikey\_3 $-$2.00：far 候选数量爆炸使预算粒度主导）——far-dense 检索是稀疏索引器全族难区（Quest 同任务同构崩塌），非 $\beta$ 配比独有问题。
 
 \begin{table}[h]\centering
-\caption{LongBench 13 子集终表（各任务官方口径平均；KV 压缩三 baseline = 统一 monkeypatch 管线 + 1024 预算，无 sink 保送适配）。}
+\small
+\caption{LongBench 13 子集终表（各任务官方口径平均；TLI = 分区配置 (minmax, avg) $\alpha{=}0.125/\beta{=}0.375/\gamma{=}0.125$；TLI-单池 = 同预算 $\alpha{=}0$ 单池消融臂；KV 压缩三 baseline = 统一 monkeypatch 管线 + 1024 预算，无 sink 保送适配）。}
 \label{tab:longbench}
-\begin{tabular}{lccccccc}
+\begin{tabular}{lcccccccc}
 \toprule
- & FullKV & Quest & TIA & TLI & SnapKV & H2O & PyramidKV \\
+ & FullKV & Quest & TIA & TLI-单池 & TLI & SnapKV & H2O & PyramidKV \\
+
 \midrule
-总分 & 50.36 & 47.72 & 50.06 & \textbf{50.54} & 27.70 & 14.87 & 28.82 \\
-musique & 32.14 & 27.09 & 32.28 & \textbf{34.76} & 8.61 & 0.63 & 8.99 \\
+hotpotqa & 53.48 & 45.74 & 53.89 & 54.93 & 54.43 & 23.64 & 2.68 & 25.10 \\
+2wikimqa & 38.29 & 38.46 & 38.27 & 38.57 & 39.23 & 28.62 & 7.90 & 26.01 \\
+musique & 32.14 & 27.25 & 32.28 & 29.74 & 34.76 & 8.61 & 0.63 & 8.99 \\
+passage\_retrieval & 100.00 & 98.50 & 99.50 & 99.50 & 99.50 & 4.00 & 2.50 & 4.50 \\
+qasper & 44.17 & 40.13 & 44.03 & 44.31 & 44.51 & 16.84 & 10.18 & 18.58 \\
+multifieldqa & 53.40 & 51.01 & 53.19 & 52.87 & 52.92 & 20.24 & 13.45 & 23.68 \\
+gov\_report & 33.17 & 32.13 & 33.43 & 33.49 & 33.29 & 19.21 & 17.23 & 20.56 \\
+qmsum & 23.53 & 22.21 & 23.90 & 23.87 & 23.52 & 18.46 & 8.82 & 18.54 \\
+multi\_news & 24.93 & 24.95 & 24.73 & 24.64 & 24.62 & 21.04 & 22.79 & 21.37 \\
+narrativeqa & 25.61 & 20.64 & 22.18 & 24.46 & 23.83 & 11.53 & 1.41 & 12.03 \\
+triviaqa & 90.71 & 87.55 & 89.82 & 89.88 & 90.16 & 69.77 & 18.01 & 75.03 \\
+lcc & 68.81 & 68.34 & 69.14 & 69.28 & 69.62 & 67.19 & 54.06 & 67.05 \\
+repobench & 66.50 & 63.41 & 66.40 & 66.58 & 66.67 & 50.93 & 33.65 & 53.17 \\
+总分 & 50.36 & 47.72 & 50.06 & 50.16 & \textbf{50.54} & 27.70 & 14.87 & 28.82 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -191,7 +216,7 @@ musique & 32.14 & 27.09 & 32.28 & \textbf{34.76} & 8.61 & 0.63 & 8.99 \\
 \subsection{消融}
 
 % MoBA 式：目标句 → 数字 → 机理 → 结论。
-\textbf{子空间（A）。}低频 $d'{=}32$ 对全维 top-1024 的 mass 覆盖 0.729，全维打分自身 0.732（随机 0.32、高频 0.137 崩溃）——位置稳定子空间存在。机理三重判决：tail32 = 16 个完整最低频旋转对（频率单调 0.811/0.360/0.004、错位配对崩 0.567、16 对饱和）；选取方法学四象限（表~\ref{tab:select}）刻画可行域——逐维谱 0.759 与训练投影均败于配对纠缠，query 自适应 pair 选取 0.865 是 oracle 上界但不可索引化，per-layer 静态 pair 0.849 兼容索引，tail32 是零信号成本最优。降维三段判决：无监督 PCA $d{=}16$ 近无损（0.766 vs 0.804）是唯一推荐；训练投影 trace 成立 e2e 崩（口径鸿沟）；非线性（UMAP/t-SNE）质量无增益且 fit 成本 80--167s/层-样本 vs 增量索引 0.128ms/token，四个数量级不可行。跨 kv-head 共享 SVD 基 $d{=}16$ 在 8/8 样本追平 tail32 且优于 per-head 基——GQA head 冗余使 MLA 式单投影缓存的 training-free 代理可行。
+\textbf{子空间（A）。}低频 $d'{=}32$ 对全维 top-1024 的选择覆盖 $C{=}0.729$，全维打分自身 0.732（随机 0.32、高频 0.137 崩溃）——位置稳定子空间存在。机理三重判决：tail32 = 16 个完整最低频旋转对（频率单调 0.811/0.360/0.004、错位配对崩 0.567、16 对饱和）；选取方法学四象限（表~\ref{tab:select}）刻画可行域——逐维谱 0.759 与训练投影均败于配对纠缠，query 自适应 pair 选取 0.865 是 oracle 上界但不可索引化，per-layer 静态 pair 0.849 兼容索引但 e2e 反转（重放 +3.8pt、e2e $-0.50$，musique $-5.27$，与训练投影同构的口径鸿沟），tail32 是经 e2e 验证的零信号成本最优。降维三段判决：无监督 PCA $d{=}16$ 近无损（$R_{\mathrm{far}}$ 0.766 vs 同批次 tail32 0.804）是唯一推荐；训练投影 trace 成立 e2e 崩（口径鸿沟）；非线性（UMAP/t-SNE）质量无增益且 fit 成本 80--167s/层-样本 vs 增量索引 0.128ms/token，四个数量级不可行。跨 kv-head 共享 SVD 基 $d{=}16$ 在 8/8 样本追平 tail32 且优于 per-head 基——GQA head 冗余使 MLA 式单投影缓存的 training-free 代理可行。
 
 \textbf{分区。}far 区 token 级精筛接近 oracle（far-heavy 层 0.999）；聚类代表在严格 token 预算下无一致优势（块 scatter-amax 0.09--0.39 最差）且聚类中心非上界有漏选理论空洞——降级为负结果。分区 vs 单池 e2e 双基准成立（LongBench +0.25 / RULER +0.17），与 trace 重放口径（宽预算下单池微胜）的分歧坐实：\textbf{分区收益的本质是紧预算下的预算分配，而非候选质量}。
 
@@ -199,7 +224,7 @@ musique & 32.14 & 27.09 & 32.28 & \textbf{34.76} & 8.61 & 0.63 & 8.99 \\
 
 \textbf{自适应 $\alpha/\beta$ 的否定。}per-request 在线分派 $\alpha/\beta$ 判 No-Go：oracle 上限 LongBench +0.08 / RULER +0.00，且 +0.08 全部可由噪声正向选择偏差解释（非 musique 12 任务 $|\Delta|$ 中位 0.17）。信号零成本可得，但参数面平坦使自适应无杠杆。同一信号的最佳用途是 gate（安全价值）而非 $\beta$ 分派（无精度价值）。粒度细化到层同样无杠杆（per-layer oracle 增益均值 +0.0008）——任务与层两粒度双重否定，转译为部署简单性论据。
 
-\textbf{离线重放与端到端的口径鸿沟。}我们对五种近/远端打分组合做了离线 trace 重放与端到端评测的双重排名：重放质量排名第 4 的组合（近端取均值聚合的配置）在端到端评测中取得全场最高分 50.54——两种口径的排名系统性反转。这说明离线代理指标不能替代端到端评测，kernel microbench 与 e2e 必须都测都报告。
+\textbf{离线重放与端到端的口径鸿沟。}我们对五种近/远端打分组合做了离线 trace 重放与端到端评测的双重排名：重放质量排名第 4 的组合（近端取均值聚合的配置）在端到端评测中取得全场最高分 50.54——两种口径的排名系统性反转。该鸿沟在子空间选取维度上再次出现：per-layer 静态 pair 臂重放口径 +3.8pt（$R_{\mathrm{far}}$ 0.849 vs 0.811），同配置 e2e 却 $-0.50$（50.04 vs 50.54，musique $-5.27$）——prefill 统计派生的选择基（训练投影与静态 pair 同构）在 decode 查询漂移下失效。这说明离线代理指标不能替代端到端评测，kernel microbench 与 e2e 必须都测都报告。
 
 \subsection{Kernel 级 Microbench}
 
@@ -207,7 +232,7 @@ musique & 32.14 & 27.09 & 32.28 & \textbf{34.76} & 8.61 & 0.63 & 8.99 \\
 
 \subsection{端到端速度}
 
-e2e 终值（Qwen3-30B-A3B，H20$\times$2）：64K 单请求 1.285$\times$（16.39s vs dense 21.06s）——稀疏理论流量收益首次在 e2e 净兑现；32K 档 0.77$\times$（短上下文固定开销未能覆盖）；TP2 bs16 64K 档 0.92$\times$，差 8\% 如实归因为 launch-bound（逐请求 Python 循环使 GPU 名义满载而带宽 util 仅 10--11\%），跨请求批量化已验证 3.8$\times$ 为修复方向。8B 稳态（bs16 $\times$ S=30K $\times$ n=256）：prefill 733.9 $\rightarrow$ 183.4s（4.00$\times$），decode step 65.0 $\rightarrow$ 33.5ms（1.94$\times$，反超 dense 的 40.4ms）。
+e2e 终值（Qwen3-30B-A3B，H20$\times$2）：64K 单请求 1.285$\times$（16.39s vs dense 21.06s）——稀疏理论流量收益首次在 e2e 净兑现；32K 档 0.77$\times$（短上下文固定开销未能覆盖）；TP2 bs16 64K 档 0.92$\times$，差 8\% 如实归因为 launch-bound（逐请求 Python 循环使 GPU 名义满载而带宽 util 仅 10--11\%），跨请求批量化已验证 3.8$\times$ 为修复方向。8B 稳态（bs16 $\times$ S=30K $\times$ n=256；基线 733.9s 与 65.0ms 均为 TLI 自身 kernel 化前，非 dense）：decode step 65.0 $\rightarrow$ 33.5ms（自身 1.94$\times$，优化后为 dense 40.4ms 的 1.21$\times$）；prefill 733.9 $\rightarrow$ 183.4s（自身 4.00$\times$，对 dense 仍慢 1.60$\times$——8B 的 8 个 kv-head 使每层 gather 形态更重，30B 的 4 头形态同一实验为 0.77$\times$，kv-head 数是 prefill 差异的主变量）。
 
 \subsection{Profiling 方法论发现}
 
