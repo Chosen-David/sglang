@@ -3,7 +3,7 @@
 \usepackage{booktabs,amsmath,amssymb,graphicx}
 \usepackage[margin=1in]{geometry}
 \usepackage[hidelinks]{hyperref}
-\title{TLI：面向长上下文稀疏注意力的免训练轻量索引\\
+\title{PSI：面向长上下文稀疏注意力的位置稳定免训练索引\\
 \large 块级上界粗筛与远/近分区预算}
 \date{2026-09-30}
 \begin{document}
@@ -14,7 +14,7 @@
 % we propose+命名+key advantage → 部署声明）。
 % =====================================================================
 \begin{abstract}
-扩展大语言模型的有效上下文长度需要突破 KV 缓存带宽的制约：在 131K 上下文的 8B 模型上，decode 每步的全量 KV 读取远超计算量，成为吞吐上限。现有方案面临一个困难权衡：training-free 的稀疏索引依赖下界近似，在长上下文检索任务上质量崩塌（我们实测 Quest 在 RULER 16K 的 multikey\_3 上仅 21 分，FullKV 为 100）；训练类索引（DSA）引入可学习参数与上千步 warm-up 成本，且选择质量依赖训练分布。本文提出 TLI，一个两级 training-free 稀疏注意力索引：第一级用 4bit 量化子空间上的块级 minmax \textbf{上界}粗筛保证子空间口径下无漏选，第二级用 far/near 分区的 token 级精筛保护远端关键 token 不被近端高分挤出。在 Qwen3-8B 的 LongBench 13 任务上，TLI 取得 50.54，与 FullKV（50.36）在噪声级差距内持平；多跳 far-heavy 任务 musique 达到 34.76，为全部方法（含 FullKV）最高。RULER 上 87.93 逼近 FullKV 的 88.71，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91），增益集中于多干扰检索与词表任务。速度侧，选择链相对 dense 打分取得 1.46$\times$@32K $\rightarrow$ 5.09$\times$@128K 的 kernel 级加速；同机三方对比中 Quest 单 kernel 延迟更低（0.107ms vs TLI 0.787ms），TLI 的速度优势在索引计算量（DSA 的 1/32）与索引存储总量（336B/token vs Quest 约 1KB/token，全 head 汇总口径）而非延迟；e2e 收益有形状边界：64K 单请求 1.285$\times$，32K 档 0.77$\times$、高并发档 0.92$\times$（固定开销与 launch-bound 所致）。全部精度代价与负结果在同机同协议下如实报告。TLI 已在 sglang 生产形态（paged 寻址、增量索引、CUDA graph）下集成。
+扩展大语言模型的有效上下文长度需要突破 KV 缓存带宽的制约：在 131K 上下文的 8B 模型上，decode 每步的全量 KV 读取远超计算量，成为吞吐上限。现有方案面临一个困难权衡：training-free 的稀疏索引依赖下界近似，在长上下文检索任务上质量崩塌（我们实测 Quest 在 RULER 16K 的 multikey\_3 上仅 21 分，FullKV 为 100）；训练类索引（DSA）引入可学习参数与上千步 warm-up 成本，且选择质量依赖训练分布。本文提出 PSI，一个两级 training-free 稀疏注意力索引：第一级用 4bit 量化子空间上的块级 minmax \textbf{上界}粗筛保证子空间口径下无漏选，第二级用 far/near 分区的 token 级精筛保护远端关键 token 不被近端高分挤出。在 Qwen3-8B 的 LongBench 13 任务上，PSI 取得 50.54，与 FullKV（50.36）在噪声级差距内持平；多跳 far-heavy 任务 musique 达到 34.76，为全部方法（含 FullKV）最高。RULER 上 87.93 逼近 FullKV 的 88.71，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91），增益集中于多干扰检索与词表任务。速度侧，选择链相对 dense 打分取得 1.46$\times$@32K $\rightarrow$ 5.09$\times$@128K 的 kernel 级加速；同机三方对比中 Quest 单 kernel 延迟更低（0.107ms vs PSI 0.787ms），PSI 的速度优势在索引计算量（DSA 的 1/32）与索引存储总量（336B/token vs Quest 约 1KB/token，全 head 汇总口径）而非延迟；e2e 收益有形状边界：64K 单请求 1.285$\times$，32K 档 0.77$\times$、高并发档 0.92$\times$（固定开销与 launch-bound 所致）。全部精度代价与负结果在同机同协议下如实报告。PSI 已在 sglang 生产形态（paged 寻址、增量索引、CUDA graph）下集成。
 \end{abstract}
 
 % =====================================================================
@@ -37,7 +37,7 @@
 由此产生一个关键问题：能否设计一个 training-free、零 warm-up 的稀疏注意力索引，在不引入任何可学习参数的前提下，同时保住长上下文检索质量并兑现带宽收益？
 
 % P5（we introduce + 机制完整段）。
-本文提出 TLI（Training-free Lightweight Indexer）回答这个问题。TLI 是一个两级级联的索引：第一级把 KV 缓存组织为 64-token 块，在 position-stable 低频子空间（$d'{=}32$）上维护每块的 min/max 上界并以 4bit 量化存储，query 打分取块上界的乐观侧——上界保证无漏选，任何真实高分 token 所在块必然入选；第二级把 token 预算划分为 far/near 两个池，近端滑窗强制覆盖局部性，远端池对 L1 入选块做 token 级精筛，独立配额使远端关键 token 不被近端高分挤出。两级之间以感知型 per-request gate 收尾：prefill 末段的一次 softmax 统计识别 far mass 近零的层，decode 侧安全跳过其远端检索。整个选择链 kernel 化为 fused L1 块打分、L2 级联 dual topk 与统一稀疏 attention kernel，O(n) 增量索引使块界维护与序列长度无关。
+本文提出 PSI（Position-Stable Indexing）回答这个问题。PSI 是一个两级级联的索引：第一级把 KV 缓存组织为 64-token 块，在 position-stable 低频子空间（$d'{=}32$）上维护每块的 min/max 上界并以 4bit 量化存储，query 打分取块上界的乐观侧——上界保证无漏选，任何真实高分 token 所在块必然入选；第二级把 token 预算划分为 far/near 两个池，近端滑窗强制覆盖局部性，远端池对 L1 入选块做 token 级精筛，独立配额使远端关键 token 不被近端高分挤出。两级之间以感知型 per-request gate 收尾：prefill 末段的一次 softmax 统计识别 far mass 近零的层，decode 侧安全跳过其远端检索。整个选择链 kernel 化为 fused L1 块打分、L2 级联 dual topk 与统一稀疏 attention kernel，O(n) 增量索引使块界维护与序列长度无关。
 
 % P6（贡献列表，claim-first）。
 本文的贡献如下：
@@ -64,20 +64,20 @@
 \end{equation}
 稀疏索引的问题是：为 $q$ 选出大小为 $K_2$ 的位置集合 $I\subseteq[N]$，使 $\mathrm{Attn}(q, K[I], V[I])$ 逼近全量结果。本文关注单 head 情形以保持清晰；GQA 下逐 kv-head 打分与远端 mass 的跨 head 不均性，在 §~\ref{sec:l2} 的分区机理中讨论。与训练类索引不同，training-free 索引不允许任何参数——选择质量完全取决于用什么信号打分、以什么组织方式分配预算。
 
-\subsection{TLI 架构}\label{sec:l2}
+\subsection{PSI 架构}\label{sec:l2}
 
 \begin{figure}[h]\centering
 \includegraphics[width=0.85\linewidth]{figures/fig7_tli_architecture.pdf}
-\caption{TLI 两级索引架构：L1 块级 minmax 上界粗筛（子空间 $d'{=}32$ + 4bit 量化）$\rightarrow$ L2 far/near 分区 token 级精筛 $\rightarrow$ 统一稀疏 attention fused kernel。}
+\caption{PSI 两级索引架构：L1 块级 minmax 上界粗筛（子空间 $d'{=}32$ + 4bit 量化）$\rightarrow$ L2 far/near 分区 token 级精筛 $\rightarrow$ 统一稀疏 attention fused kernel。}
 \label{fig:arch}
 \end{figure}
 
 % MoBA 2.2 式：Different from standard attention where..., X enables...
-与标准注意力每个查询访问全部上下文不同，TLI 为每个查询 head 选出 $K_2{=}1024$ 个 KV token（图~\ref{fig:arch}）：
+与标准注意力每个查询访问全部上下文不同，PSI 为每个查询 head 选出 $K_2{=}1024$ 个 KV token（图~\ref{fig:arch}）：
 \begin{equation}
-\mathrm{TLI}(q, K, V) = \mathrm{Attn}\!\left(q,\ K[I_{\mathrm{L1}\rightarrow\mathrm{L2}}],\ V[I_{\mathrm{L1}\rightarrow\mathrm{L2}}]\right),
+\mathrm{PSI}(q, K, V) = \mathrm{Attn}\!\left(q,\ K[I_{\mathrm{L1}\rightarrow\mathrm{L2}}],\ V[I_{\mathrm{L1}\rightarrow\mathrm{L2}}]\right),
 \end{equation}
-其中 $I_{\mathrm{L1}\rightarrow\mathrm{L2}}$ 由两级级联产生。TLI 的关键设计不在级联形态本身（HISA 已验证），而在两个正交维度上的选择：\textbf{分数表示取上界}与\textbf{预算组织取分区}。
+其中 $I_{\mathrm{L1}\rightarrow\mathrm{L2}}$ 由两级级联产生。PSI 的关键设计不在级联形态本身（HISA 已验证），而在两个正交维度上的选择：\textbf{分数表示取上界}与\textbf{预算组织取分区}。
 
 \textbf{L1：块级上界粗筛。}把上下文按 $B{=}64$ 切块，块 $I_i$ 内 token 记为 $k_j$。对每块每 kv-head，在 position-stable 低频子空间（$d'{=}32$）上维护逐维 min/max（$k^{\min}, k^{\max}\in\mathbb{R}^{d'}$）并以 4bit 量化存储（128 维压至 40B/token-head）。查询对块的打分取上界的乐观侧：逐维按 $q_d$ 的符号取 min/max 端值求和，构成该块对块内任意 token 点积的上界
 \begin{equation}
@@ -95,14 +95,14 @@ I_{\mathrm{L1}\rightarrow\mathrm{L2}} &= I_{\mathrm{sink}}\ \cup\ \big[\,S-sw_{l
 \end{align}
 其中 mid 预算 $K_2^{\mathrm{mid}}=K_2-|I_{\mathrm{sink}}|-sw_{lo}$，far 配额 $F=\max\big(64,\ K_2^{\mathrm{mid}}-\lfloor\gamma\,\lceil\ell_{\mathrm{near}}/B\rceil B\rfloor\big)$：$\gamma$ 经近端块数折算近端细筛配额，far 取剩余预算并保底 64；$\beta$ 作用于 L1 的近端页预算。
 
-\textbf{维持因果性的两个设计。}自回归语言模型要求查询不能访问未来 token。TLI 通过两个具体设计维持因果性：其一，\textbf{池边界即因果边界}——far 池的上界位置 $\leq t+1-\ell_{\mathrm{near}}-sw_{lo}$、near 池 $< sw_{lo}$，两池的并集天然落在因果范围内，无需显式因果 mask（L1 的垃圾块也天然落池外）；其二，\textbf{早期行均匀覆盖}——首个 prefill chunk 内，行位置 $t_r$ 小于 $K_2$ 的早期行候选不足，若放任 topk 返回的哨兵/未来位置混入，非因果泄漏会逐层传播（我们在 30B 模型上实测到生成重复循环崩坏，根因正是此处；8B 对同 bug 耐受未崩，如实报告）。早期行改用均匀重复 grid，等价 dense。
+\textbf{维持因果性的两个设计。}自回归语言模型要求查询不能访问未来 token。PSI 通过两个具体设计维持因果性：其一，\textbf{池边界即因果边界}——far 池的上界位置 $\leq t+1-\ell_{\mathrm{near}}-sw_{lo}$、near 池 $< sw_{lo}$，两池的并集天然落在因果范围内，无需显式因果 mask（L1 的垃圾块也天然落池外）；其二，\textbf{早期行均匀覆盖}——首个 prefill chunk 内，行位置 $t_r$ 小于 $K_2$ 的早期行候选不足，若放任 topk 返回的哨兵/未来位置混入，非因果泄漏会逐层传播（我们在 30B 模型上实测到生成重复循环崩坏，根因正是此处；8B 对同 bug 耐受未崩，如实报告）。早期行改用均匀重复 grid，等价 dense。
 
-\textbf{与 sink 和滑窗注意力的关系。}sink（StreamingLLM~\cite{streamingllm}）与滑窗注意力（Longformer/BigBird~\cite{longformer,bigbird}）是两种成熟的静态稀疏结构，本文将它们作为已知组件沿用：sink token 承载 0.37--0.71 的 attention mass，滑窗承载近端局部性——两者共同构成 TLI 的强制保留区，不占分区预算。本文的创新不在保留区本身，而在\textbf{剩余预算在 far 检索与 near 精筛之间的分配}。作为旁证，我们在 baseline 适配中实测：SnapKV/H2O/PyramidKV 无显式 sink 保送时在 Qwen3-8B 上首 token 即 EOS（末层 sink 权重 mean 0.592 而浅层选择信号不指向 sink，逐层恶性畸变）——任何不显式处理 sink 的稀疏方案在该模型族上都会失真。
+\textbf{与 sink 和滑窗注意力的关系。}sink（StreamingLLM~\cite{streamingllm}）与滑窗注意力（Longformer/BigBird~\cite{longformer,bigbird}）是两种成熟的静态稀疏结构，本文将它们作为已知组件沿用：sink token 承载 0.37--0.71 的 attention mass，滑窗承载近端局部性——两者共同构成 PSI 的强制保留区，不占分区预算。本文的创新不在保留区本身，而在\textbf{剩余预算在 far 检索与 near 精筛之间的分配}。作为旁证，我们在 baseline 适配中实测：SnapKV/H2O/PyramidKV 无显式 sink 保送时在 Qwen3-8B 上首 token 即 EOS（末层 sink 权重 mean 0.592 而浅层选择信号不指向 sink，逐层恶性畸变）——任何不显式处理 sink 的稀疏方案在该模型族上都会失真。
 
 \subsection{设计选择讨论}
 
 % MoBA 式：Next, we discuss some additional key design choices...
-接下来讨论 TLI 的三个关键设计选择。
+接下来讨论 PSI 的三个关键设计选择。
 
 \textbf{子空间选择。}L1 为什么取低频尾维 32 维。索引信号必须在降维后保住对全维分数排序的区分力。Qwen3 的 rotate\_half RoPE 使低频维上的点积与全维点积排序高度一致（子空间选择对全维 top-1024 的选择覆盖 $C{=}0.729$，同管线 $d'{=}128$ 臂（含 4bit 量化与级联损失）为 0.732），随机子空间崩至 0.32、高频维 0.137。机理经三重判决确证（图~\ref{fig:dim}）：Qwen3 的 128 维全部参与 RoPE，rotate\_half 布局下频率 $j$ 施加在维度对 $(j, j{+}64)$ 上，tail32 = 维度 48..63 与 112..127 = \textbf{16 个完整最低频旋转对}。点积按频率分解为 $\sum_j [(q_j k_j + q_{j+64} k_{j+64})\cos(\Delta\,\omega_j) + (q_j k_{j+64} - q_{j+64} k_j)\sin(\Delta\,\omega_j)]$，远端大 $\Delta$ 上低频项平滑高相关、高频项震荡相消——低频对承载长程检索信号。三个判决支持这个结构解释：其一，频率单调（far 区召回 $R_{\mathrm{far}}$：低频 16 对 0.811 / 中频 0.360 / 高频 0.004）；其二，配对完整性（前半取低频 16 维、后半换成中频对来源的错位配对崩至 0.567，段位几乎重合仅元素来源错位）；其三，对数饱和（16 对即 0.811 近饱和，8 对仅 0.473）。32B 上方向复现（完整对 0.829 > 错位 0.645 > 单半 0.54），饱和宽度后移至 24 对（0.904）。
 
@@ -130,14 +130,14 @@ per-layer 静态 pair & prefill $q$ 统计 & 0.849 & 兼容 \\
 \end{tabular}
 \end{table}
 
-\textbf{分区预算参数。}预算空间由三个参数刻画：$\alpha{=}0.125$（near 区比例）、$\beta{=}0.375$（near 页预算）、$\gamma{=}0.125$（near token 预算），far/near 方法取 (minmax, avg)。132 个配置点的网格加上五个方法组合臂的 e2e 给出三条规律：$\alpha$ 单调至边界（越省 far 越好，受 near\_floor 制约）；$\beta$ 在 0.25--0.75 上平坦（多跳任务 0.375 占优）；$\gamma$ 必须随 $K_2$ 等比缩放（$\gamma{=}0.5$ 在 $K_2{=}1024$ 下 far 仅保底 64，F1 崩至 13.51 的教训）。最重要的发现是平坦性本身：per-task 完美选 $\beta$ 的 oracle 上限仅 +0.08，per-layer oracle 仅 +0.0008——\textbf{分区预算对配置误差不敏感，不需要精调}。这构成部署简单性论据：对照 DSA 的 1000 步 warm-up，TLI 一组固定配置覆盖 12/13 任务。
+\textbf{分区预算参数。}预算空间由三个参数刻画：$\alpha{=}0.125$（near 区比例）、$\beta{=}0.375$（near 页预算）、$\gamma{=}0.125$（near token 预算），far/near 方法取 (minmax, avg)。132 个配置点的网格加上五个方法组合臂的 e2e 给出三条规律：$\alpha$ 单调至边界（越省 far 越好，受 near\_floor 制约）；$\beta$ 在 0.25--0.75 上平坦（多跳任务 0.375 占优）；$\gamma$ 必须随 $K_2$ 等比缩放（$\gamma{=}0.5$ 在 $K_2{=}1024$ 下 far 仅保底 64，F1 崩至 13.51 的教训）。最重要的发现是平坦性本身：per-task 完美选 $\beta$ 的 oracle 上限仅 +0.08，per-layer oracle 仅 +0.0008——\textbf{分区预算对配置误差不敏感，不需要精调}。这构成部署简单性论据：对照 DSA 的 1000 步 warm-up，PSI 一组固定配置覆盖 12/13 任务。
 
 \textbf{gate 的阈值。}动态 gate 用 prefill 末段 far 统计识别 far mass 近零的层。阈值 $\tau$ 的真判决（双任务梯度）：$\tau{=}0.005$ 下 musique +0.23 / qasper $-$0.41；$\tau{=}0.015$ 下 +0.27 / $-$0.67——梯度单调，真触发区间微损不崩（对照静态版掉 4.8--5.9）。gate 因此定位为安全省算力的保守开关。
 
 \subsection{实现}
 
 % MoBA 2.3 式：We provide a high-performance implementation..., consisting of N major steps.
-TLI 在 sglang 生产形态下实现，选择链由四个 kernel 组件构成：
+PSI 在 sglang 生产形态下实现，选择链由四个 kernel 组件构成：
 \begin{itemize}
 \item \textbf{fused L1 块打分}：单个 Triton kernel 内完成 gather + 4bit 反量化（共享 scale 表）+ GEMV 打分 + 块级规约，32K 形态 3.6$\times$；
 \item \textbf{L2 级联 dual kernel}：单 launch 完成 far/near 双池打分与分区 topk，池边界即因果边界（替代 eager 的 fine 矩阵因果 mask）；
@@ -166,13 +166,13 @@ TLI 在 sglang 生产形态下实现，选择链由四个 kernel 组件构成：
 \subsection{端到端质量}
 
 % MoBA 3.1 式：In this section, we conduct... to validate...
-本节在双基准上验证 TLI 的质量：RULER~\cite{ruler}（3 长度 $\times$ 11 任务 $\times$ n=100，NVIDIA 官方预生成）考察长上下文检索，LongBench~\cite{longbench} 13 子集考察真实任务混合口径。对比方法中，TIA 是与本文同一管线下的第一代 training-free 块上界索引器（块 min/max 上界 + 4bit 子空间量化，无分区预算与感知 gate），作为 TLI 最直接的结构消融对照；Quest 为下界近似的代表；KV 压缩三 baseline 走统一 monkeypatch 管线。全部实验用 Qwen3-8B~\cite{qwen3} 真实权重；TLI 用终局配置（sink/swa 强制保留不计入预算的严格口径）。
+本节在双基准上验证 PSI 的质量：RULER~\cite{ruler}（3 长度 $\times$ 11 任务 $\times$ n=100，NVIDIA 官方预生成）考察长上下文检索，LongBench~\cite{longbench} 13 子集考察真实任务混合口径。对比方法中，TIA 是与本文同一管线下的第一代 training-free 块上界索引器（块 min/max 上界 + 4bit 子空间量化，无分区预算与感知 gate），作为 PSI 最直接的结构消融对照；Quest 为下界近似的代表；KV 压缩三 baseline 走统一 monkeypatch 管线。全部实验用 Qwen3-8B~\cite{qwen3} 真实权重；PSI 用终局配置（sink/swa 强制保留不计入预算的严格口径）。
 
 \begin{table}[h]\centering
-\caption{RULER 终表（string\_match\_all $\times$100；TLI 为分区配置：(minmax, avg) 打分、$\alpha{=}0.125$、$\beta{=}0.25$、$\gamma{=}0.125$、$K_2{=}1024$；TLI-单池 = 同预算 $\alpha{=}0$ 单池消融臂）。}
+\caption{RULER 终表（string\_match\_all $\times$100；PSI 为分区配置：(minmax, avg) 打分、$\alpha{=}0.125$、$\beta{=}0.25$、$\gamma{=}0.125$、$K_2{=}1024$；PSI-单池 = 同预算 $\alpha{=}0$ 单池消融臂）。}
 \begin{tabular}{llllll}
 \toprule
- & FullKV & TIA@1024 & TLI-单池 & TLI@1024 & Quest@1024 \\
+ & FullKV & TIA@1024 & PSI-单池 & PSI@1024 & Quest@1024 \\
 \midrule
 4K & 91.59 & \textbf{91.63} & 91.63 & 91.49 & 87.91 \\
 8K & \textbf{89.14} & 88.90 & 88.87 & 88.62 & 81.76 \\
@@ -182,17 +182,17 @@ TLI 在 sglang 生产形态下实现，选择链由四个 kernel 组件构成：
 \end{tabular}
 \end{table}
 
-如表所示，三个观察成立。其一，TLI 对 Quest 的领先随长度超线性扩大（+3.58 $\rightarrow$ +6.86 $\rightarrow$ +13.50）：16K 档 Quest 在多干扰检索任务上崩塌，TLI 同任务保持量级正确——根因是下界近似漏选随干扰项增多加剧，上界粗筛无此劣化。其二，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91）：超长上下文是分区 far 检索的收益区，16K 的分区增益集中于 multikey\_3（+5.0）与 cwe（+5.4），均为 vs 同配置单池臂的差分。其三，绝对值解读须以同长度 FullKV 为基线——聚合列举类任务 FullKV 自身随长度退化（multivalue 89.5 $\rightarrow$ 69.25 $\rightarrow$ 44.25 是模型列举能力上限），稀疏方法在同长度上的差距才是稀疏效应。
+如表所示，三个观察成立。其一，PSI 对 Quest 的领先随长度超线性扩大（+3.58 $\rightarrow$ +6.86 $\rightarrow$ +13.50）：16K 档 Quest 在多干扰检索任务上崩塌，PSI 同任务保持量级正确——根因是下界近似漏选随干扰项增多加剧，上界粗筛无此劣化。其二，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91）：超长上下文是分区 far 检索的收益区，16K 的分区增益集中于 multikey\_3（+5.0）与 cwe（+5.4），均为 vs 同配置单池臂的差分。其三，绝对值解读须以同长度 FullKV 为基线——聚合列举类任务 FullKV 自身随长度退化（multivalue 89.5 $\rightarrow$ 69.25 $\rightarrow$ 44.25 是模型列举能力上限），稀疏方法在同长度上的差距才是稀疏效应。
 
-LongBench 13 子集上（表~\ref{tab:longbench}），TLI \textbf{50.54}——与 FullKV 50.36 持平（+0.18，噪声级边缘，Limitations 一节如实标注），vs Quest +2.82；持平的诚实分解为 musique 单任务 +2.62 扛住其余 12 任务净 $-0.30$（摊分后 +0.20 $+$ $-0.02$ $\approx$ +0.18）。增益的结构清晰：多跳 far-heavy 任务 musique 34.76 为全部方法最高（vs FullKV +2.62、vs 同预算单池臂 +5.02），是分区 far 检索的直接证据；其余 12 任务互有胜负（$-1.78$ 至 $+0.95$；narrativeqa 为最大损失点 $-1.78$，hotpotqa +0.95 / 2wikimqa +0.94 / lcc +0.81 为正向）。KV 压缩三 baseline 的全量崩坏坐实 sink 论断：SnapKV 27.70 / H2O 更崩（musique 0.63、hotpotqa 2.68）——无显式 sink 保送时 Qwen3-8B 首 token 即 EOS（§2.2 末段机理），三者中仅代码类任务（lcc 67.19 / 54.06）部分幸存。预算配比的任务形态依赖性以 $\beta \in \{0.25, 0.375\} \times$ \{LongBench, RULER\} 交叉表完整给出（表~\ref{tab:betacross}）：LongBench 多跳任务 $\beta{=}0.375$ 占优（50.54 vs 50.41），RULER 合成 needle $\beta{=}0.25$ 占优（87.93 vs 87.58）——对角占优但四格差距均 $\le$0.35，与消融节的参数面平坦性一致；两臂并报，使用者按任务形态选择。逐任务族分解给出 $\beta$ 让渡的边界判据：真实任务全族成立（最 far-heavy 的 musique 反而增益最大 +1.94），合成 far-dense 族失效（multikey\_3 $-$2.00：far 候选数量爆炸使预算粒度主导）——far-dense 检索是稀疏索引器全族难区（Quest 同任务同构崩塌），非 $\beta$ 配比独有问题。
+LongBench 13 子集上（表~\ref{tab:longbench}），PSI \textbf{50.54}——与 FullKV 50.36 持平（+0.18，噪声级边缘，Limitations 一节如实标注），vs Quest +2.82；持平的诚实分解为 musique 单任务 +2.62 扛住其余 12 任务净 $-0.30$（摊分后 +0.20 $+$ $-0.02$ $\approx$ +0.18）。增益的结构清晰：多跳 far-heavy 任务 musique 34.76 为全部方法最高（vs FullKV +2.62、vs 同预算单池臂 +5.02），是分区 far 检索的直接证据；其余 12 任务互有胜负（$-1.78$ 至 $+0.95$；narrativeqa 为最大损失点 $-1.78$，hotpotqa +0.95 / 2wikimqa +0.94 / lcc +0.81 为正向）。KV 压缩三 baseline 的全量崩坏坐实 sink 论断：SnapKV 27.70 / H2O 更崩（musique 0.63、hotpotqa 2.68）——无显式 sink 保送时 Qwen3-8B 首 token 即 EOS（§2.2 末段机理），三者中仅代码类任务（lcc 67.19 / 54.06）部分幸存。预算配比的任务形态依赖性以 $\beta \in \{0.25, 0.375\} \times$ \{LongBench, RULER\} 交叉表完整给出（表~\ref{tab:betacross}）：LongBench 多跳任务 $\beta{=}0.375$ 占优（50.54 vs 50.41），RULER 合成 needle $\beta{=}0.25$ 占优（87.93 vs 87.58）——对角占优但四格差距均 $\le$0.35，与消融节的参数面平坦性一致；两臂并报，使用者按任务形态选择。逐任务族分解给出 $\beta$ 让渡的边界判据：真实任务全族成立（最 far-heavy 的 musique 反而增益最大 +1.94），合成 far-dense 族失效（multikey\_3 $-$2.00：far 候选数量爆炸使预算粒度主导）——far-dense 检索是稀疏索引器全族难区（Quest 同任务同构崩塌），非 $\beta$ 配比独有问题。
 
 \begin{table}[h]\centering
 \small
-\caption{LongBench 13 子集终表（各任务官方口径平均；TLI = 分区配置 (minmax, avg) $\alpha{=}0.125/\beta{=}0.375/\gamma{=}0.125$；TLI-单池 = 同预算 $\alpha{=}0$ 单池消融臂；KV 压缩三 baseline = 统一 monkeypatch 管线 + 1024 预算，无 sink 保送适配）。}
+\caption{LongBench 13 子集终表（各任务官方口径平均；PSI = 分区配置 (minmax, avg) $\alpha{=}0.125/\beta{=}0.375/\gamma{=}0.125$；PSI-单池 = 同预算 $\alpha{=}0$ 单池消融臂；KV 压缩三 baseline = 统一 monkeypatch 管线 + 1024 预算，无 sink 保送适配）。}
 \label{tab:longbench}
 \begin{tabular}{lcccccccc}
 \toprule
- & FullKV & Quest & TIA & TLI-单池 & TLI & SnapKV & H2O & PyramidKV \\
+ & FullKV & Quest & TIA & PSI-单池 & PSI & SnapKV & H2O & PyramidKV \\
 
 \midrule
 hotpotqa & 53.48 & 45.74 & 53.89 & 54.93 & 54.43 & 23.64 & 2.68 & 25.10 \\
@@ -241,11 +241,11 @@ RULER-33 & \textbf{87.93} & 87.58 \\
 
 \subsection{Kernel 级 Microbench}
 
-选择链相对 dense 全维打分的加速比：32K 1.46$\times$、64K 2.77$\times$、128K 5.09$\times$（合成数据已标注，trace 重放口径）。同机三方对比（官方 kernel 原样接入统一 harness，131K cudaEvent）：Quest 0.107ms / DSA 0.503ms / TLI 0.787ms。延迟排名 Quest $<$ DSA $<$ TLI，如实报告——TLI 当前的优势在算法结构侧：每 token 索引 MAC $\approx$258（DSA 的 1/32）、索引存储总量 3$\times$ 低于 Quest（336B/token vs 约 1KB/token，全 head 汇总；Quest 逐 32 个 head 建索引而 TLI 仅建 8 个 kv-head）、质量 vs Quest LongBench +2.82 / RULER +7.98。131K 下三家都远离 HBM bound，排名反映实现成熟度而非算法上界。
+选择链相对 dense 全维打分的加速比：32K 1.46$\times$、64K 2.77$\times$、128K 5.09$\times$（合成数据已标注，trace 重放口径）。同机三方对比（官方 kernel 原样接入统一 harness，131K cudaEvent）：Quest 0.107ms / DSA 0.503ms / PSI 0.787ms。延迟排名 Quest $<$ DSA $<$ PSI，如实报告——PSI 当前的优势在算法结构侧：每 token 索引 MAC $\approx$258（DSA 的 1/32）、索引存储总量 3$\times$ 低于 Quest（336B/token vs 约 1KB/token，全 head 汇总；Quest 逐 32 个 head 建索引而 PSI 仅建 8 个 kv-head）、质量 vs Quest LongBench +2.82 / RULER +7.98。131K 下三家都远离 HBM bound，排名反映实现成熟度而非算法上界。
 
 \subsection{端到端速度}
 
-e2e 终值（Qwen3-30B-A3B，H20$\times$2）：64K 单请求 1.285$\times$（16.39s vs dense 21.06s）——稀疏理论流量收益首次在 e2e 净兑现；32K 档 0.77$\times$（短上下文固定开销未能覆盖）；TP2 bs16 64K 档 0.92$\times$，差 8\% 如实归因为 launch-bound（逐请求 Python 循环使 GPU 名义满载而带宽 util 仅 10--11\%），跨请求批量化已验证 3.8$\times$ 为修复方向。8B 稳态（bs16 $\times$ S=30K $\times$ n=256；基线 733.9s 与 65.0ms 均为 TLI 自身 kernel 化前，非 dense）：decode step 65.0 $\rightarrow$ 33.5ms（自身 1.94$\times$，优化后为 dense 40.4ms 的 1.21$\times$）；prefill 733.9 $\rightarrow$ 183.4s（自身 4.00$\times$，对 dense 仍慢 1.60$\times$——8B 的 8 个 kv-head 使每层 gather 形态更重，30B 的 4 头形态同一实验 prefill 耗时为 dense 的 0.77 倍（1.30$\times$ 加速），kv-head 数是 prefill 差异的主变量）。
+e2e 终值（Qwen3-30B-A3B，H20$\times$2）：64K 单请求 1.285$\times$（16.39s vs dense 21.06s）——稀疏理论流量收益首次在 e2e 净兑现；32K 档 0.77$\times$（短上下文固定开销未能覆盖）；TP2 bs16 64K 档 0.92$\times$，差 8\% 如实归因为 launch-bound（逐请求 Python 循环使 GPU 名义满载而带宽 util 仅 10--11\%），跨请求批量化已验证 3.8$\times$ 为修复方向。8B 稳态（bs16 $\times$ S=30K $\times$ n=256；基线 733.9s 与 65.0ms 均为 PSI 自身 kernel 化前，非 dense）：decode step 65.0 $\rightarrow$ 33.5ms（自身 1.94$\times$，优化后为 dense 40.4ms 的 1.21$\times$）；prefill 733.9 $\rightarrow$ 183.4s（自身 4.00$\times$，对 dense 仍慢 1.60$\times$——8B 的 8 个 kv-head 使每层 gather 形态更重，30B 的 4 头形态同一实验 prefill 耗时为 dense 的 0.77 倍（1.30$\times$ 加速），kv-head 数是 prefill 差异的主变量）。
 
 \subsection{Profiling 方法论发现}
 
@@ -256,13 +256,13 @@ e2e 终值（Qwen3-30B-A3B，H20$\times$2）：64K 单请求 1.285$\times$（16.
 % =====================================================================
 \section{相关工作}
 
-\textbf{稀疏注意力索引。}Quest 用 page 采样构造下界近似，KV 压缩类（SnapKV/H2O/PyramidKV）在 prefill 时一次性丢弃 KV。TLI 与它们的差异在三点：分数表示取上界（vs 下界——上界家族在 RULER 总 AVG 上领先 Quest $+8.40$，是长上下文质量分化的主要根源）、预算组织取分区（vs 全池）、两级级联（vs 单级）。我们在统一口径适配 SnapKV/H2O/PyramidKV 时发现：无显式 sink 保送的实现在 Qwen3-8B 上首 token 即 EOS——sink 在浅层不获选择信号但承载深层 0.59 的 attention mass，逐层恶性畸变。这既是对这类 baseline 适配的公平性修正，也旁证 sink 保送的必要性。
+\textbf{稀疏注意力索引。}Quest 用 page 采样构造下界近似，KV 压缩类（SnapKV/H2O/PyramidKV）在 prefill 时一次性丢弃 KV。PSI 与它们的差异在三点：分数表示取上界（vs 下界——上界家族在 RULER 总 AVG 上领先 Quest $+8.40$，是长上下文质量分化的主要根源）、预算组织取分区（vs 全池）、两级级联（vs 单级）。我们在统一口径适配 SnapKV/H2O/PyramidKV 时发现：无显式 sink 保送的实现在 Qwen3-8B 上首 token 即 EOS——sink 在浅层不获选择信号但承载深层 0.59 的 attention mass，逐层恶性畸变。这既是对这类 baseline 适配的公平性修正，也旁证 sink 保送的必要性。
 
-\textbf{训练类索引。}DSA~\cite{dsa}（DeepSeek V3.2）用 $I=\sum w\cdot\mathrm{ReLU}(q\cdot k)$ 训练选择器，64 头 $\times$128 维 FP8 top-2048，warm-up 1000 步；MoBA~\cite{moba} 用门控块稀疏。TLI training-free/weight-free，与其在 kernel 级统一 harness 对比。两者构成方法论分界：DSA 用训练换选择能力，可学任意投影；training-free 只能依赖与查询分布无关的位置先验——trace 离线成立而 e2e 崩坏的口径鸿沟正是这条分界线的实证刻画。
+\textbf{训练类索引。}DSA~\cite{dsa}（DeepSeek V3.2）用 $I=\sum w\cdot\mathrm{ReLU}(q\cdot k)$ 训练选择器，64 头 $\times$128 维 FP8 top-2048，warm-up 1000 步；MoBA~\cite{moba} 用门控块稀疏。PSI training-free/weight-free，与其在 kernel 级统一 harness 对比。两者构成方法论分界：DSA 用训练换选择能力，可学任意投影；training-free 只能依赖与查询分布无关的位置先验——trace 离线成立而 e2e 崩坏的口径鸿沟正是这条分界线的实证刻画。
 
-\textbf{两级结构。}HISA（COLM 2026）验证 block-coarse + token-refine 形态有效——「two-level」本身不是本文创新。TLI 的增量是两个正交维度的系统刻画：表示（上界 vs 下界）与预算组织（分区 vs 全池）的质量-速度影响。
+\textbf{两级结构。}HISA（COLM 2026）验证 block-coarse + token-refine 形态有效——「two-level」本身不是本文创新。PSI 的增量是两个正交维度的系统刻画：表示（上界 vs 下界）与预算组织（分区 vs 全池）的质量-速度影响。
 
-\textbf{推理系统。}FlashAttention 系优化计算核，PagedAttention/vLLM 优化显存组织。TLI 与它们正交，在 sglang 生产形态集成。
+\textbf{推理系统。}FlashAttention 系优化计算核，PagedAttention/vLLM 优化显存组织。PSI 与它们正交，在 sglang 生产形态集成。
 
 % =====================================================================
 % 5 Limitations：诚实边界。
@@ -331,8 +331,15 @@ DeepSeek-AI. DeepSeek-V3.2-Exp Technical Report: Boosting Long-Context Efficienc
 Moonshot AI. MoBA: Mixture of Block Attention for Efficient Long-Context LLMs. arXiv:2502.13189, 2025.
 
 \bibitem{hisa}
+Y.~Xu, F.~Meng, F.~Jiang, Y.~Wang, R.~Zhou, Z.~Wang, J.~Wu, Z.~Pan, X.~Tang, W.~Pei, T.~Liu, D.~Yin, X.~Sun, and M.~Zhang. HISA: Efficient Hierarchical Indexing for Fine-Grained Sparse Attention. In \emph{COLM}, 2026. arXiv:2603.28458.
+
+\bibitem{nsa}
 % TODO: 投稿前核对作者列表
-HISA: Efficient Hierarchical Indexing for Fine-Grained Sparse Attention. In \emph{COLM}, 2026. arXiv:2603.28458.
+J.~Yuan et al. NSA: Native Sparse Attention: Hardware-Aligned and Trainable Sparse Attention. arXiv:2502.11089, 2025.
+
+\bibitem{clusterkv}
+% TODO: 投稿前核对正式条目（本环境论文页不可达，arXiv 编号待补）
+ClusterKV: Manipulating LLM KV Cache In and Out of Page Flags to Mitigate KV Cache Indirection. 2025.
 
 \bibitem{ruler}
 C.-P. Hsieh, S.~Sun, S.~Kriman, S.~Ganti, J.~Zhang, B.~Kulis, K.~Papayiannis, M.~Fofanos, N.~Rudrajit, and C.~Tigges. RULER: What's the Real Context Size of Your Long-Context Language Models? arXiv:2404.06654, 2024.
