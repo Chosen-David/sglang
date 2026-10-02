@@ -226,7 +226,26 @@ PSI 在 sglang 生产形态下实现，选择链由四个 kernel 组件构成：
 \end{tabular}
 \end{table}
 
-如表所示，三个观察成立。其一，PSI 对 Quest 的领先随长度超线性扩大（+3.58 $\rightarrow$ +6.86 $\rightarrow$ +13.50）：16K 档 Quest 在多干扰检索任务上崩塌，PSI 同任务保持量级正确——根因是下界近似漏选随干扰项增多加剧，上界粗筛无此劣化。其二，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91）：超长上下文是分区 far 检索的收益区，16K 的分区增益集中于 multikey\_3（+5.0）与 cwe（+5.4），均为 vs 同配置单池臂的差分。其三，绝对值解读须以同长度 FullKV 为基线——聚合列举类任务 FullKV 自身随长度退化（multivalue 89.5 $\rightarrow$ 69.25 $\rightarrow$ 44.25 是模型列举能力上限），稀疏方法在同长度上的差距才是稀疏效应。
+\begin{table}[h]\centering
+\small\setlength{\tabcolsep}{4pt}
+\caption{RULER 16K 档逐任务分解（string\_match\_all $\times$100；配置同上表）。single\_1--3 与 multikey\_1 五方法全部 100、multiquery 25 为含 FullKV 的模型上限，不列。}
+\label{tab:ruler16k}
+\begin{tabular}{lccccc}
+\toprule
+ & FullKV & Quest & TIA & PSI-单池 & PSI@1024 \\
+\midrule
+multikey\_2 & 100.0 & 60.0 & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} \\
+multikey\_3 & \textbf{100.0} & 21.0 & 89.0 & 75.0 & 80.0 \\
+multivalue & \textbf{44.25} & 41.25 & \textbf{44.25} & \textbf{44.25} & \textbf{44.25} \\
+cwe & \textbf{83.60} & 29.50 & 78.90 & 73.20 & 78.60 \\
+fwe & 86.67 & \textbf{96.67} & 92.67 & 93.00 & 92.67 \\
+vt & \textbf{100.0} & 98.60 & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} \\
+16K AVG & \textbf{85.41} & 70.18 & 84.53 & 82.77 & 83.68 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+如表~\ref{tab:ruler16k} 所示，三个观察成立。其一，PSI 对 Quest 的领先随长度超线性扩大（+3.58 $\rightarrow$ +6.86 $\rightarrow$ +13.50）：16K 档 Quest 在多干扰检索任务上崩塌（multikey\_3 21、multikey\_2 60、cwe 29.5），PSI 同任务保持量级正确（multikey\_2/vt 100、cwe 78.6）——根因是下界近似漏选随干扰项增多加剧，上界粗筛无此劣化。其二，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91）：超长上下文是分区 far 检索的收益区，16K 的分区增益集中于 multikey\_3（75.0 $\rightarrow$ 80.0，+5.0）与 cwe（73.2 $\rightarrow$ 78.6，+5.4），均为 vs 同配置单池臂的差分。其三，绝对值解读须以同长度 FullKV 为基线——聚合列举类任务 FullKV 自身随长度退化（multivalue 89.5 $\rightarrow$ 69.25 $\rightarrow$ 44.25 是模型列举能力上限），稀疏方法在同长度上的差距才是稀疏效应。
 
 LongBench 13 子集上（表~\ref{tab:longbench}），PSI \textbf{50.54}——与 FullKV 50.36 持平（+0.18，噪声级边缘，Limitations 一节如实标注），vs Quest +2.82；持平的诚实分解为 musique 单任务 +2.62 扛住其余 12 任务净 $-0.30$（摊分后 +0.20 $+$ $-0.02$ $\approx$ +0.18）。增益的结构清晰：多跳 far-heavy 任务 musique 34.76 为全部方法最高（vs FullKV +2.62、vs 同预算单池臂 +5.02），是分区 far 检索的直接证据；其余 12 任务互有胜负（$-1.78$ 至 $+0.95$；narrativeqa 为最大损失点 $-1.78$，hotpotqa +0.95 / 2wikimqa +0.94 / lcc +0.81 为正向）。KV 压缩三 baseline 的全量崩坏坐实 sink 论断：SnapKV 27.70 / H2O 更崩（musique 0.63、hotpotqa 2.68）——无显式 sink 保送时 Qwen3-8B 首 token 即 EOS（§3.2 末段机理），三者中仅代码类任务（lcc 67.19 / 54.06）部分幸存。静态稀疏对照补齐同一结论：StreamingLLM（sink+滑窗 budget 1024）全量 AVG 14.20（表~\ref{tab:longbench}），检索类任务系统性崩塌（passage\_retrieval 0.25、musique 1.99）——强制区之外的预算为零时 far 检索无从谈起，这从反面界定 PSI 分区预算的必要工作面。训练类门控的代表 MoBA 在统一 harness 下（全维 chunk-mean gate 选 top-16 块全展开，sink/swa 保送与预算同口径）双任务 screen 为 hotpotqa 51.02 / musique 29.74，vs 同口径 PSI 54.23 / 32.82 低 $3.15$——无上界的 chunk 门控在 token 级质量上掉档，13 任务全量在跑，届时回填。预算配比的任务形态依赖性以 $\beta \in \{0.25, 0.375\} \times$ \{LongBench, RULER\} 交叉表完整给出（表~\ref{tab:betacross}）：LongBench 多跳任务 $\beta{=}0.375$ 占优（50.54 vs 50.41），RULER 合成 needle $\beta{=}0.25$ 占优（87.93 vs 87.58）——对角占优但四格差距均 $\le$0.35，与消融节的参数面平坦性一致；两臂并报，使用者按任务形态选择。逐任务族分解给出 $\beta$ 让渡的边界判据：真实任务全族成立（最 far-heavy 的 musique 反而增益最大 +1.94），合成 far-dense 族失效（multikey\_3 $-$2.00：far 候选数量爆炸使预算粒度主导）——far-dense 检索是稀疏索引器全族难区（Quest 同任务同构崩塌），非 $\beta$ 配比独有问题。
 
