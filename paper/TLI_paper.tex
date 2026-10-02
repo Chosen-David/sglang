@@ -49,7 +49,51 @@
 \end{enumerate}
 
 % =====================================================================
-% 2 Method：模仿 MoBA §2 结构——Preliminaries 形式化 → 架构+核心公式
+% 2 Observations：三个位置结构规律，每个按四要素展开
+% （现象→机理→设计蕴含→边界），数据映射 observation_design.md。
+% =====================================================================
+\section{观察：三个位置结构规律}\label{sec:obs}
+
+PSI 的三个设计分别建立在三个可复验的观察上。每个观察按四要素展开：现象（真实模型与真实任务的 trace 统计）、机理（结构解释）、设计蕴含（直接导出 PSI 的对应设计）、边界（何时不成立）。观察来自 Qwen3-8B 的 10 条真实 trace（8 条 LongBench 任务加 needle/natural 合成对照，逐层保存全部 K 与尾部 256 个 query），关键规律在 Qwen3-32B 上复验。系统性 negative results 是本文观察方法论的一部分：多数论文只报「何时成立」，我们同时报「何时不成立」，四条边界（口径鸿沟、训练投影 e2e 崩坏、自适应无杠杆、非线性降维不可行）与正面规律来自同一协议。
+
+\subsection{观察一：注意力质量的位置分段密度台阶}\label{sec:obsa}
+
+dense top-1024 选择的注意力质量呈位置分段的三层台阶（图~\ref{fig:h1}）：sink 段 0.37--0.71、近端滑窗 0.16--0.29、远端检索 0.02--0.29。远端段内部质量高度稀疏，且在 GQA 的 kv-head 间极不均：trace 实测第 3 层单个 kv-head 独占 0.804 的远端质量，同组其余 kv-head 近零。远端层轮廓在同任务内跨层相关 0.93--1.00，跨任务仅 0.05--0.89——远端检索的模式是任务指纹，层间共享、任务间分化。
+
+两段的统计性质相反，最优索引粒度因此相反。近端段密集平稳：候选 token 分数普遍高且彼此接近，块均值这类粗索引不会漏；该段压维从 $d{=}4$ 到 $d{=}64$ 质量平坦，信息冗余大、区分度低。远端段稀疏尖锐：少数关键 token（musique 的多跳证据句）承载几乎全部远端质量，漏选单个的代价大，因此需要保证不漏的块上界与 token 级精筛。sink 与滑窗是同一谱系的免打分极限：质量大且位置确定，无需任何打分。分区因此是把上下文切成三段的密度台阶自然映射。
+
+设计蕴含：远端区取 minmax 上界粗筛加 token 级精筛，近端区取省一半索引存储的 avg 块分（§\ref{sec:l2}）。边界必须诚实：异构 method 组合本身的增益很小，16 样本宽预算重放中近端侧 method 自由度 $\leq 0.003$；分区的真实增益是预算防挤出——远端独立配额后远端捕获反超单池基线，异构 method 是便宜且等效的工程选择而非精度来源。通用性：该结构在 8B/32B 双模型、13 个真实任务与合成 needle 上全部复现（32B 远端分布复现，静态层跳过 41/64 层精度 0.993），密度比例任务相关。
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.95\linewidth]{figures/fig1_h1_decomposition.pdf}
+\caption{注意力质量的位置分段密度台阶（E1，10 条真实 trace）：sink / 近端滑窗 / 远端检索三层构成 dense top-1024 的选择质量，远端段稀疏且 kv-head 间极不均。}
+\label{fig:h1}
+\end{figure}
+
+\subsection{观察二：预算的饱和性与平坦性}\label{sec:obsb}
+
+三个预算规律同时成立（图~\ref{fig:abg}）。其一，远端预算饱和：远端配额 128--256 token 后质量捕获饱和，多给预算买不到质量。其二，让渡有正收益：近端预算份额超过近端区份额（$\beta{=}0.375$ 对 0.25）在全部真实任务族成立，最 far-heavy 的 musique 增益最大（+1.94）。其三，参数面平坦：$\beta$ 在 0.25--0.75 平坦、$\alpha$ 单调至边界，逐任务完美选参的 oracle 上限仅 $+0.08$、逐层仅 $+0.0008$。
+
+这些规律合起来刻画了单池 top-k 方法的结构性浪费。Quest 与单池形态 TIA 的池内竞争下，近端段海量中高分 token 天然挤占配额，远端 0.02--0.29 的少数关键 token 因绝对分数低被系统性挤出。远端预算独立后 128--256 即饱和。两头夹出让渡空间：远端不需要那么多（饱和），近端挤得掉别人（挤出），预算应向近端让渡。平坦性的正面转译是部署简单性：oracle 双重否定给出定量界——完美选参与固定配置的差距在任务粒度 $\leq 0.08$、层粒度 $\leq 0.001$。本文不提出一个需要精调的参数，而是证明这个参数不需要精调。
+
+边界：让渡的前提是远端关键 token 稀疏。合成 far-dense 任务（RULER multikey\_3）远端候选爆炸，让渡失效（远端预算粒度主导，同任务上 Quest 同构崩塌）。收益的长度梯度清晰：分区相对单池在 RULER 4K/8K 为 $-0.14$/$-0.25$、16K 为 $+0.91$——短上下文分区中性，长上下文分区放大，分区是长上下文方法的设计约束。动态信号的价值在跳层 gate（安全省算力）而非配比分派：prefill 端一次远端统计与 decode 侧远端质量相关 0.924，但驱动的配比选择净增益为 0。
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.95\linewidth]{figures/fig5_abg_scan.pdf}
+\caption{预算参数面（$\alpha/\beta/\gamma$ 扫描）：$\beta$ 0.25--0.75 平坦、$\alpha$ 单调至边界，per-task/per-layer oracle 上限 $+0.08$/$+0.0008$——参数不需精调本身构成部署优势。}
+\label{fig:abg}
+\end{figure}
+
+\subsection{观察三：降维自由度来自位置先验}\label{sec:obsc}
+
+低频尾维 32/128（25\%）的子空间索引质量不打折：对全维 top-1024 的选择覆盖 0.729，同管线 $d'{=}128$ 臂为 0.732；随机 32 维崩至 0.32、高频 32 维 0.137。「哪个 25\%」比「压到 25\%」重要。尾维内部两段互补：RoPE 低频尾 16 维单独 0.576、nope 尾 16 维单独 0.387，拼接 0.811（$+0.24$ 组合增益）——位置感知段与内容稳定段各取所长。无监督 PCA 可将细筛再压至 $d{=}16$ 近无损（0.766 对 0.804），跨 kv-head 共享 SVD 基在 8/8 样本上追平 tail32。e2e 五臂消融复现同一排序：rope64 55.98 $>$ full128 54.72 $>$ tail32 54.23 $>$ nope64 52.4 $\gg$ random32 46.01 $\gg$ highfreq32 33.8（hotpotqa F1）。
+
+三层证据链收束到一个规律：training-free 的降维自由度来自位置先验（分布无关结构），而非学习或自适应。其一，任意子空间崩、位置结构子空间稳——自由度不是「任意 32 维」而是「位置稳态的那 32 维」。其二，无监督谱结构也成立：远端内容谱集中（PCA $d{=}16$ 近无损）、GQA head 冗余（跨 head 共享投影追平 per-head），共享投影缓存在纯 GQA 模型上 training-free 可行，DeepSeek 类模型的 MLA latent 索引是其训练版本。其三，口径鸿沟定案自适应不可行：监督投影在 trace 重放中成立（92--94\%）而 e2e 崩坏——投影基对 decode 查询分布漂移脆弱，旋转对频率先验与查询分布无关恒稳；query 自适应压缩（相关性 $\approx 0$、churn 22\%）与非线性流形学习（UMAP/t-SNE，质量无增益且成本高四个数量级）均被否定。
+
+设计蕴含：L1 索引信号取尾维子空间，选取方法学的完整四象限刻画见 §\ref{sec:l2}。与 DSA 的分界线在此：DSA 用训练（KL 对齐注意力分布）换选择能力，可以学任意投影；training-free 只能用分布无关的位置先验。trace 离线成立而 e2e 崩坏的口径鸿沟是这两个流派的数学分界，而非实现失误。通用性边界如实报告：32B 上机制存在、强度递减（低频 32 维 0.66--0.87，与全维差距 $\leq 0.08$）。
+
+% =====================================================================
+% 3 Method：模仿 MoBA §2 结构——Preliminaries 形式化 → 架构+核心公式
 % → 因果性两设计 → 设计选择讨论（子空间/分区预算）→ 与 sink/SWA 关系
 % → Implementation。
 % =====================================================================
@@ -83,7 +127,7 @@
 \begin{equation}
 s_{\mathrm{blk}}(q, i) \;=\; \sum_{d=1}^{d'} \max\!\big(q_d\, k^{\min}_{i,d},\; q_d\, k^{\max}_{i,d}\big)\;\geq\; \max_{j\in I_i}\; \langle q, k_j \rangle.
 \end{equation}
-这个上界在\textbf{子空间打分口径下}保证无漏选：真实高分 token 所在块的子空间分数必然不低于该 token 的子空间真实分数，必然进入 top-$K_1$（子空间相对全维点积是有损的，损失由 §2.3 的选取方法学单独刻画）。这与 Quest 的 page-min 下界近似形成对照——下界会低估真实高分页，漏选随干扰项增多而加剧。取 top-$K_1{=}128$ 块进入 L2。
+这个上界在\textbf{子空间打分口径下}保证无漏选：真实高分 token 所在块的子空间分数必然不低于该 token 的子空间真实分数，必然进入 top-$K_1$（子空间相对全维点积是有损的，损失由 §3.3 的选取方法学单独刻画）。这与 Quest 的 page-min 下界近似形成对照——下界会低估真实高分页，漏选随干扰项增多而加剧。取 top-$K_1{=}128$ 块进入 L2。
 
 \textbf{L2：far/near 分区精筛。}sink 与滑窗（最近 $sw_{lo}$ 个 token，局部性由滑窗语义天然保证，无需打分）构成强制保留区、不占分区预算；剩余 mid 预算划分为两个池。far 池对 L1 入选块做 token 级 4bit 精筛，取 far 配额 $F$（128--256 饱和）；near 池对近端区做同口径精筛。分区防挤出的机理：GQA 下远端 mass 在 kv-head 间极不均（trace 实测单 head 独占 0.804 而同组其余 head 近零），全池 top-k 时 far 候选与近端高分 token 在同一池竞争，far-heavy 层的远端关键 token 会被系统性挤出。分区给 far 独立配额，近端扣减带 near\_floor 保护防边界回退。
 
@@ -184,7 +228,7 @@ PSI 在 sglang 生产形态下实现，选择链由四个 kernel 组件构成：
 
 如表所示，三个观察成立。其一，PSI 对 Quest 的领先随长度超线性扩大（+3.58 $\rightarrow$ +6.86 $\rightarrow$ +13.50）：16K 档 Quest 在多干扰检索任务上崩塌，PSI 同任务保持量级正确——根因是下界近似漏选随干扰项增多加剧，上界粗筛无此劣化。其二，分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91）：超长上下文是分区 far 检索的收益区，16K 的分区增益集中于 multikey\_3（+5.0）与 cwe（+5.4），均为 vs 同配置单池臂的差分。其三，绝对值解读须以同长度 FullKV 为基线——聚合列举类任务 FullKV 自身随长度退化（multivalue 89.5 $\rightarrow$ 69.25 $\rightarrow$ 44.25 是模型列举能力上限），稀疏方法在同长度上的差距才是稀疏效应。
 
-LongBench 13 子集上（表~\ref{tab:longbench}），PSI \textbf{50.54}——与 FullKV 50.36 持平（+0.18，噪声级边缘，Limitations 一节如实标注），vs Quest +2.82；持平的诚实分解为 musique 单任务 +2.62 扛住其余 12 任务净 $-0.30$（摊分后 +0.20 $+$ $-0.02$ $\approx$ +0.18）。增益的结构清晰：多跳 far-heavy 任务 musique 34.76 为全部方法最高（vs FullKV +2.62、vs 同预算单池臂 +5.02），是分区 far 检索的直接证据；其余 12 任务互有胜负（$-1.78$ 至 $+0.95$；narrativeqa 为最大损失点 $-1.78$，hotpotqa +0.95 / 2wikimqa +0.94 / lcc +0.81 为正向）。KV 压缩三 baseline 的全量崩坏坐实 sink 论断：SnapKV 27.70 / H2O 更崩（musique 0.63、hotpotqa 2.68）——无显式 sink 保送时 Qwen3-8B 首 token 即 EOS（§2.2 末段机理），三者中仅代码类任务（lcc 67.19 / 54.06）部分幸存。静态稀疏对照补齐同一结论：StreamingLLM（sink+滑窗 budget 1024）全量 AVG 14.20（表~\ref{tab:longbench}），检索类任务系统性崩塌（passage\_retrieval 0.25、musique 1.99）——强制区之外的预算为零时 far 检索无从谈起，这从反面界定 PSI 分区预算的必要工作面。训练类门控的代表 MoBA 在统一 harness 下（全维 chunk-mean gate 选 top-16 块全展开，sink/swa 保送与预算同口径）双任务 screen 为 hotpotqa 51.02 / musique 29.74，vs 同口径 PSI 54.23 / 32.82 低 $3.15$——无上界的 chunk 门控在 token 级质量上掉档，13 任务全量在跑，届时回填。预算配比的任务形态依赖性以 $\beta \in \{0.25, 0.375\} \times$ \{LongBench, RULER\} 交叉表完整给出（表~\ref{tab:betacross}）：LongBench 多跳任务 $\beta{=}0.375$ 占优（50.54 vs 50.41），RULER 合成 needle $\beta{=}0.25$ 占优（87.93 vs 87.58）——对角占优但四格差距均 $\le$0.35，与消融节的参数面平坦性一致；两臂并报，使用者按任务形态选择。逐任务族分解给出 $\beta$ 让渡的边界判据：真实任务全族成立（最 far-heavy 的 musique 反而增益最大 +1.94），合成 far-dense 族失效（multikey\_3 $-$2.00：far 候选数量爆炸使预算粒度主导）——far-dense 检索是稀疏索引器全族难区（Quest 同任务同构崩塌），非 $\beta$ 配比独有问题。
+LongBench 13 子集上（表~\ref{tab:longbench}），PSI \textbf{50.54}——与 FullKV 50.36 持平（+0.18，噪声级边缘，Limitations 一节如实标注），vs Quest +2.82；持平的诚实分解为 musique 单任务 +2.62 扛住其余 12 任务净 $-0.30$（摊分后 +0.20 $+$ $-0.02$ $\approx$ +0.18）。增益的结构清晰：多跳 far-heavy 任务 musique 34.76 为全部方法最高（vs FullKV +2.62、vs 同预算单池臂 +5.02），是分区 far 检索的直接证据；其余 12 任务互有胜负（$-1.78$ 至 $+0.95$；narrativeqa 为最大损失点 $-1.78$，hotpotqa +0.95 / 2wikimqa +0.94 / lcc +0.81 为正向）。KV 压缩三 baseline 的全量崩坏坐实 sink 论断：SnapKV 27.70 / H2O 更崩（musique 0.63、hotpotqa 2.68）——无显式 sink 保送时 Qwen3-8B 首 token 即 EOS（§3.2 末段机理），三者中仅代码类任务（lcc 67.19 / 54.06）部分幸存。静态稀疏对照补齐同一结论：StreamingLLM（sink+滑窗 budget 1024）全量 AVG 14.20（表~\ref{tab:longbench}），检索类任务系统性崩塌（passage\_retrieval 0.25、musique 1.99）——强制区之外的预算为零时 far 检索无从谈起，这从反面界定 PSI 分区预算的必要工作面。训练类门控的代表 MoBA 在统一 harness 下（全维 chunk-mean gate 选 top-16 块全展开，sink/swa 保送与预算同口径）双任务 screen 为 hotpotqa 51.02 / musique 29.74，vs 同口径 PSI 54.23 / 32.82 低 $3.15$——无上界的 chunk 门控在 token 级质量上掉档，13 任务全量在跑，届时回填。预算配比的任务形态依赖性以 $\beta \in \{0.25, 0.375\} \times$ \{LongBench, RULER\} 交叉表完整给出（表~\ref{tab:betacross}）：LongBench 多跳任务 $\beta{=}0.375$ 占优（50.54 vs 50.41），RULER 合成 needle $\beta{=}0.25$ 占优（87.93 vs 87.58）——对角占优但四格差距均 $\le$0.35，与消融节的参数面平坦性一致；两臂并报，使用者按任务形态选择。逐任务族分解给出 $\beta$ 让渡的边界判据：真实任务全族成立（最 far-heavy 的 musique 反而增益最大 +1.94），合成 far-dense 族失效（multikey\_3 $-$2.00：far 候选数量爆炸使预算粒度主导）——far-dense 检索是稀疏索引器全族难区（Quest 同任务同构崩塌），非 $\beta$ 配比独有问题。
 
 \begin{table}[h]\centering
 \small\setlength{\tabcolsep}{3.5pt}
@@ -258,7 +302,7 @@ e2e 终值（Qwen3-30B-A3B，H20$\times$2）：64K 单请求 1.285$\times$（16.
 
 \textbf{稀疏注意力索引。}Quest 用 page 采样构造下界近似，KV 压缩类（SnapKV/H2O/PyramidKV）在 prefill 时一次性丢弃 KV。PSI 与它们的差异在三点：分数表示取上界（vs 下界——上界家族在 RULER 总 AVG 上领先 Quest $+8.40$，是长上下文质量分化的主要根源）、预算组织取分区（vs 全池）、两级级联（vs 单级）。我们在统一口径适配 SnapKV/H2O/PyramidKV 时发现：无显式 sink 保送的实现在 Qwen3-8B 上首 token 即 EOS——sink 在浅层不获选择信号但承载深层 0.59 的 attention mass，逐层恶性畸变。这既是对这类 baseline 适配的公平性修正，也旁证 sink 保送的必要性。
 
-\textbf{训练类索引。}DSA~\cite{dsa}（DeepSeek V3.2）用 $I=\sum w\cdot\mathrm{ReLU}(q\cdot k)$ 训练选择器，64 头 $\times$128 维 FP8 top-2048，warm-up 1000 步；MoBA~\cite{moba} 用门控块稀疏。PSI training-free/weight-free，与其在 kernel 级统一 harness 对比；我们另将 MoBA 的 chunk-mean 门控复现进本文统一 e2e 管线（decode 同稀疏口径，官方 wrapper 的 decode 为 full-attention 回退不可比），其无上界门控相对 PSI 的 token 级质量差距见 §3.2。两者构成方法论分界：DSA 用训练换选择能力，可学任意投影；training-free 只能依赖与查询分布无关的位置先验——trace 离线成立而 e2e 崩坏的口径鸿沟正是这条分界线的实证刻画。
+\textbf{训练类索引。}DSA~\cite{dsa}（DeepSeek V3.2）用 $I=\sum w\cdot\mathrm{ReLU}(q\cdot k)$ 训练选择器，64 头 $\times$128 维 FP8 top-2048，warm-up 1000 步；MoBA~\cite{moba} 用门控块稀疏。PSI training-free/weight-free，与其在 kernel 级统一 harness 对比；我们另将 MoBA 的 chunk-mean 门控复现进本文统一 e2e 管线（decode 同稀疏口径，官方 wrapper 的 decode 为 full-attention 回退不可比），其无上界门控相对 PSI 的 token 级质量差距见 §4.2。两者构成方法论分界：DSA 用训练换选择能力，可学任意投影；training-free 只能依赖与查询分布无关的位置先验——trace 离线成立而 e2e 崩坏的口径鸿沟正是这条分界线的实证刻画。
 
 \textbf{两级结构。}HISA（COLM 2026）验证 block-coarse + token-refine 形态有效——「two-level」本身不是本文创新。PSI 的增量是两个正交维度的系统刻画：表示（上界 vs 下界）与预算组织（分区 vs 全池）的质量-速度影响。
 
