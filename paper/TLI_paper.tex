@@ -14,7 +14,7 @@
 % we propose+命名+key advantage → 部署声明）。
 % =====================================================================
 \begin{abstract}
-扩展大语言模型的有效上下文长度需要突破 KV 缓存带宽的制约：在 131K 上下文的 8B 模型上，decode 每步的全量 KV 读取远超计算量，成为吞吐上限。现有方案面临一个困难权衡：training-free 的稀疏索引依赖下界近似，在长上下文检索任务上质量崩塌（我们实测 Quest 在 RULER 16K 的 multikey\_3 上仅 21 分，FullKV 为 100）；训练类索引（DSA）引入可学习参数与上千步 warm-up 成本，且选择质量依赖训练分布。本文提出 PSI，一个两级 training-free 稀疏注意力索引：第一级用 4bit 量化子空间上的块级 minmax \textbf{上界}粗筛保证子空间口径下无漏选，第二级用 far/near 分区的 token 级精筛保护远端关键 token 不被近端高分挤出。在 Qwen3-8B 的 LongBench 13 任务上，PSI 与 FullKV 精度持平（50.78 vs 50.36，差 $+0.42$；逐样本配对 bootstrap 95\% CI $[-0.18, +1.02]$ 含 0，sign test 8/13 胜 $p{=}0.58$）；多跳 far-heavy 任务 musique 达到 34.71，为全部方法（含 FullKV）最高。主表配置经双口径网格选举产生：3600 个合法 $(\alpha,\beta,\gamma)$ 配置的离线质量网格加 13 个配置臂的端到端实测网格——离线质量口径的冠军组合在端到端跌至第 3 档（排序系统性反转，秩相关 0.166），配置选举因此只认端到端实测。RULER 上合成 needle 参照臂（$\beta{=}0.25/\gamma{=}0.125$）87.93 逼近 FullKV 的 88.71，主臂 $\gamma{=}0.625$ 同表重扫为 85.83——$-$2.10 的差距随长度集中于 far-dense 词表任务 cwe，其余 8 任务与参照臂逐位持平；分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91），双臂并报：真实任务形态取主臂、合成 needle 形态取参照臂。速度侧，在精度持平的前提下，选择链相对 dense 打分取得 1.46$\times$@32K $\rightarrow$ 5.09$\times$@128K 的 kernel 级加速；e2e 三臂对照（同机同协议，30B-A3B：PSI vs Quest vs dense）如实报告：Quest 全形状 e2e 占优（TP2 bs16 64K total 62.1s 对 dense 106.1s 对 PSI 142.0s），PSI 在 e2e 的兑现点是 decode 段——对 dense 的索引开销增量 32ms/step 对 Quest 的 59.5ms/step（1.85$\times$）；PSI 的速度主张据此收窄为三层：选择链 kernel 加速、索引计算量（DSA 的 1/32）与索引存储总量（336B/token vs Quest 约 1KB/token），prefill 索引构建与 launch-bound 是 e2e 净兑现的当前边界。全部精度代价与负结果在同机同协议下如实报告。PSI 已在 sglang 生产形态（paged 寻址、增量索引、CUDA graph）下集成。
+扩展大语言模型的有效上下文长度需要突破 KV 缓存带宽的制约：在 131K 上下文的 8B 模型上，decode 每步的全量 KV 读取远超计算量，成为吞吐上限。现有方案面临一个困难权衡：training-free 的稀疏索引依赖下界近似，在长上下文检索任务上质量崩塌（我们实测 Quest 在 RULER 16K 的 multikey\_3 上仅 21 分，FullKV 为 100）；训练类索引（DSA）引入可学习参数与上千步 warm-up 成本，且选择质量依赖训练分布。本文提出 PSI，一个两级 training-free 稀疏注意力索引：第一级用 4bit 量化子空间上的块级 minmax \textbf{上界}粗筛保证子空间口径下无漏选，第二级用 far/near 分区的 token 级精筛保护远端关键 token 不被近端高分挤出。在 Qwen3-8B 的 LongBench 13 任务上，PSI 与 FullKV 精度持平（50.78 vs 50.36，差 $+0.42$；逐样本配对 bootstrap 95\% CI $[-0.18, +1.02]$ 含 0，sign test 8/13 胜 $p{=}0.58$）；多跳 far-heavy 任务 musique 达到 34.71，为全部方法（含 FullKV）最高。主表配置经双口径网格选举产生：3600 个合法 $(\alpha,\beta,\gamma)$ 配置的离线质量网格（其中 $\gamma$ 维在部署预算下经截断坍缩去重）加 13 个配置臂的端到端实测网格——离线质量口径的冠军组合在端到端跌至第 3 档（排序系统性反转，秩相关 0.166），配置选举因此只认端到端实测。RULER 上合成 needle 参照臂（$\beta{=}0.25/\gamma{=}0.125$）87.93 逼近 FullKV 的 88.71，主臂 $\gamma{=}0.625$ 同表重扫为 85.83——$-$2.10 的差距随长度集中于 far-dense 词表任务 cwe，其余 8 任务与参照臂逐位持平；分区相对单池消融臂的增益在 16K 才转正（4K/8K 为 $-$0.14/$-$0.25，16K 为 +0.91），双臂并报：真实任务形态取主臂、合成 needle 形态取参照臂。速度侧，在精度持平的前提下，选择链相对 dense 打分取得 1.46$\times$@32K $\rightarrow$ 5.09$\times$@128K 的 kernel 级加速；e2e 三臂对照（同机同协议，30B-A3B：PSI vs Quest vs dense）如实报告：Quest 全形状 e2e 占优（TP2 bs16 64K total 62.1s 对 dense 106.1s 对 PSI 142.0s），PSI 在 e2e 的兑现点是 decode 段——对 dense 的索引开销增量 32ms/step 对 Quest 的 59.5ms/step（1.85$\times$）；PSI 的速度主张据此收窄为三层：选择链 kernel 加速、索引计算量（DSA 的 1/32）与索引存储总量（336B/token vs Quest 约 1KB/token），prefill 索引构建与 launch-bound 是 e2e 净兑现的当前边界。全部精度代价与负结果在同机同协议下如实报告。PSI 已在 sglang 生产形态（paged 寻址、增量索引、CUDA graph）下集成。
 \end{abstract}
 
 % =====================================================================
@@ -174,7 +174,7 @@ per-layer 静态 pair & prefill $q$ 统计 & 0.849 & 兼容 \\
 \end{tabular}
 \end{table}
 
-\textbf{分区预算参数。}预算空间由三个参数刻画：$\alpha{=}0.125$（near 区比例）、$\beta{=}0.375$（near 页预算）、$\gamma{=}0.625$（near token 预算折扣），far/near 方法取 (minmax, avg)。参数面由双口径网格完整刻画（方法学见消融节 \S\ref{sec:abl}）：离线质量网格在 5 个方法组合上扫描 $9\times9\times9$ 的 $(\alpha,\beta,\gamma)$（0.125 步长、合法性约束过滤后 3600 个有效配置，16 样本 trace 均值）；端到端网格把质量口径各组合最优配置按端到端有效预算去重后精选 13 个配置臂做 LongBench 双任务实测。三条规律：$\alpha$ 单调至边界（越省 far 越好，受 near\_floor 制约）；$\beta$ 在 0.25--0.75 上平坦（多跳任务 0.375 占优）；$\gamma$ 必须随 $K_2$ 等比缩放（$\gamma{=}0.5$ 在 $K_2{=}1024$ 下 far 仅保底 64，F1 崩至 13.51 的教训；且离线口径总预算 $B_{\mathrm{TOK}}{=}2048$ 与端到端 $K_2{=}1024$ 的 2 倍差会使 $\gamma$ 在端到端侧被近端细筛配额截断压平，跨口径选臂须按有效配置去重）。最重要的发现是平坦性本身：per-task 完美选 $\beta$ 的 oracle 上限仅 +0.08，per-layer oracle 仅 +0.0008，配置臂粒度 oracle 上限 $+0.21$--$+0.49$——\textbf{分区预算对配置误差不敏感，不需要精调}。主表配置由端到端网格选出（离线质量口径的组合排序在端到端反转，选举只认端到端实测，见 \S\ref{sec:abl}）。这构成部署简单性论据：对照 DSA 的 1000 步 warm-up，PSI 一组固定配置覆盖 12/13 任务。
+\textbf{分区预算参数。}预算空间由三个参数刻画：$\alpha{=}0.125$（near 区比例）、$\beta{=}0.375$（near 页预算）、$\gamma{=}0.625$（near token 预算折扣），far/near 方法取 (minmax, avg)。参数面由双口径网格完整刻画（方法学见消融节 \S\ref{sec:abl}）：离线质量网格在 5 个方法组合上扫描 $9\times9\times9$ 的 $(\alpha,\beta,\gamma)$（0.125 步长、合法性约束过滤后 3600 个有效配置，16 样本 trace 均值）；端到端网格把质量口径各组合最优配置按端到端有效预算去重后精选 13 个配置臂做 LongBench 双任务实测（全表见表~\ref{tab:e2egrid}）。三条规律：$\alpha$ 单调至边界（越省 far 越好，受 near\_floor 制约）；$\beta$ 在 0.25--0.75 上平坦（多跳任务 0.375 占优）；$\gamma$ 必须随 $K_2$ 等比缩放（$\gamma{=}0.5$ 在 $K_2{=}1024$ 下 far 仅保底 64，F1 崩至 13.51 的教训；且离线口径总预算 $B_{\mathrm{TOK}}{=}2048$ 与端到端 $K_2{=}1024$ 的 2 倍差会使 $\gamma$ 在端到端侧被近端细筛配额截断压平，跨口径选臂须按有效配置去重）。最重要的发现是平坦性本身：per-task 完美选 $\beta$ 的 oracle 上限仅 +0.08，per-layer oracle 仅 +0.0008，配置臂粒度 oracle 上限 $+0.21$--$+0.49$——\textbf{分区预算对配置误差不敏感，不需要精调}。主表配置由端到端网格选出（离线质量口径的组合排序在端到端反转，选举只认端到端实测，见 \S\ref{sec:abl}）。这构成部署简单性论据：对照 DSA 的 1000 步 warm-up，PSI 一组固定配置覆盖 12/13 任务。
 
 \textbf{gate 的阈值。}动态 gate 用 prefill 末段 far 统计识别 far mass 近零的层。阈值 $\tau$ 的真判决（双任务梯度）：$\tau{=}0.005$ 下 musique +0.23 / qasper $-$0.41；$\tau{=}0.015$ 下 +0.27 / $-$0.67——梯度单调，真触发区间微损不崩（对照静态版掉 4.8--5.9）。gate 因此定位为安全省算力的保守开关。
 
@@ -300,7 +300,32 @@ RULER-33 & \textbf{87.93} & 87.58 \\
 
 \textbf{自适应 $\alpha/\beta$ 的否定。}per-request 在线分派 $\alpha/\beta$ 判 No-Go：oracle 上限 LongBench +0.08 / RULER +0.00，且 +0.08 全部可由噪声正向选择偏差解释（非 musique 12 任务 $|\Delta|$ 中位 0.17）。信号零成本可得，但参数面平坦使自适应无杠杆。同一信号的最佳用途是 gate（安全价值）而非 $\beta$ 分派（无精度价值）。粒度细化到层同样无杠杆（per-layer oracle 增益均值 +0.0008）；细化到配置臂粒度复证（13 个端到端配置臂）：逐臂 oracle 上限 $+0.21$（vs 固定 $\beta{=}0.25$）/$+0.49$（vs 部署参照臂），12 个候选代理特征（任务匹配 mass、质量离散度、合成侧 mass 等）经 BH 校正后无一显著，mass 总量与端到端精度的秩相关 0.166（bootstrap 95\% CI 含 0），按 mass 选臂相对 oracle 亏 1.18——代理选臂主动有害而非中性。任务、层、样本、配置臂四粒度否定收敛于同一结论：\textbf{平坦性是参数面的结构性属性，预测器无杠杆可撬}，转译为部署简单性论据。
 
-\textbf{双口径参数网格与配置选举。}主表配置的选举方法学：离线质量网格在 5 个方法组合（far/near 打分的 (minmax, avg)、(minmax, minmax)、(avg, avg)、(cluster, avg)、(cluster, cluster)）上扫描 $9\times9\times9$ 的 $(\alpha,\beta,\gamma)$（0.125 步长、合法性约束过滤后 3600 个有效配置，16 样本 trace 均值，块池 $BP{=}64$、总预算 $B_{\mathrm{TOK}}{=}2048$）；端到端网格把质量口径各组合最优配置按端到端有效预算去重后精选 13 个配置臂，在 LongBench hotpotqa+musique（各 n=200，$K_1{=}128$/$K_2{=}1024$）上实测。两条口径教训如实入册。其一，$\gamma$ 的截断坍缩：质量网格 $B_{\mathrm{TOK}}{=}2048$ 与端到端 $K_2{=}1024$ 的 2 倍预算差使 $\gamma$ 经近端细筛配额的 $\min(\cdot,\,K_2^{\mathrm{mid}})$ 截断作用于有效预算——质量口径下互异的 $\gamma$ 臂（0.375 与 0.75）在端到端逐位同分（54.16/35.57），跨口径选臂必须按目标口径的有效配置去重。其二，排序反转：质量口径的四组合排序 (minmax, minmax) 0.896 $>$ (minmax, avg) 0.882 $>$ (cluster, avg) 0.879 $>$ (avg, avg) 0.796，端到端反转为 (minmax, avg) 45.08 $>$ (minmax, minmax) 43.90 $\approx$ (avg, avg) 43.90 $>$ (cluster, avg) 43.58（图~\ref{fig:reversal}）；(cluster, cluster) 组合近端侧聚类无端到端实现路径、仅质量数据，如实排除。因此\textbf{选举只认端到端实测}：最优臂 (minmax, avg) $\alpha{=}0.125/\beta{=}0.375/\gamma{=}0.625$ 平均分居首（45.08）：hotpotqa 55.44 为全部 13 臂最高，musique 34.71 仅次于 $\beta{=}0.25$ 臂的 35.57（该臂平均分 44.86 更低）；相对部署参照臂（$\gamma{=}0.125$）+0.49、相对固定 $\beta{=}0.25$ +0.21——增益幅度本身再次印证参数面平坦。
+\textbf{双口径参数网格与配置选举。}主表配置的选举方法学：离线质量网格在 5 个方法组合（far/near 打分的 (minmax, avg)、(minmax, minmax)、(avg, avg)、(cluster, avg)、(cluster, cluster)）上扫描 $9\times9\times9$ 的 $(\alpha,\beta,\gamma)$（0.125 步长、合法性约束过滤后 3600 个有效配置，16 样本 trace 均值，块池 $BP{=}64$、总预算 $B_{\mathrm{TOK}}{=}2048$）；端到端网格把质量口径各组合最优配置按端到端有效预算去重后精选 13 个配置臂，在 LongBench hotpotqa+musique（各 n=200，$K_1{=}128$/$K_2{=}1024$）上实测。两条口径教训如实入册。其一，$\gamma$ 的截断坍缩：质量网格 $B_{\mathrm{TOK}}{=}2048$ 与端到端 $K_2{=}1024$ 的 2 倍预算差使 $\gamma$ 经近端细筛配额的 $\min(\cdot,\,K_2^{\mathrm{mid}})$ 截断作用于有效预算——质量口径下互异的 $\gamma$ 臂（0.375 与 0.75）在端到端逐位同分（54.16/35.57），跨口径选臂必须按目标口径的有效配置去重。其二，排序反转：质量口径的四组合排序 (minmax, minmax) 0.896 $>$ (minmax, avg) 0.882 $>$ (cluster, avg) 0.879 $>$ (avg, avg) 0.796，端到端反转为 (minmax, avg) 45.08 $>$ (minmax, minmax) 43.90 $\approx$ (avg, avg) 43.90 $>$ (cluster, avg) 43.58（图~\ref{fig:reversal}）；(cluster, cluster) 组合近端侧聚类无端到端实现路径、仅质量数据，如实排除。因此\textbf{选举只认端到端实测}：最优臂 (minmax, avg) $\alpha{=}0.125/\beta{=}0.375/\gamma{=}0.625$ 平均分居首（45.08）：hotpotqa 55.44 为全部 13 臂最高，musique 34.71 仅次于 $\beta{=}0.25$ 臂的 35.57（该臂平均分 44.86 更低）；相对部署参照臂（$\gamma{=}0.125$）+0.49、相对固定 $\beta{=}0.25$ +0.21——增益幅度本身再次印证参数面平坦。13 臂的完整配置与双任务分列于表~\ref{tab:e2egrid}：选取规则为各组合质量口径最优配置按端到端有效预算 $(\alpha,\beta,\mathrm{nt\_near})$ 去重后取 top-3，加部署参照臂；$\gamma$ 截断坍缩对（0.375 与 0.75）在表内逐位同分直接可见。
+
+\begin{table}[h]\centering
+\small\setlength{\tabcolsep}{4pt}
+\caption{端到端网格 13 配置臂全表（LongBench hotpotqa/musique 各 n=200，$K_1{=}128$/$K_2{=}1024$；mass 为离线质量口径 16 样本 trace 均值，仅作并读不作选举依据；选取规则=各组合质量最优配置按 $(\alpha,\beta,\mathrm{nt\_near})$ 去重取 top-3 + 部署参照臂；mavg $\beta{=}0.25$ 的 $\gamma{=}0.375/0.75$ 两臂逐位同分，即 $\gamma$ 截断坍缩的直接实证）。}
+\label{tab:e2egrid}
+\begin{tabular}{lllllll}
+\toprule
+组合 & $\alpha$ & $\beta$ & $\gamma$ & mass & hotpotqa & musique \\
+\midrule
+mavg & 0.125 & 0.25 & 0.75 & 0.882 & 54.16 & 35.57 \\
+mavg & 0.125 & 0.25 & 0.375 & 0.881 & 54.16 & 35.57 \\
+mavg & 0.125 & 0.375 & 0.625 & 0.880 & \textbf{55.44} & 34.71 \\
+mavg（参照） & 0.125 & 0.375 & 0.125 & 0.873 & 54.43 & 34.76 \\
+mminmax & 0.875 & 0.875 & 0.5 & 0.896 & 54.40 & 33.40 \\
+mminmax & 0.75 & 0.75 & 0.5 & 0.895 & 54.38 & 33.24 \\
+mminmax & 0.625 & 0.625 & 0.5 & 0.895 & 53.88 & 33.04 \\
+aavg & 0.875 & 0.875 & 0.375 & 0.796 & 54.40 & 33.40 \\
+aavg & 0.875 & 0.75 & 0.5 & 0.796 & 54.13 & 33.05 \\
+aavg & 0.75 & 0.75 & 0.5 & 0.794 & 54.38 & 33.24 \\
+cavg & 0.125 & 0.375 & 0.625 & 0.879 & 53.43 & 32.20 \\
+cavg & 0.125 & 0.25 & 0.75 & 0.879 & 54.13 & 33.03 \\
+cavg & 0.125 & 0.25 & 0.375 & 0.877 & 54.13 & 32.50 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \begin{figure}[h]\centering
 \includegraphics[width=0.95\linewidth]{figures/fig11_mass_vs_e2e.pdf}
