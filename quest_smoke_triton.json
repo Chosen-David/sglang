@@ -1,0 +1,20 @@
+{
+ "backend": "triton",
+ "n": 5,
+ "f1_per_sample": [
+  1.0,
+  1.0,
+  0.0,
+  1.0,
+  0.5
+ ],
+ "f1_mean": 0.7,
+ "preds": [
+  "Miller v. California",
+  "Charles L. Clifford",
+  "Lowell, Michigan",
+  "Sun",
+  "film"
+ ],
+ "reference": "two-level quest_64_16 hotpotqa: full200=0.46 first5=0.43"
+}

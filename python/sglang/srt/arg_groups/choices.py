@@ -80,6 +80,7 @@ ATTENTION_BACKEND_CHOICES = [
     "nsa",  # Deprecated alias for "dsa"
     "qsa",
     "tli",  # Two-Level Indexer (TIA 下一代: 子空间粗筛 + kmeans 远端 + 层跳过)
+    "quest",  # Quest page min/max 上界稀疏 attention（审稿 C3 e2e 对照臂）
     "dsv4",
     "compressed",  # Deprecated alias for "dsv4"
     # NVIDIA specific

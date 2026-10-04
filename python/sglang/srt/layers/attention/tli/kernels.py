@@ -691,8 +691,13 @@ def _tli_sparse_attn_kernel(
         att = tl.sum(q[:, None, :] * kt[None, :, :], axis=2) * sm_scale  # [G, BK]
         att = tl.where(valid[None, :], att, float("-inf"))
         m_new = tl.maximum(m_i, tl.max(att, axis=1))
-        p = tl.exp(att - m_new[:, None])  # -inf 位 → 0
-        alpha = tl.exp(m_i - m_new)
+        # NaN guard：整块全无效（如 extend 早 query 行的前 chunk 全哨兵）时
+        # m_new=-inf，-inf-(-inf)=NaN 会毒化 l_i/acc。钳 0 后 p=exp(-inf)=0、
+        # alpha=exp(-inf)=0，数学与「跳过该块」等价；行内只要有任一有效
+        # lane（quest 当前页恒含 pos=t）最终 l_i>0 不变。
+        m_safe = tl.where(m_new == float("-inf"), 0.0, m_new)
+        p = tl.exp(att - m_safe[:, None])  # -inf 位 → 0
+        alpha = tl.exp(m_i - m_safe)
         l_i = l_i * alpha + tl.sum(p, axis=1)
         acc = acc * alpha[:, None]
         vt = tl.load(vbuf_ptr + addr, mask=km[:, None], other=0).to(tl.float32)
@@ -766,8 +771,11 @@ def _tli_sparse_attn_dot_kernel(
         att = tl.dot(q_tile, tl.trans(kt)) * sm_scale  # [GP, BK] fp32
         att = tl.where(valid[None, :], att, float("-inf"))
         m_new = tl.maximum(m_i, tl.max(att, axis=1))
-        p = tl.exp(att - m_new[:, None])
-        alpha = tl.exp(m_i - m_new)
+        # NaN guard：同广播版（整块全无效时 -inf-(-inf)=NaN 毒化 l_i/acc；
+        # quest extend 的因果哨兵 chunk 会触发，钳 0 = 数学跳过该块）
+        m_safe = tl.where(m_new == float("-inf"), 0.0, m_new)
+        p = tl.exp(att - m_safe[:, None])
+        alpha = tl.exp(m_i - m_safe)
         l_i = l_i * alpha + tl.sum(p, axis=1)
         acc = acc * alpha[:, None]
         vt = tl.load(vbuf_ptr + addr, mask=km[:, None], other=0)  # [BK, D] bf16

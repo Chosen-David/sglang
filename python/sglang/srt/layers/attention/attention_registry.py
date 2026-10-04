@@ -159,6 +159,15 @@ def create_tli_backend(runner):
     return TLISparseAttnBackend(runner)
 
 
+@register_attention_backend("quest")
+def create_quest_backend(runner):
+    # 审稿 C3：Quest e2e 对照臂（page 64 × topk 16 = 1024 token 预算，
+    # 全维 min/max 上界，无量化；算法口径对齐 quest_indexer.py）
+    from sglang.srt.layers.attention.quest.backend import QuestSparseAttnBackend
+
+    return QuestSparseAttnBackend(runner)
+
+
 @register_attention_backend("nsa")
 def _create_nsa_compat(runner):
     warnings.warn(
