@@ -1,0 +1,40 @@
+{
+ "section": "Full paper (EN, 23pp): abstract through Limitations",
+ "target_venue": "ML systems venue (article class; benchmarked against academic register)",
+ "diagnostics": {
+  "words": 12247,
+  "sentences": 337,
+  "mean_sentence_len": 36.3,
+  "stdev_sentence_len": 33.5,
+  "hedges_per_1k": 1.06,
+  "emdash_per_1k": 7.02,
+  "antithesis_per_1k": 1.22,
+  "taxonomy_markers_per_1k": 3.1,
+  "we_per_1k": 2.2,
+  "reframe_moves_per_1k": 0.08,
+  "necessity_sufficiency_per_1k": 0.0,
+  "note": "stdev/mean ratio 0.92 -- live variance signature intact; mean sentence length far above the author's 14-16 band (dense results prose with parenthesized CI/protocol qualifiers)"
+ },
+ "rubric": {
+  "voice": {
+   "score": 4,
+   "rationale": "Executes the reduce-to-a-named-set move repeatedly and well (three positional layers, two orthogonal dimensions, four-quadrant selection taxonomy, four-granularity flatness); antithesis present but sparse for the density of claims ('a safety switch, not a source of accuracy gain'; 'the two-level form itself is not our contribution'); run-in bold labels structure every subsection; honesty markers conspicuous (parities with CIs, negative results named as such, 'not a net-win shape'). Misses: no Scope-style paragraph in the intro; the vivid single-example move is absent; we-density 2.2/1k is below the academic band, and mean sentence length 36 with stdev 33 signals qualification-stacking rather than the author's short-declarative-against-long-complex rhythm."
+  },
+  "logic": {
+   "score": 4,
+   "rationale": "Every major claim is scoped to its measurement protocol (mass-replay vs e2e, main arm vs reference arm, TIA vs PSI protocol for the +8.40/+7.98 split), CIs accompany effect sizes, and causal mechanisms are explained not asserted (anti-eviction via GQA head unevenness; rotation-pair frequency argument with the dot-product decomposition). Two fuzzy spots hold it back from 5: the abstract still asserts 'accuracy parity... delivers the bandwidth win' while the e2e section documents no net win shape in any tested configuration (kernel-internal speedup only); and the two-profiles-two-arms deployment protocol is stated as verified uniformity while the underlying selection signal for profile membership is never operationalized (the paper's own E79-style finding was that no cheap signal separates them)."
+  },
+  "structure": {
+   "score": 4,
+   "rationale": "Clean MoBA-style arc: stakes-with-named-products, three-family critique with quantified deficiencies, research question, mechanism, claim-first contributions; Observations section with explicit phenomenon-mechanism-implication-boundary template is a structural strength; evidence sits beside its claims throughout; Limitations returns to every headline number with a scope restriction. The abstract is the weakest structural element: ~500 words and 25+ numbers in one paragraph, front-loading the concession list instead of the design-space-characterization thesis the paper actually argues."
+  }
+ },
+ "mean_rubric": 4.0,
+ "flags": [
+  "anti_gaming: rubric dimensions uniform (4/4/4) -- spot-checked; not lockstep optimization, the uniformity reflects genuinely even quality across dimensions",
+  "diagnostic-vs-rubric: voice=4 while mean sentence length 36.3 is far outside the author band -- corroborated, not contradictory: the paper reads confident and on-register in moves but over-stacks protocol qualifiers per sentence; a venue-cleanup compression pass is the natural fix",
+  "abstract overload is the single highest-leverage structural residual (consistent with the caller's independent reviewer history; scored blind here from the text itself)"
+ ],
+ "confidence": "high (full-text read of EN version; deterministic metrics reproduced twice)",
+ "notes": "Blind eval of the round5 revision. Rubric 4.0/5 with the residual gap concentrated in: (1) abstract doing 40% concession-listing instead of leading with the design-space-characterization thesis; (2) intro missing the Scope paragraph and the single-quoted-concrete-example move; (3) the profile-selection signal being asserted as deployable without an operationalization. None of these are logic errors; all are presentation-level. On the venue's novelty bar this remains a different question (see pc-review)."
+}
