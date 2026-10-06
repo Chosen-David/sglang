@@ -1,0 +1,28 @@
+{
+ "experiment": "E75: per-request/per-task adaptive alpha-beta feasibility (oracle upper bound + signal availability)",
+ "date": "2026-09-30",
+ "question": "能否快速估计 attention mass 在线自适应 alpha/beta，优于固定值？（用户指令）",
+ "oracle_upper_bound": {
+  "longbench": {
+   "fix_b375": 50.54,
+   "fix_b25": 50.41,
+   "oracle_per_task_max": 50.62,
+   "gain_vs_best_fixed": 0.08
+  },
+  "ruler": {
+   "fix_b375": 87.59,
+   "fix_b25": 87.93,
+   "oracle_per_task_max": 87.93,
+   "gain_vs_best_fixed": 0.0
+  },
+  "noise_bias_check": "oracle +0.08 全部由噪声正向选择偏差解释：非 musique 12 任务 |delta| 中位 0.17，max 吃掉正向噪声（6 任务各 +0.09~+0.28）；唯一系统性信号 musique +1.94 已被全局 beta.375 兑现"
+ },
+ "signal_availability": {
+  "prefill_far_stat": "#60 基础设施现成（prefill 末 chunk 一次 softmax far 统计，成本近零，无需新 kernel）",
+  "quality": "prefill last1 <-> decode far corr 0.924（E67）；但分离度弱：安全任务 0.001-0.008 vs 多跳 0.015-0.026（仅 ~3x gap）",
+  "caveat": "mass 口径陷阱已证（36 层总和 vs per-layer 混淆，E67 tau 口径修正教训）"
+ },
+ "param_surface_flatness": "alpha 网格单调递减至边界 0.125（E64a/E64g 最优在边缘）；beta 0.25-0.75 平坦（E64g 热力图）——参数面平坦，自适应无杠杆",
+ "family_dispatch": "按族分派（多跳->b375 其余->b25）= 50.58 vs 全局 b375 50.54——噪声级",
+ "verdict": "不值得做：oracle 上限 +0.08 LongBench / +0.00 RULER，且主要是噪声正向偏差；信号最佳用途是 D' gate（防反向错误有安全价值）而非 beta 分派（无精度价值）。静态双臂（按任务形态二选一）是收益/复杂度最优解。"
+}

@@ -1,0 +1,142 @@
+{
+ "note": "E100 主表 claim 显著性判决：PSI 50.78 vs FullKV 50.36（+0.42）逐样本配对 bootstrap CI",
+ "method": {
+  "bootstrap": "任务内有放回重采样逐样本配对差 → 任务均值 → 13 任务等权平均（LongBench 官方聚合口径）",
+  "B": 10000,
+  "seed": 20261004,
+  "ci": "percentile 95%",
+  "scoring": "per-sample = max over ground_truths（与 benchmark.LongBench.eval.scorer 逐字一致，含 triviaqa 截断）",
+  "pairing": "PSI 与 FullKV 同任务同 n 同 answers 逐位配对（已 assert 校验）"
+ },
+ "claim": {
+  "psi_avg": 50.78,
+  "fkv_avg": 50.36,
+  "diff": 0.42
+ },
+ "calibration_check": {
+  "psi_avg_expected": 50.78,
+  "fkv_avg_expected": 50.36,
+  "passed": true
+ },
+ "task_table": {
+  "hotpotqa": {
+   "n": 200,
+   "psi_task_score": 55.44,
+   "fkv_task_score": 53.48,
+   "task_diff": 1.97
+  },
+  "2wikimqa": {
+   "n": 200,
+   "psi_task_score": 39.32,
+   "fkv_task_score": 38.29,
+   "task_diff": 1.03
+  },
+  "musique": {
+   "n": 200,
+   "psi_task_score": 34.71,
+   "fkv_task_score": 32.14,
+   "task_diff": 2.57
+  },
+  "passage_retrieval_en": {
+   "n": 200,
+   "psi_task_score": 99.0,
+   "fkv_task_score": 100.0,
+   "task_diff": -1.0
+  },
+  "qasper": {
+   "n": 200,
+   "psi_task_score": 43.95,
+   "fkv_task_score": 44.17,
+   "task_diff": -0.22
+  },
+  "multifieldqa_en": {
+   "n": 150,
+   "psi_task_score": 53.05,
+   "fkv_task_score": 53.4,
+   "task_diff": -0.36
+  },
+  "gov_report": {
+   "n": 200,
+   "psi_task_score": 33.52,
+   "fkv_task_score": 33.17,
+   "task_diff": 0.35
+  },
+  "qmsum": {
+   "n": 200,
+   "psi_task_score": 23.58,
+   "fkv_task_score": 23.53,
+   "task_diff": 0.05
+  },
+  "multi_news": {
+   "n": 200,
+   "psi_task_score": 24.44,
+   "fkv_task_score": 24.93,
+   "task_diff": -0.49
+  },
+  "narrativeqa": {
+   "n": 200,
+   "psi_task_score": 26.31,
+   "fkv_task_score": 25.61,
+   "task_diff": 0.71
+  },
+  "triviaqa": {
+   "n": 200,
+   "psi_task_score": 90.57,
+   "fkv_task_score": 90.71,
+   "task_diff": -0.14
+  },
+  "lcc": {
+   "n": 500,
+   "psi_task_score": 69.28,
+   "fkv_task_score": 68.81,
+   "task_diff": 0.47
+  },
+  "repobench": {
+   "n": 500,
+   "psi_task_score": 66.97,
+   "fkv_task_score": 66.5,
+   "task_diff": 0.47
+  }
+ },
+ "main_ci_13tasks": {
+  "mean": 0.42,
+  "ci95_lo": -0.18,
+  "ci95_hi": 1.02,
+  "contains_zero": true
+ },
+ "heldout_ci_11tasks": {
+  "mean": 0.08,
+  "ci95_lo": -0.46,
+  "ci95_hi": 0.6,
+  "contains_zero": true,
+  "tasks_excluded": [
+   "musique",
+   "hotpotqa"
+  ],
+  "nominal_diff": 0.08
+ },
+ "election_task_ci": {
+  "musique": {
+   "mean": 2.53,
+   "ci95_lo": -1.29,
+   "ci95_hi": 6.37,
+   "contains_zero": true,
+   "nominal_diff": 2.57
+  },
+  "hotpotqa": {
+   "mean": 1.97,
+   "ci95_lo": -1.44,
+   "ci95_hi": 5.57,
+   "contains_zero": true,
+   "nominal_diff": 1.97
+  }
+ },
+ "sign_test": {
+  "wins": 8,
+  "losses": 5,
+  "ties": 0,
+  "two_sided_binomial_p": 0.5811
+ },
+ "verdict": "13 任务 AVG 差 +0.42 的 95% CI [-0.18, 1.02] 含 0，+0.42 在逐样本配对 bootstrap 下不显著；主表 claim 不得表述为显著增益，卖点须转向结构分析（musique/hotpotqa far 检索证据 + 等精度同预算的 kernel 速度优势）",
+ "significant": false
+}

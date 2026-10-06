@@ -1,0 +1,161 @@
+{
+ "note": "E102 审稿C3：PSI(TLI) vs Quest vs dense-Triton 三臂 e2e 延迟对照（同机同协议同env；两遍法 pass1 max_new=1=prefill、pass2 max_new=64=total、decode=差值；NaN 修复后代码 c808e7d96+）",
+ "model": {
+  "single": "Qwen3-30B-A3B 单卡GPU0",
+  "tp2": "Qwen3-30B-A3B-Instruct-2507 TP2双卡"
+ },
+ "quest_protocol": "page64 全维 min/max 上界 + GQA group-mean + top-16 页 = 1024 预算（SGLANG_QUEST_POOL_R=32, S_CAP=65536, tp2段）",
+ "env": "SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK=1 SGLANG_IS_FLASHINFER_AVAILABLE=false SGLANG_ENABLE_JIT_DEEPGEMM=0",
+ "single_request": {
+  "quest": {
+   "backend": "quest",
+   "n_decode": 64,
+   "32k": {
+    "prefill_s": 3.798,
+    "total_s": 10.605,
+    "decode_s": 6.807,
+    "decode_ms_per_step": 108.04,
+    "pass1_runs_s": [
+     4.223,
+     3.798
+    ],
+    "pass2_runs_s": [
+     10.629,
+     10.605
+    ],
+    "prompt_chars": 85043,
+    "out_preview": " Jacob, a Vietnam War veteran suffering from trauma and hall"
+   },
+   "64k": {
+    "prefill_s": 8.067,
+    "total_s": 14.86,
+    "decode_s": 6.793,
+    "decode_ms_per_step": 107.83,
+    "pass1_runs_s": [
+     8.118,
+     8.067
+    ],
+    "pass2_runs_s": [
+     14.892,
+     14.86
+    ],
+    "prompt_chars": 170043,
+    "out_preview": " The text presents a screenplay for \"Jacob's Ladder\" by Bruc"
+   }
+  },
+  "triton": {
+   "backend": "triton",
+   "n_decode": 64,
+   "32k": {
+    "prefill_s": 5.615,
+    "total_s": 8.446,
+    "decode_s": 2.831,
+    "decode_ms_per_step": 44.93,
+    "pass1_runs_s": [
+     5.716,
+     5.615
+    ],
+    "pass2_runs_s": [
+     8.471,
+     8.446
+    ],
+    "prompt_chars": 85043,
+    "out_preview": " \n\nJacob Singer, a Vietnam veteran suffering from PTSD and h"
+   },
+   "64k": {
+    "prefill_s": 20.86,
+    "total_s": 23.625,
+    "decode_s": 2.765,
+    "decode_ms_per_step": 43.88,
+    "pass1_runs_s": [
+     20.908,
+     20.86
+    ],
+    "pass2_runs_s": [
+     23.625,
+     23.69
+    ],
+    "prompt_chars": 170043,
+    "out_preview": " The film \"Jacob's Ladder\" follows Jacob Singer, a Vietnam W"
+   }
+  },
+  "tli": {
+   "backend": "tli",
+   "n_decode": 64,
+   "32k": {
+    "prefill_s": 10.115,
+    "total_s": 18.978,
+    "decode_s": 8.863,
+    "decode_ms_per_step": 140.68,
+    "pass1_runs_s": [
+     11.373,
+     10.115
+    ],
+    "pass2_runs_s": [
+     19.052,
+     18.978
+    ],
+    "prompt_chars": 85043,
+    "out_preview": " Jacob Singer, a Vietnam War veteran, experiences terrifying"
+   },
+   "64k": {
+    "prefill_s": 24.348,
+    "total_s": 33.252,
+    "decode_s": 8.904,
+    "decode_ms_per_step": 141.33,
+    "pass1_runs_s": [
+     24.966,
+     24.348
+    ],
+    "pass2_runs_s": [
+     33.258,
+     33.252
+    ],
+    "prompt_chars": 170043,
+    "out_preview": " \n\nThe film \"Jacob's Ladder\" follows Jacob Singer, a Vietnam"
+   }
+  }
+ },
+ "tp2_bs16_64k": {
+  "quest": {
+   "backend": "quest",
+   "bs": 16,
+   "chars": 260000,
+   "n_decode": 64,
+   "prefill_s": 54.43,
+   "total_s": 62.06,
+   "decode_s": 7.63,
+   "decode_ms_per_step": 121.1,
+   "tok_per_s": 16.5
+  },
+  "triton": {
+   "backend": "triton",
+   "bs": 16,
+   "chars": 260000,
+   "n_decode": 64,
+   "prefill_s": 102.25,
+   "total_s": 106.13,
+   "decode_s": 3.88,
+   "decode_ms_per_step": 61.6,
+   "tok_per_s": 9.6
+  },
+  "tli": {
+   "backend": "tli",
+   "bs": 16,
+   "chars": 260000,
+   "n_decode": 64,
+   "prefill_s": 136.03,
+   "total_s": 141.95,
+   "decode_s": 5.92,
+   "decode_ms_per_step": 93.9,
+   "tok_per_s": 7.2
+  }
+ },
+ "verdicts": {
+  "single_64k_total": "quest 14.86 < triton 23.63 < tli 33.25 —— Quest e2e 占优，TLI 全形状不敌",
+  "tp2_total": "quest 62.06 < triton 106.13 < tli 141.95 —— 同向",
+  "tp2_decode_only": "triton 61.6 < tli 93.9 < quest 121.1 ms/step —— decode 段 TLI 索引开销 32ms/step vs Quest 59.5ms/step = 1.85x（对 dense 增量口径），TLI 唯一 e2e 层亮点",
+  "regression_note": "旧 tli_64k_tp2_tli.json total 115.28s（0928，NaN修复前）vs 新 141.95s；triton 基线不动（106.24->106.13）——TLI 侧 +23% 回归待归因（m_safe where 或 env）",
+  "paper_impact": "论文旧速度句「64K 单请求 1.285x / 32K 0.77x / 高并发 0.92x」基于旧代码旧口径（单请求为纯 prefill 计时失真），须按新三臂数据改写为诚实口径"
+ }
+}

@@ -1,0 +1,84 @@
+{
+ "experiment": "E79b: far_stat-driven per-task arm selector (offline replay)",
+ "signal": {
+  "gov_report": {
+   "far_stat": 0.2714,
+   "hot_frac": 0.569
+  },
+  "hotpotqa": {
+   "far_stat": 0.0171,
+   "hot_frac": 0.056
+  },
+  "multifieldqa_en": {
+   "far_stat": 0.0263,
+   "hot_frac": 0.097
+  },
+  "musique": {
+   "far_stat": 0.0218,
+   "hot_frac": 0.111
+  },
+  "narrativeqa": {
+   "far_stat": 0.2142,
+   "hot_frac": 0.583
+  },
+  "passage_retrieval_en": {
+   "far_stat": 0.0242,
+   "hot_frac": 0.097
+  },
+  "qasper": {
+   "far_stat": 0.0152,
+   "hot_frac": 0.056
+  }
+ },
+ "fixed_config_universality": {
+  "noise_tasks_2arm_gap_lt_0.5": [
+   "hotpotqa",
+   "2wikimqa",
+   "qasper",
+   "multifieldqa_en",
+   "passage_retrieval_en",
+   "gov_report",
+   "qmsum",
+   "multi_news",
+   "narrativeqa",
+   "triviaqa",
+   "lcc",
+   "repobench"
+  ],
+  "diverging_tasks": {
+   "musique": 1.94
+  },
+  "n_noise": 12,
+  "n_total": 13
+ },
+ "verdict_longbench": {
+  "fixed_b375": 50.54,
+  "fixed_b25": 50.41,
+  "selector": 50.54,
+  "oracle_per_task": 50.62,
+  "selector_tau": 0.02,
+  "selector_default_arm": "b25",
+  "selector_correct_on_signaled": "2/7",
+  "selector_scores": {
+   "hotpotqa": 54.23,
+   "2wikimqa": 39.07,
+   "musique": 34.76,
+   "qasper": 44.24,
+   "multifieldqa_en": 52.92,
+   "passage_retrieval_en": 99.5,
+   "gov_report": 33.29,
+   "qmsum": 23.8,
+   "multi_news": 24.75,
+   "narrativeqa": 23.83,
+   "triviaqa": 90.41,
+   "lcc": 69.37,
+   "repobench": 66.84
+  }
+ },
+ "verdict_ruler": {
+  "fixed_b25": 87.93,
+  "fixed_b375": 87.59,
+  "needle_signal_far_stat": 0.0566
+ },
+ "signal_cost": "zero (prefill far_stat \u662f #60 \u73b0\u6210\u526f\u4ea7\u54c1\uff0ccorr 0.924\uff1b\u65e0\u65b0\u589e kernel)"
+}

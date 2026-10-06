@@ -1,0 +1,64 @@
+{
+ "mean": {
+  "tail32": 0.8113,
+  "kvar32": 0.7493,
+  "sparq_q32": 0.8482,
+  "pair_adapt16": 0.8652
+ },
+ "per_sample": {
+  "lb_gov_report_0": {
+   "tail32": 0.7653,
+   "kvar32": 0.7352,
+   "sparq_q32": 0.8766,
+   "pair_adapt16": 0.8506
+  },
+  "lb_hotpotqa_0": {
+   "tail32": 0.7602,
+   "kvar32": 0.7006,
+   "sparq_q32": 0.8575,
+   "pair_adapt16": 0.8772
+  },
+  "lb_musique_0": {
+   "tail32": 0.7767,
+   "kvar32": 0.7757,
+   "sparq_q32": 0.7555,
+   "pair_adapt16": 0.8566
+  },
+  "lb_narrativeqa_0": {
+   "tail32": 0.6926,
+   "kvar32": 0.5511,
+   "sparq_q32": 0.6431,
+   "pair_adapt16": 0.6417
+  },
+  "lb_passage_retrieval_en_0": {
+   "tail32": 0.8202,
+   "kvar32": 0.8576,
+   "sparq_q32": 0.8649,
+   "pair_adapt16": 0.9127
+  },
+  "lb_qasper_0": {
+   "tail32": 0.8826,
+   "kvar32": 0.82,
+   "sparq_q32": 0.8967,
+   "pair_adapt16": 0.8798
+  },
+  "needle32k": {
+   "tail32": 0.9672,
+   "kvar32": 0.817,
+   "sparq_q32": 0.9962,
+   "pair_adapt16": 0.9963
+  },
+  "natural32k": {
+   "tail32": 0.8255,
+   "kvar32": 0.7372,
+   "sparq_q32": 0.895,
+   "pair_adapt16": 0.9068
+  },
+  "MEAN8": {
+   "tail32": 0.8113,
+   "kvar32": 0.7493,
+   "sparq_q32": 0.8482,
+   "pair_adapt16": 0.8652
+  }
+ }
+}

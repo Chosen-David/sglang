@@ -1,0 +1,158 @@
+{
+ "note": "E104/E104b round4 MAJOR #111：RULER 32768 档补点——双 TLI 臂（主臂 mavg α=0.125 β=0.375 γ=0.625，E101 同配置；参照臂 mavg α=0.125 β=0.25 γ=0.125，b7s 论文 87.93 主源口径）+ 五方法臂（FullKV/Quest/TIA/单池，凑主表 32K 行），11 任务×n=100，官方生成器产数据",
+ "arms": {
+  "main_g0625": {
+   "alpha": 0.125,
+   "beta": 0.375,
+   "gamma": 0.625
+  },
+  "ref_g0125": {
+   "alpha": 0.125,
+   "beta": 0.25,
+   "gamma": 0.125
+  },
+  "fullkv": {
+   "method": "none"
+  },
+  "quest": {
+   "method": "quest_64_16 (defaults)"
+  },
+  "tia": {
+   "method": "tia_64_128_1024_c4"
+  },
+  "single_pool": {
+   "method": "tli α=0/β=0/γ=1 (C0 defaults)"
+  }
+ },
+ "context_length": 32768,
+ "budget": "level1_topk 128 / level2_topk 1024 / cmp_ratio 4 / subspace full(默认)",
+ "scores": {
+  "main_g0625": {
+   "niah_single_1": 99.0,
+   "niah_single_2": 100.0,
+   "niah_single_3": 100.0,
+   "niah_multikey_1": 99.0,
+   "niah_multikey_2": 80.0,
+   "niah_multikey_3": 7.0,
+   "niah_multiquery": 24.75,
+   "niah_multivalue": 30.25,
+   "cwe": 61.9,
+   "fwe": 11.0,
+   "vt": 32.0,
+   "AVG": 58.63
+  },
+  "ref_g0125": {
+   "niah_single_1": 99.0,
+   "niah_single_2": 100.0,
+   "niah_single_3": 100.0,
+   "niah_multikey_1": 98.0,
+   "niah_multikey_2": 80.0,
+   "niah_multikey_3": 12.0,
+   "niah_multiquery": 24.5,
+   "niah_multivalue": 27.75,
+   "cwe": 80.1,
+   "fwe": 12.67,
+   "vt": 34.6,
+   "AVG": 60.78
+  },
+  "fullkv": {
+   "niah_single_1": 100.0,
+   "niah_single_2": 100.0,
+   "niah_single_3": 100.0,
+   "niah_multikey_1": 99.0,
+   "niah_multikey_2": 76.0,
+   "niah_multikey_3": 4.0,
+   "niah_multiquery": 24.5,
+   "niah_multivalue": 25.0,
+   "cwe": 83.5,
+   "fwe": 7.0,
+   "vt": 34.2,
+   "AVG": 59.38
+  },
+  "quest": {
+   "niah_single_1": 98.0,
+   "niah_single_2": 91.0,
+   "niah_single_3": 95.0,
+   "niah_multikey_1": 86.0,
+   "niah_multikey_2": 2.0,
+   "niah_multikey_3": 0.0,
+   "niah_multiquery": 19.5,
+   "niah_multivalue": 21.75,
+   "cwe": 24.5,
+   "fwe": 51.0,
+   "vt": 35.2,
+   "AVG": 47.63
+  },
+  "tia": {
+   "niah_single_1": 99.0,
+   "niah_single_2": 100.0,
+   "niah_single_3": 100.0,
+   "niah_multikey_1": 99.0,
+   "niah_multikey_2": 75.0,
+   "niah_multikey_3": 16.0,
+   "niah_multiquery": 24.5,
+   "niah_multivalue": 27.0,
+   "cwe": 83.5,
+   "fwe": 12.67,
+   "vt": 31.8,
+   "AVG": 60.77
+  },
+  "single_pool": {
+   "niah_single_1": 99.0,
+   "niah_single_2": 100.0,
+   "niah_single_3": 100.0,
+   "niah_multikey_1": 99.0,
+   "niah_multikey_2": 75.0,
+   "niah_multikey_3": 16.0,
+   "niah_multiquery": 24.5,
+   "niah_multivalue": 27.0,
+   "cwe": 83.5,
+   "fwe": 12.67,
+   "vt": 31.8,
+   "AVG": 60.77
+  }
+ },
+ "delta_main_minus_ref": {
+  "niah_single_1": 0.0,
+  "niah_single_2": 0.0,
+  "niah_single_3": 0.0,
+  "niah_multikey_1": 1.0,
+  "niah_multikey_2": 0.0,
+  "niah_multikey_3": -5.0,
+  "niah_multiquery": 0.25,
+  "niah_multivalue": 2.5,
+  "cwe": -18.2,
+  "fwe": -1.67,
+  "vt": -2.6,
+  "AVG": -2.15
+ },
+ "delta_ref_minus_fullkv": {
+  "niah_single_1": -1.0,
+  "niah_single_2": 0.0,
+  "niah_single_3": 0.0,
+  "niah_multikey_1": -1.0,
+  "niah_multikey_2": 4.0,
+  "niah_multikey_3": 8.0,
+  "niah_multiquery": 0.0,
+  "niah_multivalue": 2.75,
+  "cwe": -3.4,
+  "fwe": 5.67,
+  "vt": 0.4,
+  "AVG": 1.4
+ },
+ "delta_ref_minus_quest": {
+  "niah_single_1": 1.0,
+  "niah_single_2": 9.0,
+  "niah_single_3": 5.0,
+  "niah_multikey_1": 12.0,
+  "niah_multikey_2": 78.0,
+  "niah_multikey_3": 12.0,
+  "niah_multiquery": 5.0,
+  "niah_multivalue": 6.0,
+  "cwe": 55.6,
+  "fwe": -38.33,
+  "vt": -0.6,
+  "AVG": 13.15
+ },
+ "e101_context": "16K 及以下：主臂 overall 85.83 vs 参照臂 87.93（−2.10），伤害集中 cwe（82.0/68.6/55.5 随长度放大）+ fwe 微伤，其余 8 任务持平；Quest 4K/8K/16K = 87.91/81.76/70.18 随长度崩塌"
+}

@@ -1,0 +1,35 @@
+{
+ "note": "E103 kv-head 共享消融（审稿 MAJOR：§2.2 GQA 组内共享 vs per-q-head 独立选择）",
+ "protocol": {
+  "model": "Qwen3-8B",
+  "gqa": "32 q-head -> 8 kv-head, group_size G=4",
+  "config": "mavg (far=minmax, near=avg), alpha=0.125 beta=0.375 gamma=0.625, K1=128, cmp_ratio=4, subspace=full, kmeans/layer_skip off",
+  "arms": {
+   "A_shared": "K2=1024, mask [Hkv,T] 组内广播（论文 §2.2 口径，不重跑，取 e98_full_13tasks.json best 选举臂同配置数字）",
+   "B_per_q_head_same_K2": "K2=1024, --tli_per_q_head true（每 q-head 独立 1024；索引量 ×4、计算量与 A 持平——测共享的质量损失）",
+   "C_per_q_head_same_total": "K2=256, --tli_per_q_head true（32x256=8192 token-head = 共享臂 8x1024 索引条目持平——同预算公平对照）"
+  },
+  "caveat": "臂 C 结构事实：K2=256 时 K2_mid = 256 - sink(128) - swa(128) = 0，mid 预算被固定区吃满（sink/swa per-head 化后固定开销 ×G）；共享口径把固定区摊薄到 kv-head 级（8x256 vs 32x256），该摊薄优势是共享结构收益的一部分，如实计入对照语义",
+  "tasks": "hotpotqa / musique, LongBench n=200"
+ },
+ "A_shared": {
+  "hotpotqa": 55.44,
+  "musique": 34.71
+ },
+ "B_per_q_head_same_K2": {
+  "hotpotqa": 53.79,
+  "musique": 34.51
+ },
+ "C_per_q_head_same_total": {
+  "hotpotqa": 28.37,
+  "musique": 12.0
+ },
+ "delta_B_minus_A": {
+  "hotpotqa": -1.65,
+  "musique": -0.2
+ },
+ "delta_C_minus_A": {
+  "hotpotqa": -27.07,
+  "musique": -22.71
+ }
+}

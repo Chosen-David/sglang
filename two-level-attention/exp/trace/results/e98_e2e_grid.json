@@ -1,0 +1,71 @@
+{
+ "note": "E98 e2e 精度网格 v2：mass 有效配置 top-3（γ 截断去重，nt_near=min(nb_near*BS*γ,K2)）× 4 组合 × screen 任务 + 部署参照臂；v1 坍缩臂教训见 note",
+ "v1_fix": "v1 选 mass top-3 但 γ≥0.5 臂在 e2e K2=1024 下全部截断为 nt_near=1024 同配置（g0.75/g0.875 同分 54.16/35.57 实证），v2 按 (α,β,nt_near) 去重",
+ "protocol": "K1=128 K2=1024, n=200",
+ "mavg_a0.125_b0.25_g0.75": {
+  "mass": 0.8822,
+  "hotpotqa": 54.16,
+  "musique": 35.57
+ },
+ "mavg_a0.125_b0.25_g0.375": {
+  "mass": 0.8805,
+  "hotpotqa": 54.16,
+  "musique": 35.57
+ },
+ "mavg_a0.125_b0.375_g0.625": {
+  "mass": 0.8801,
+  "hotpotqa": 55.44,
+  "musique": 34.71
+ },
+ "mminmax_a0.875_b0.875_g0.5": {
+  "mass": 0.896,
+  "hotpotqa": 54.4,
+  "musique": 33.4
+ },
+ "mminmax_a0.75_b0.75_g0.5": {
+  "mass": 0.8952,
+  "hotpotqa": 54.38,
+  "musique": 33.24
+ },
+ "mminmax_a0.625_b0.625_g0.5": {
+  "mass": 0.8947,
+  "hotpotqa": 53.88,
+  "musique": 33.04
+ },
+ "aavg_a0.875_b0.875_g0.375": {
+  "mass": 0.7964,
+  "hotpotqa": 54.4,
+  "musique": 33.4
+ },
+ "aavg_a0.875_b0.75_g0.5": {
+  "mass": 0.7957,
+  "hotpotqa": 54.13,
+  "musique": 33.05
+ },
+ "aavg_a0.75_b0.75_g0.5": {
+  "mass": 0.7937,
+  "hotpotqa": 54.38,
+  "musique": 33.24
+ },
+ "cavg_a0.125_b0.375_g0.625": {
+  "mass": 0.879,
+  "hotpotqa": 53.43,
+  "musique": 32.2
+ },
+ "cavg_a0.125_b0.25_g0.75": {
+  "mass": 0.8788,
+  "hotpotqa": 54.13,
+  "musique": 33.03
+ },
+ "cavg_a0.125_b0.25_g0.375": {
+  "mass": 0.8773,
+  "hotpotqa": 54.13,
+  "musique": 32.5
+ },
+ "mavg_a0.125_b0.375_g0.125": {
+  "mass": 0.8728,
+  "ref": true,
+  "hotpotqa": 54.43,
+  "musique": 34.76
+ }
+}

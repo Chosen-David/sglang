@@ -1,0 +1,406 @@
+[
+ {
+  "method": "PSI (minmax,avg) 分区",
+  "config": "α.125/β.375/γ.125",
+  "trace_mass": 0.883,
+  "e2e": {
+   "longbench_avg": 50.54,
+   "screen": {
+    "hotpotqa": 54.43,
+    "musique": 34.76,
+    "calib_tail32_L1": {
+     "hotpotqa": 54.83,
+     "musique": 33.22
+    }
+   }
+  },
+  "speed": "选择链 1.46×@32K→5.09×@128K；MACs/token≈258；336B/token",
+  "note": "L1 上界全维 128 口径（L2 细筛两口径数学等价 tail32，E87c 配对校准：L1-tail 臂 hq 54.83/mu 33.22——主表结论对 L1 维度不敏感）"
+ },
+ {
+  "method": "PSI 分区 (β.25 对照)",
+  "config": "α.125/β.25/γ.125",
+  "trace_mass": 0.8819,
+  "e2e": {
+   "longbench_avg": 50.41,
+   "screen": {
+    "hotpotqa": 54.23,
+    "musique": 32.82,
+    "screen_avg": 43.52,
+    "trace_mass": 0.9166,
+    "alpha": 0.125,
+    "beta": 0.25
+   }
+  },
+  "speed": "同上",
+  "note": ""
+ },
+ {
+  "method": "PSI 单池 (minmax)",
+  "config": "bp128/γ.125",
+  "trace_mass": 0.8979,
+  "e2e": {
+   "longbench_avg": 50.16,
+   "screen": null
+  },
+  "speed": "同上（无分区开销略低）",
+  "note": ""
+ },
+ {
+  "method": "mavg (minmax,avg)",
+  "config": "E72 最优 α/β/γ",
+  "trace_mass": 0.883,
+  "e2e": {
+   "hotpotqa": 54.23,
+   "musique": 32.82,
+   "screen_avg": 43.52,
+   "trace_mass": 0.9166,
+   "alpha": 0.125,
+   "beta": 0.25
+  },
+  "speed": null,
+  "note": "E72 冠军 β.375"
+ },
+ {
+  "method": "mminmax (minmax,minmax)",
+  "config": "E72 最优 α/β/γ",
+  "trace_mass": 0.8424,
+  "e2e": {
+   "hotpotqa": 53.27,
+   "musique": 34.14,
+   "screen_avg": 43.7,
+   "trace_mass": 0.9116,
+   "alpha": 0.375,
+   "beta": 0.375
+  },
+  "speed": null,
+  "note": null
+ },
+ {
+  "method": "aavg (avg,avg)",
+  "config": "E72 最优 α/β/γ",
+  "trace_mass": 0.7918,
+  "e2e": {
+   "hotpotqa": 54.72,
+   "musique": 32.82,
+   "screen_avg": 43.77,
+   "trace_mass": 0.8036,
+   "alpha": 0.125,
+   "beta": 0.25
+  },
+  "speed": null,
+  "note": null
+ },
+ {
+  "method": "cavg (cluster,avg)",
+  "config": "E72 最优 α/β/γ",
+  "trace_mass": 0.8801,
+  "e2e": {
+   "hotpotqa": 53.43,
+   "musique": 32.31,
+   "screen_avg": 42.87,
+   "trace_mass": 0.9033,
+   "alpha": 0.125,
+   "beta": 0.375
+  },
+  "speed": "—",
+  "note": "ClusterKV-style 代表"
+ },
+ {
+  "method": "两级 baseline (minmax,avg)",
+  "config": "α.125/β.25/γ1",
+  "trace_mass": 0.8819,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 54.23,
+    "musique": 32.82
+   }
+  },
+  "speed": "macs=76892.0, sel=2048.0",
+  "note": "trace 重放参照臂"
+ },
+ {
+  "method": "top-σ near_sigma_8.0",
+  "config": "σ=8.0",
+  "trace_mass": 0.8596,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 55.12,
+    "musique": 31.83
+   }
+  },
+  "speed": "macs=130255.0, sel=1300.9",
+  "note": "预算可变质量-预算旋钮"
+ },
+ {
+  "method": "top-σ far_sigma_8.0",
+  "config": "σ=8.0",
+  "trace_mass": 0.7352,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 54.31,
+    "musique": 30.09
+   }
+  },
+  "speed": "macs=635809.0, sel=1972.5",
+  "note": "预算可变质量-预算旋钮"
+ },
+ {
+  "method": "top-σ mid_sigma_8.0",
+  "config": "σ=8.0",
+  "trace_mass": 0.7125,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 53.5,
+    "musique": 31.09
+   }
+  },
+  "speed": "macs=689172.0, sel=1225.4",
+  "note": "预算可变质量-预算旋钮"
+ },
+ {
+  "method": "top-σ far_sigma_32.0",
+  "config": "σ=32.0",
+  "trace_mass": 0.7522,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 52.48
+   }
+  },
+  "speed": "macs=635809.0, sel=2287.4",
+  "note": "预算可变质量-预算旋钮"
+ },
+ {
+  "method": "top-σ mid_sigma_32.0",
+  "config": "σ=32.0",
+  "trace_mass": 0.7328,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 53.48
+   }
+  },
+  "speed": "macs=689172.0, sel=1573.5",
+  "note": "预算可变质量-预算旋钮"
+ },
+ {
+  "method": "mono vs 分区 @b256",
+  "config": "mavg 同预算",
+  "trace_mass": -0.0027,
+  "e2e": null,
+  "speed": null,
+  "note": "mono=0.8233 part=0.8206 分区胜 1/16"
+ },
+ {
+  "method": "mono vs 分区 @b512",
+  "config": "mavg 同预算",
+  "trace_mass": -0.0029,
+  "e2e": null,
+  "speed": null,
+  "note": "mono=0.8549 part=0.852 分区胜 0/16"
+ },
+ {
+  "method": "mono vs 分区 @b768",
+  "config": "mavg 同预算",
+  "trace_mass": -0.0038,
+  "e2e": null,
+  "speed": null,
+  "note": "mono=0.8754 part=0.8716 分区胜 1/16"
+ },
+ {
+  "method": "mono vs 分区 @b1024",
+  "config": "mavg 同预算",
+  "trace_mass": -0.0037,
+  "e2e": null,
+  "speed": null,
+  "note": "mono=0.8902 part=0.8866 分区胜 1/16"
+ },
+ {
+  "method": "mono vs 分区 @b2048",
+  "config": "mavg 同预算",
+  "trace_mass": -0.0035,
+  "e2e": null,
+  "speed": null,
+  "note": "mono=0.9271 part=0.9236 分区胜 0/16"
+ },
+ {
+  "method": "FullKV",
+  "config": "官方配置",
+  "trace_mass": null,
+  "e2e": {
+   "longbench_avg": 50.36
+  },
+  "speed": null,
+  "note": ""
+ },
+ {
+  "method": "Quest",
+  "config": "官方配置",
+  "trace_mass": null,
+  "e2e": {
+   "longbench_avg": 47.72
+  },
+  "speed": null,
+  "note": ""
+ },
+ {
+  "method": "TIA",
+  "config": "官方配置",
+  "trace_mass": null,
+  "e2e": {
+   "longbench_avg": 50.06
+  },
+  "speed": null,
+  "note": ""
+ },
+ {
+  "method": "SnapKV",
+  "config": "官方配置",
+  "trace_mass": null,
+  "e2e": {
+   "longbench_avg": 27.7
+  },
+  "speed": null,
+  "note": ""
+ },
+ {
+  "method": "H2O",
+  "config": "官方配置",
+  "trace_mass": null,
+  "e2e": {
+   "longbench_avg": 14.87
+  },
+  "speed": null,
+  "note": ""
+ },
+ {
+  "method": "PyramidKV",
+  "config": "官方配置",
+  "trace_mass": null,
+  "e2e": {
+   "longbench_avg": 28.82
+  },
+  "speed": null,
+  "note": ""
+ },
+ {
+  "method": "StreamingLLM",
+  "config": "budget=1024",
+  "trace_mass": null,
+  "e2e": {
+   "longbench_avg": 14.2,
+   "screen": {
+    "hotpotqa": 2.9,
+    "musique": 1.99,
+    "screen_avg": 2.44
+   }
+  },
+  "speed": null,
+  "note": "E89 全量 13 任务：静态稀疏崩塌证据"
+ },
+ {
+  "method": "MoBA (统一harness)",
+  "config": "chunk gate top-16 块",
+  "trace_mass": null,
+  "e2e": {
+   "longbench_avg": 49.19,
+   "screen": {
+    "hotpotqa": 51.02,
+    "musique": 29.74,
+    "screen_avg": 40.38
+   }
+  },
+  "speed": null,
+  "note": "E89 复现 13 任务全量：QA/检索落后 PSI 3+/代码任务反超（repobench 68.13 vs 66.67）——无上界 chunk gate 掉档"
+ },
+ {
+  "method": "E90 子空间 full",
+  "config": "twolvl α.125/β.25/γ.125",
+  "trace_mass": null,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 54.72,
+    "musique": 32.82
+   }
+  },
+  "speed": null,
+  "note": "五臂排序（hq）：rope64 55.98 > full128 54.72 > tail32 54.23 > nope64 52.4 >> random32 46.01 >> highfreq 33.8；崩塌级双口径同向"
+ },
+ {
+  "method": "E90 子空间 rope",
+  "config": "twolvl α.125/β.25/γ.125",
+  "trace_mass": null,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 55.98,
+    "musique": 32.96
+   }
+  },
+  "speed": null,
+  "note": "五臂排序（hq）：rope64 55.98 > full128 54.72 > tail32 54.23 > nope64 52.4 >> random32 46.01 >> highfreq 33.8；崩塌级双口径同向"
+ },
+ {
+  "method": "E90 子空间 nope",
+  "config": "twolvl α.125/β.25/γ.125",
+  "trace_mass": null,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 52.4,
+    "musique": 30.8
+   }
+  },
+  "speed": null,
+  "note": "五臂排序（hq）：rope64 55.98 > full128 54.72 > tail32 54.23 > nope64 52.4 >> random32 46.01 >> highfreq 33.8；崩塌级双口径同向"
+ },
+ {
+  "method": "E90 子空间 random",
+  "config": "twolvl α.125/β.25/γ.125",
+  "trace_mass": null,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 46.01,
+    "musique": 24.08
+   }
+  },
+  "speed": null,
+  "note": "五臂排序（hq）：rope64 55.98 > full128 54.72 > tail32 54.23 > nope64 52.4 >> random32 46.01 >> highfreq 33.8；崩塌级双口径同向"
+ },
+ {
+  "method": "E90 子空间 highfreq",
+  "config": "twolvl α.125/β.25/γ.125",
+  "trace_mass": null,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 33.8,
+    "musique": 14.26
+   }
+  },
+  "speed": null,
+  "note": "五臂排序（hq）：rope64 55.98 > full128 54.72 > tail32 54.23 > nope64 52.4 >> random32 46.01 >> highfreq 33.8；崩塌级双口径同向"
+ },
+ {
+  "method": "top-σ near σ8 (L1-tail 校准臂)",
+  "config": "σ=8, L1 上界 tail32",
+  "trace_mass": null,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 55.08,
+    "musique": 31.19
+   }
+  },
+  "speed": null,
+  "note": "E87c：top-σ 判决不受 L1 维度混杂影响（hq 维度差 −0.04 噪声级）"
+ },
+ {
+  "method": "mavg β.375 (L1-tail 校准臂)",
+  "config": "α.125/β.375, L1 上界 tail32",
+  "trace_mass": null,
+  "e2e": {
+   "screen": {
+    "hotpotqa": 54.83,
+    "musique": 33.22
+   }
+  },
+  "speed": null,
+  "note": "E87c：L1 维度效应在 mavg 臂方向反转（tail +0.40）——非可加常数、method×dimension 交互"
+ }
+]

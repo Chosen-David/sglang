@@ -1,0 +1,44 @@
+{
+ "note": "M10 gate 收益量化（round3）：E67 per-request gate 离线跳层率 × e64c tail32 选择链 kernel 成本",
+ "select_chain_cost": {
+  "per_layer_ms@8K": 0.8201,
+  "n_layers": 36,
+  "full_chain_ms_per_token_step": 29.522
+ },
+ "gate_arms": {
+  "skip_near/tau0.05_last1": {
+   "skip_ratio": 0.1429,
+   "mass_lost": 0.0079,
+   "sel_ms_saved_per_step": 4.219,
+   "sel_compute_saved_pct": 14.3,
+   "n_skipped_total": "24/168"
+  },
+  "skip_near/tau0.05_avg16": {
+   "skip_ratio": 0.1429,
+   "mass_lost": 0.0142,
+   "sel_ms_saved_per_step": 4.219,
+   "sel_compute_saved_pct": 14.3,
+   "n_skipped_total": "24/168"
+  },
+  "skip_near/tau0.1_last1": {
+   "skip_ratio": 0.3095,
+   "mass_lost": 0.0227,
+   "sel_ms_saved_per_step": 9.137,
+   "sel_compute_saved_pct": 30.9,
+   "n_skipped_total": "52/168"
+  },
+  "skip_far/tau0.2_last1": {
+   "skip_ratio": 0.119,
+   "mass_lost": 0.0173,
+   "sel_ms_saved_per_step": 3.513,
+   "sel_compute_saved_pct": 11.9,
+   "n_skipped_total": "20/168"
+  }
+ },
+ "cost_side_e2e": {
+  "musique": 0.23,
+  "qasper": -0.41,
+  "comment": "E5b/E67 e2e 差分（gate on vs off），代价侧"
+ },
+ "verdict": "τ0.05 保守臂（last1 感知信号）：跳 14.3% 层（24/168）mass 损失 0.8%；选择链 kernel 成本省 14.3%（每 token 步 29.5 ms → 省 4.2 ms，S=8K 口径）。τ0.1 激进臂跳 30.9% 层但 mass 损失 2.3% 触及 far 检索。收益上界=离线静态轮廓 13/36=36.1% 层可跳（E6）。"
+}

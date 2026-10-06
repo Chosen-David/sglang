@@ -1,0 +1,52 @@
+{
+ "note": "M6 sink-guard 判决全量：三方法 × 13 任务（预算 1024 + sink 128 计外）",
+ "protocol": "sink 保送对齐 PSI 口径（sink 不占预算），n=200（multifieldqa_en 全集 150）",
+ "snapkv_sinkguard": {
+  "hotpotqa": 32.8,
+  "musique": 12.69,
+  "2wikimqa": 27.96,
+  "passage_retrieval_en": 7.0,
+  "qasper": 17.28,
+  "multifieldqa_en": 26.99,
+  "gov_report": 23.01,
+  "qmsum": 18.16,
+  "multi_news": 20.09,
+  "narrativeqa": 12.25,
+  "triviaqa": 73.91,
+  "lcc": 67.76,
+  "repobench": 50.27,
+  "AVG": 30.01
+ },
+ "h2o_sinkguard": {
+  "hotpotqa": 3.21,
+  "musique": 1.72,
+  "2wikimqa": 12.12,
+  "passage_retrieval_en": 4.5,
+  "qasper": 9.48,
+  "multifieldqa_en": 17.15,
+  "gov_report": 22.85,
+  "qmsum": 13.62,
+  "multi_news": 21.08,
+  "narrativeqa": 2.91,
+  "triviaqa": 23.36,
+  "lcc": 53.32,
+  "repobench": 35.88,
+  "AVG": 17.02
+ },
+ "pyramidkv_sinkguard": {
+  "hotpotqa": 30.33,
+  "musique": 11.86,
+  "2wikimqa": 26.84,
+  "passage_retrieval_en": 7.5,
+  "qasper": 19.17,
+  "multifieldqa_en": 53.85,
+  "gov_report": 23.1,
+  "qmsum": 18.52,
+  "multi_news": 20.24,
+  "narrativeqa": 12.18,
+  "triviaqa": 77.92,
+  "lcc": 66.57,
+  "repobench": 52.48,
+  "AVG": 32.35
+ }
+}

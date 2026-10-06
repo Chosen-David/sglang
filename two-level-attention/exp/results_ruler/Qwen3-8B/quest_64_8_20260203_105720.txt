@@ -1,0 +1,41 @@
+Model: hf_models/downloads/Qwen/Qwen3-8B
+Evaluation Time: 2026-02-04 11:21:30
+Tasks: niah_single_1, niah_single_2, niah_multikey_1, niah_multikey_2, niah_multiquery, niah_multivalue
+Batch Size: 1
+Max Length: 65536
+
+================================================================================
+
+Evaluation Results:
+|     Tasks     |Version|Filter|n-shot|Metric|   | Value |   |Stderr|
+|---------------|------:|------|-----:|-----:|---|------:|---|------|
+|niah_multikey_1|      1|none  |     0| 16384|↑  | 0.8440|±  |   N/A|
+|               |       |none  |     0| 32768|↑  | 0.2800|±  |   N/A|
+|               |       |none  |     0|  4096|↑  |-1.0000|±  |   N/A|
+|               |       |none  |     0|  8192|↑  | 0.9860|±  |   N/A|
+|niah_multikey_2|      1|none  |     0| 16384|↑  | 0.0760|±  |   N/A|
+|               |       |none  |     0| 32768|↑  | 0.0400|±  |   N/A|
+|               |       |none  |     0|  4096|↑  |-1.0000|±  |   N/A|
+|               |       |none  |     0|  8192|↑  | 0.5660|±  |   N/A|
+|niah_multiquery|      1|none  |     0| 16384|↑  | 0.5235|±  |   N/A|
+|               |       |none  |     0| 32768|↑  | 0.1125|±  |   N/A|
+|               |       |none  |     0|  4096|↑  |-1.0000|±  |   N/A|
+|               |       |none  |     0|  8192|↑  | 0.9470|±  |   N/A|
+|niah_multivalue|      1|none  |     0| 16384|↑  | 0.3680|±  |   N/A|
+|               |       |none  |     0| 32768|↑  | 0.0540|±  |   N/A|
+|               |       |none  |     0|  4096|↑  |-1.0000|±  |   N/A|
+|               |       |none  |     0|  8192|↑  | 0.8410|±  |   N/A|
+|niah_single_1  |      1|none  |     0| 16384|↑  | 1.0000|±  |   N/A|
+|               |       |none  |     0| 32768|↑  | 1.0000|±  |   N/A|
+|               |       |none  |     0|  4096|↑  |-1.0000|±  |   N/A|
+|               |       |none  |     0|  8192|↑  | 1.0000|±  |   N/A|
+|niah_single_2  |      1|none  |     0| 16384|↑  | 0.8360|±  |   N/A|
+|               |       |none  |     0| 32768|↑  | 0.3020|±  |   N/A|
+|               |       |none  |     0|  4096|↑  |-1.0000|±  |   N/A|
+|               |       |none  |     0|  8192|↑  | 0.9960|±  |   N/A|
+
+
+================================================================================
+
+Sparse Attention Metrics:
+Mean Select Tokens: 512.0

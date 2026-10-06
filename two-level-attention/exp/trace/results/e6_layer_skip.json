@@ -1,0 +1,188 @@
+{
+ "per_prompt": {
+  "lb_gov_report_0": {
+   "n_layers": 36,
+   "n_skippable": 13,
+   "far_mass_total": 8.948454295188968,
+   "far_mass_skipped": 5.545923191877932e-05
+  },
+  "lb_gov_report_1": {
+   "n_layers": 36,
+   "n_skippable": 14,
+   "far_mass_total": 10.595210321360437,
+   "far_mass_skipped": 0.008301854246463862
+  },
+  "lb_hotpotqa_0": {
+   "n_layers": 36,
+   "n_skippable": 30,
+   "far_mass_total": 0.5707428534035681,
+   "far_mass_skipped": 0.15482917283523073
+  },
+  "lb_hotpotqa_1": {
+   "n_layers": 36,
+   "n_skippable": 32,
+   "far_mass_total": 0.6605975257019396,
+   "far_mass_skipped": 0.04716704057258325
+  },
+  "lb_narrativeqa_0": {
+   "n_layers": 36,
+   "n_skippable": 12,
+   "far_mass_total": 7.7106049811662976,
+   "far_mass_skipped": 0.005560050365502139
+  },
+  "lb_narrativeqa_1": {
+   "n_layers": 36,
+   "n_skippable": 12,
+   "far_mass_total": 7.7106049811662976,
+   "far_mass_skipped": 0.005560050365502139
+  },
+  "lb_passage_retrieval_en_0": {
+   "n_layers": 36,
+   "n_skippable": 31,
+   "far_mass_total": 0.985513894433329,
+   "far_mass_skipped": 0.03211387860233532
+  },
+  "lb_passage_retrieval_en_1": {
+   "n_layers": 36,
+   "n_skippable": 31,
+   "far_mass_total": 0.7593660383971984,
+   "far_mass_skipped": 0.04624820049131467
+  },
+  "natural32k": {
+   "n_layers": 36,
+   "n_skippable": 16,
+   "far_mass_total": 3.0547572088835997,
+   "far_mass_skipped": 0.016362990572885705
+  },
+  "needle32k": {
+   "n_layers": 36,
+   "n_skippable": 23,
+   "far_mass_total": 1.0176835697076327,
+   "far_mass_skipped": 0.044189954542279836
+  }
+ },
+ "cross_prompt_pred": {
+  "lb_gov_report_0": {
+   "precision": 1.0,
+   "recall": 1.0,
+   "n_pred": 13,
+   "missed_far_mass": 0
+  },
+  "lb_gov_report_1": {
+   "precision": 1.0,
+   "recall": 0.9285714285714286,
+   "n_pred": 13,
+   "missed_far_mass": 0
+  },
+  "lb_hotpotqa_0": {
+   "precision": 1.0,
+   "recall": 0.43333333333333335,
+   "n_pred": 13,
+   "missed_far_mass": 0
+  },
+  "lb_hotpotqa_1": {
+   "precision": 1.0,
+   "recall": 0.40625,
+   "n_pred": 13,
+   "missed_far_mass": 0
+  },
+  "lb_narrativeqa_0": {
+   "precision": 0.9230769230769231,
+   "recall": 1.0,
+   "n_pred": 13,
+   "missed_far_mass": 0.022601356729865074
+  },
+  "lb_narrativeqa_1": {
+   "precision": 0.9230769230769231,
+   "recall": 1.0,
+   "n_pred": 13,
+   "missed_far_mass": 0.022601356729865074
+  },
+  "lb_passage_retrieval_en_0": {
+   "precision": 1.0,
+   "recall": 0.41935483870967744,
+   "n_pred": 13,
+   "missed_far_mass": 0
+  },
+  "lb_passage_retrieval_en_1": {
+   "precision": 1.0,
+   "recall": 0.41935483870967744,
+   "n_pred": 13,
+   "missed_far_mass": 0
+  },
+  "natural32k": {
+   "precision": 1.0,
+   "recall": 0.8125,
+   "n_pred": 13,
+   "missed_far_mass": 0
+  },
+  "needle32k": {
+   "precision": 1.0,
+   "recall": 0.5652173913043478,
+   "n_pred": 13,
+   "missed_far_mass": 0
+  }
+ },
+ "l1_online_pred": {
+  "lb_gov_report_0": {
+   "threshold": 0.12188778710034158,
+   "n_pred": 30,
+   "precision": 0.26666666666666666,
+   "missed_far_mass": 8.443589814007282
+  },
+  "lb_gov_report_1": {
+   "threshold": 0.12188778710034158,
+   "n_pred": 30,
+   "precision": 0.3333333333333333,
+   "missed_far_mass": 10.069499261677265
+  },
+  "lb_hotpotqa_0": {
+   "threshold": 0.12188778710034158,
+   "n_pred": 0,
+   "precision": 1.0,
+   "missed_far_mass": 0
+  },
+  "lb_hotpotqa_1": {
+   "threshold": 0.12188778710034158,
+   "n_pred": 0,
+   "precision": 1.0,
+   "missed_far_mass": 0
+  },
+  "lb_narrativeqa_0": {
+   "threshold": 0.12188778710034158,
+   "n_pred": 31,
+   "precision": 0.2903225806451613,
+   "missed_far_mass": 7.141862099990249
+  },
+  "lb_narrativeqa_1": {
+   "threshold": 0.12188778710034158,
+   "n_pred": 31,
+   "precision": 0.2903225806451613,
+   "missed_far_mass": 7.141862099990249
+  },
+  "lb_passage_retrieval_en_0": {
+   "threshold": 0.12188778710034158,
+   "n_pred": 0,
+   "precision": 1.0,
+   "missed_far_mass": 0
+  },
+  "lb_passage_retrieval_en_1": {
+   "threshold": 0.12188778710034158,
+   "n_pred": 0,
+   "precision": 1.0,
+   "missed_far_mass": 0
+  },
+  "natural32k": {
+   "threshold": 0.12188778710034158,
+   "n_pred": 31,
+   "precision": 0.41935483870967744,
+   "missed_far_mass": 2.2889685686677694
+  },
+  "needle32k": {
+   "threshold": 0.12188778710034158,
+   "n_pred": 28,
+   "precision": 0.5357142857142857,
+   "missed_far_mass": 0.9734936151653528
+  }
+ }
+}

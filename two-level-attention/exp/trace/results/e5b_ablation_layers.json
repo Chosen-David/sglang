@@ -1,0 +1,30 @@
+{
+ "A+B+D' (far_blocks=16)": {
+  "n_layers": 36,
+  "tli_mean": 0.99995,
+  "tia_mean": 0.99977,
+  "max_abs_diff": 0.0068,
+  "n_layers_diff_gt_001": 0
+ },
+ "A only": {
+  "n_layers": 36,
+  "tli_mean": 0.99994,
+  "tia_mean": 0.99977,
+  "max_abs_diff": 0.0068,
+  "n_layers_diff_gt_001": 0
+ },
+ "A+D'": {
+  "n_layers": 36,
+  "tli_mean": 0.99993,
+  "tia_mean": 0.99977,
+  "max_abs_diff": 0.0068,
+  "n_layers_diff_gt_001": 0
+ },
+ "A+B (far_blocks=32)": {
+  "n_layers": 36,
+  "tli_mean": 0.99995,
+  "tia_mean": 0.99977,
+  "max_abs_diff": 0.0068,
+  "n_layers_diff_gt_001": 0
+ }
+}

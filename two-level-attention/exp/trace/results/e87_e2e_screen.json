@@ -1,0 +1,28 @@
+{
+ "near_sigma_2": {
+  "hotpotqa": 54.4,
+  "musique": 31.14
+ },
+ "near_sigma_8": {
+  "hotpotqa": 55.12,
+  "musique": 31.83
+ },
+ "near_sigma_32": {
+  "hotpotqa": 54.92,
+  "musique": 31.58
+ },
+ "mid_sigma_8": {
+  "hotpotqa": 53.5,
+  "musique": 31.09
+ },
+ "far_sigma_8": {
+  "hotpotqa": 54.31,
+  "musique": 30.09
+ },
+ "far_sigma_32": {
+  "hotpotqa": 52.48
+ },
+ "mid_sigma_32": {
+  "hotpotqa": 53.48
+ }
+}

@@ -1,0 +1,262 @@
+{
+    "2wikimqa-none-01221519.jsonl": {
+        "score": 48.9,
+        "budget": -1
+    },
+    "2wikimqa-quest_64_8-01261213.jsonl": {
+        "score": 38.82,
+        "budget": 512.0
+    },
+    "2wikimqa-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 47.25,
+        "budget": 512.0
+    },
+    "2wikimqa-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 47.21,
+        "budget": 512.0
+    },
+    "2wikimqa-twi_64_128_0.9-01261213.jsonl": {
+        "score": 45.27,
+        "budget": 703.2621816127853
+    },
+    "gov_report-none-01221519.jsonl": {
+        "score": 33.29,
+        "budget": -1
+    },
+    "gov_report-quest_64_8-01261213.jsonl": {
+        "score": 30.1,
+        "budget": 512.0
+    },
+    "gov_report-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 33.43,
+        "budget": 512.0
+    },
+    "gov_report-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 33.46,
+        "budget": 512.0
+    },
+    "gov_report-twi_64_128_0.9-01261213.jsonl": {
+        "score": 33.35,
+        "budget": 882.3203884393114
+    },
+    "hotpotqa-none-01221519.jsonl": {
+        "score": 60.93,
+        "budget": -1
+    },
+    "hotpotqa-quest_64_8-01261213.jsonl": {
+        "score": 45.28,
+        "budget": 512.0
+    },
+    "hotpotqa-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 61.54,
+        "budget": 512.0
+    },
+    "hotpotqa-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 61.72,
+        "budget": 512.0
+    },
+    "hotpotqa-twi_64_128_0.9-01261213.jsonl": {
+        "score": 60.26,
+        "budget": 771.9074729399016
+    },
+    "lcc-none-01221519.jsonl": {
+        "score": 67.92,
+        "budget": -1
+    },
+    "lcc-quest_64_8-01261213.jsonl": {
+        "score": 66.0,
+        "budget": 512.0
+    },
+    "lcc-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 68.17,
+        "budget": 512.0
+    },
+    "lcc-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 68.0,
+        "budget": 512.0
+    },
+    "lcc-twi_64_128_0.9-01261213.jsonl": {
+        "score": 67.28,
+        "budget": 568.8521567601675
+    },
+    "multi_news-none-01221519.jsonl": {
+        "score": 24.89,
+        "budget": -1
+    },
+    "multi_news-quest_64_8-01261213.jsonl": {
+        "score": 24.61,
+        "budget": 512.0
+    },
+    "multi_news-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 24.97,
+        "budget": 512.0
+    },
+    "multi_news-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 24.69,
+        "budget": 512.0
+    },
+    "multi_news-twi_64_128_0.9-01261213.jsonl": {
+        "score": 24.68,
+        "budget": 506.107518035757
+    },
+    "multifieldqa_en-none-01221519.jsonl": {
+        "score": 49.53,
+        "budget": -1
+    },
+    "multifieldqa_en-quest_64_8-01261213.jsonl": {
+        "score": 42.56,
+        "budget": 512.0
+    },
+    "multifieldqa_en-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 48.99,
+        "budget": 512.0
+    },
+    "multifieldqa_en-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 49.29,
+        "budget": 512.0
+    },
+    "multifieldqa_en-twi_64_128_0.9-01261213.jsonl": {
+        "score": 51.53,
+        "budget": 735.960759023354
+    },
+    "musique-none-01221519.jsonl": {
+        "score": 36.02,
+        "budget": -1
+    },
+    "musique-quest_64_8-01261213.jsonl": {
+        "score": 20.82,
+        "budget": 512.0
+    },
+    "musique-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 34.54,
+        "budget": 512.0
+    },
+    "musique-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 35.83,
+        "budget": 512.0
+    },
+    "musique-twi_64_128_0.9-01261213.jsonl": {
+        "score": 33.64,
+        "budget": 770.8759475086351
+    },
+    "narrativeqa-none-01221519.jsonl": {
+        "score": 27.77,
+        "budget": -1
+    },
+    "narrativeqa-quest_64_8-01261213.jsonl": {
+        "score": 17.73,
+        "budget": 512.0
+    },
+    "narrativeqa-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 27.45,
+        "budget": 512.0
+    },
+    "narrativeqa-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 27.47,
+        "budget": 512.0
+    },
+    "narrativeqa-twi_64_128_0.9-01261213.jsonl": {
+        "score": 27.34,
+        "budget": 827.0377949035558
+    },
+    "passage_retrieval_en-none-01221519.jsonl": {
+        "score": 100.0,
+        "budget": -1
+    },
+    "passage_retrieval_en-quest_64_8-01261213.jsonl": {
+        "score": 88.5,
+        "budget": 512.0
+    },
+    "passage_retrieval_en-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 100.0,
+        "budget": 512.0
+    },
+    "passage_retrieval_en-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 100.0,
+        "budget": 512.0
+    },
+    "passage_retrieval_en-twi_64_128_0.9-01261213.jsonl": {
+        "score": 100.0,
+        "budget": 646.3414548760776
+    },
+    "qasper-none-01221519.jsonl": {
+        "score": 44.58,
+        "budget": -1
+    },
+    "qasper-quest_64_8-01261213.jsonl": {
+        "score": 39.54,
+        "budget": 512.0
+    },
+    "qasper-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 43.88,
+        "budget": 512.0
+    },
+    "qasper-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 44.29,
+        "budget": 512.0
+    },
+    "qasper-twi_64_128_0.9-01261213.jsonl": {
+        "score": 44.38,
+        "budget": 637.2152407427199
+    },
+    "qmsum-none-01221519.jsonl": {
+        "score": 23.59,
+        "budget": -1
+    },
+    "qmsum-quest_64_8-01261213.jsonl": {
+        "score": 21.22,
+        "budget": 512.0
+    },
+    "qmsum-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 24.11,
+        "budget": 512.0
+    },
+    "qmsum-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 24.12,
+        "budget": 512.0
+    },
+    "qmsum-twi_64_128_0.9-01261213.jsonl": {
+        "score": 24.02,
+        "budget": 792.9021461877419
+    },
+    "repobench-none-01221519.jsonl": {
+        "score": 64.8,
+        "budget": -1
+    },
+    "repobench-quest_64_8-01261213.jsonl": {
+        "score": 51.85,
+        "budget": 512.0
+    },
+    "repobench-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 63.46,
+        "budget": 512.0
+    },
+    "repobench-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 63.09,
+        "budget": 512.0
+    },
+    "repobench-twi_64_128_0.9-01261213.jsonl": {
+        "score": 63.59,
+        "budget": 817.6490334789869
+    },
+    "triviaqa-none-01221519.jsonl": {
+        "score": 92.25,
+        "budget": -1
+    },
+    "triviaqa-quest_64_8-01261213.jsonl": {
+        "score": 72.32,
+        "budget": 512.0
+    },
+    "triviaqa-tia_64_128_512_c2-01261213.jsonl": {
+        "score": 92.25,
+        "budget": 512.0
+    },
+    "triviaqa-tia_64_128_512_c4-01281117.jsonl": {
+        "score": 92.25,
+        "budget": 512.0
+    },
+    "triviaqa-twi_64_128_0.9-01261213.jsonl": {
+        "score": 91.08,
+        "budget": 662.0238782370649
+    }
+}

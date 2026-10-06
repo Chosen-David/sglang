@@ -1,0 +1,72 @@
+{
+ "none": {
+  "niah_single_1": 100.0,
+  "niah_single_2": 100.0,
+  "niah_single_3": 100.0,
+  "niah_multikey_1": 100.0,
+  "niah_multikey_2": 100.0,
+  "niah_multikey_3": 100.0,
+  "niah_multiquery": 25.0,
+  "niah_multivalue": 67.67,
+  "cwe": 91.97,
+  "fwe": 91.22,
+  "vt": 100.0,
+  "AVG": 88.71
+ },
+ "quest_64_16": {
+  "niah_single_1": 100.0,
+  "niah_single_2": 100.0,
+  "niah_single_3": 100.0,
+  "niah_multikey_1": 100.0,
+  "niah_multikey_2": 85.33,
+  "niah_multikey_3": 51.33,
+  "niah_multiquery": 25.0,
+  "niah_multivalue": 64.83,
+  "cwe": 62.4,
+  "fwe": 91.0,
+  "vt": 99.53,
+  "AVG": 79.95
+ },
+ "tia_64_128_1024_c4": {
+  "niah_single_1": 100.0,
+  "niah_single_2": 100.0,
+  "niah_single_3": 100.0,
+  "niah_multikey_1": 100.0,
+  "niah_multikey_2": 100.0,
+  "niah_multikey_3": 96.33,
+  "niah_multiquery": 25.0,
+  "niah_multivalue": 67.83,
+  "cwe": 89.4,
+  "fwe": 93.34,
+  "vt": 100.0,
+  "AVG": 88.35
+ },
+ "tli_64_128_1024_c4_ABD": {
+  "niah_single_1": 100.0,
+  "niah_single_2": 100.0,
+  "niah_single_3": 100.0,
+  "niah_multikey_1": 100.0,
+  "niah_multikey_2": 100.0,
+  "niah_multikey_3": 75.33,
+  "niah_multiquery": 24.92,
+  "niah_multivalue": 64.42,
+  "cwe": 79.93,
+  "fwe": 93.89,
+  "vt": 98.93,
+  "AVG": 85.22
+ },
+ "tli_64_128_1024_c4_A": {
+  "niah_single_1": 100.0,
+  "niah_single_2": 100.0,
+  "niah_single_3": 100.0,
+  "niah_multikey_1": 100.0,
+  "niah_multikey_2": 100.0,
+  "niah_multikey_3": 91.67,
+  "niah_multiquery": 25.0,
+  "niah_multivalue": 67.83,
+  "cwe": 87.37,
+  "fwe": 93.45,
+  "vt": 100.0,
+  "AVG": 87.76
+ }
+}

@@ -1,0 +1,41 @@
+{
+ "L16384/tli_64_128_1024_c4_A": {
+  "niah_single_1": 100.0,
+  "niah_single_2": 100.0,
+  "niah_single_3": 100.0,
+  "niah_multikey_1": 100.0,
+  "niah_multikey_2": 100.0,
+  "niah_multikey_3": 74.0,
+  "niah_multiquery": 25.0,
+  "niah_multivalue": 44.25,
+  "cwe": 72.4,
+  "fwe": 94.0,
+  "vt": 100.0
+ },
+ "L4096/tli_64_128_1024_c4_A": {
+  "niah_single_1": 100.0,
+  "niah_single_2": 100.0,
+  "niah_single_3": 100.0,
+  "niah_multikey_1": 100.0,
+  "niah_multikey_2": 100.0,
+  "niah_multikey_3": 100.0,
+  "niah_multiquery": 25.0,
+  "niah_multivalue": 90.0,
+  "cwe": 98.4,
+  "fwe": 94.67,
+  "vt": 100.0
+ },
+ "L8192/tli_64_128_1024_c4_A": {
+  "niah_single_1": 100.0,
+  "niah_single_2": 100.0,
+  "niah_single_3": 100.0,
+  "niah_multikey_1": 100.0,
+  "niah_multikey_2": 100.0,
+  "niah_multikey_3": 98.0,
+  "niah_multiquery": 25.0,
+  "niah_multivalue": 69.25,
+  "cwe": 89.5,
+  "fwe": 92.67,
+  "vt": 100.0
+ }
+}

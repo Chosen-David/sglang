@@ -1,0 +1,153 @@
+{
+ "experiment": "E74 far-budget-yield task-type generalization (beta 0.375 vs 0.25 per-task-family delta)",
+ "date": "2026-09-30",
+ "delta_definition": "Delta = beta0.375 - beta0.25; positive = far ceding budget to near wins",
+ "longbench_per_task_raw": {
+  "hotpotqa": {
+   "b375": 54.43,
+   "b25": 54.23,
+   "delta": 0.2
+  },
+  "2wikimqa": {
+   "b375": 39.23,
+   "b25": 39.07,
+   "delta": 0.16
+  },
+  "musique": {
+   "b375": 34.76,
+   "b25": 32.82,
+   "delta": 1.94
+  },
+  "qasper": {
+   "b375": 44.51,
+   "b25": 44.24,
+   "delta": 0.27
+  },
+  "multifieldqa_en": {
+   "b375": 52.92,
+   "b25": 52.91,
+   "delta": 0.01
+  },
+  "passage_retrieval_en": {
+   "b375": 99.5,
+   "b25": 99.5,
+   "delta": 0.0
+  },
+  "gov_report": {
+   "b375": 33.29,
+   "b25": 33.38,
+   "delta": -0.09
+  },
+  "qmsum": {
+   "b375": 23.52,
+   "b25": 23.8,
+   "delta": -0.28
+  },
+  "multi_news": {
+   "b375": 24.62,
+   "b25": 24.75,
+   "delta": -0.13
+  },
+  "narrativeqa": {
+   "b375": 23.83,
+   "b25": 23.96,
+   "delta": -0.13
+  },
+  "triviaqa": {
+   "b375": 90.16,
+   "b25": 90.41,
+   "delta": -0.25
+  },
+  "lcc": {
+   "b375": 69.62,
+   "b25": 69.37,
+   "delta": 0.25
+  },
+  "repobench": {
+   "b375": 66.67,
+   "b25": 66.84,
+   "delta": -0.17
+  }
+ },
+ "longbench_family_avg": {
+  "multi_hop_qa": 0.767,
+  "single_doc_qa": 0.14,
+  "retrieval": 0.0,
+  "summarization": -0.167,
+  "fewshot_narrative": -0.19,
+  "code": 0.04
+ },
+ "ruler_per_task_delta": {
+  "L4096": {
+   "niah_single_1": 0.0,
+   "niah_single_2": 0.0,
+   "niah_single_3": 0.0,
+   "niah_multikey_1": 0.0,
+   "niah_multikey_2": 0.0,
+   "niah_multikey_3": 0.0,
+   "niah_multiquery": 0.0,
+   "niah_multivalue": 0.0,
+   "cwe": -1.3,
+   "fwe": -0.34,
+   "vt": 0.0
+  },
+  "L8192": {
+   "niah_single_1": 0.0,
+   "niah_single_2": 0.0,
+   "niah_single_3": 0.0,
+   "niah_multikey_1": 0.0,
+   "niah_multikey_2": 0.0,
+   "niah_multikey_3": -1.0,
+   "niah_multiquery": 0.0,
+   "niah_multivalue": 0.0,
+   "cwe": -1.1,
+   "fwe": -1.0,
+   "vt": 0.0
+  },
+  "L16384": {
+   "niah_single_1": 0.0,
+   "niah_single_2": 0.0,
+   "niah_single_3": 0.0,
+   "niah_multikey_1": 0.0,
+   "niah_multikey_2": 0.0,
+   "niah_multikey_3": -5.0,
+   "niah_multiquery": 0.0,
+   "niah_multivalue": 0.0,
+   "cwe": -1.3,
+   "fwe": -0.34,
+   "vt": 0.0
+  }
+ },
+ "ruler_family_avg": {
+  "needle_single_key": {
+   "L4096": 0.0,
+   "L8192": 0.0,
+   "L16384": 0.0
+  },
+  "needle_multikey": {
+   "L4096": 0.0,
+   "L8192": -0.333,
+   "L16384": -1.667
+  },
+  "needle_multiquery_value": {
+   "L4096": 0.0,
+   "L8192": 0.0,
+   "L16384": 0.0
+  },
+  "aggregation_tracking": {
+   "L4096": -0.547,
+   "L8192": -0.7,
+   "L16384": -0.547
+  }
+ },
+ "ruler_length_gradient": {
+  "L4096": -0.15,
+  "L8192": -0.28,
+  "L16384": -0.6
+ },
+ "verdict": {
+  "generalizes": "LongBench 全部真实任务族：多跳 QA +0.77（musique +1.94 最 far-heavy 任务增益最大）、单文档 QA +0.14、检索 0.00（双臂饱和）、摘要 -0.17 / few-shot -0.19 / 代码 +0.04（噪声级）",
+  "boundary": "RULER 合成 far-dense 任务族不成立：multikey_3 -2.00（超多干扰 key，far 预算粒度主导）、cwe -1.23 / fwe -0.56（远端多 key 聚合）；长度梯度 -0.15->-0.28->-0.60（干扰项随长度增多 far 需求增大）",
+  "mechanism": "far 让渡合理性边界 = far 关键 token 稀疏度：真实多跳任务 far 关键 token 极稀疏（far_tokens 128-256 饱和，分区配额已防挤出），让渡给 near 边际收益高；far 候选/关键 key 数量多的合成任务（multikey_3/cwe）far 侧预算粒度成主导，让渡反损"
+ }
+}

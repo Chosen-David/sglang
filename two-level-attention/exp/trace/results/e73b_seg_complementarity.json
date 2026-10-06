@@ -1,0 +1,65 @@
+{
+ "lb_gov_report_0": {
+  "rope_tail16": 0.5818,
+  "nope_tail16": 0.4423,
+  "tail32": 0.7653,
+  "random32": 0.1526,
+  "oracle128": 1.0
+ },
+ "lb_hotpotqa_0": {
+  "rope_tail16": 0.4993,
+  "nope_tail16": 0.4342,
+  "tail32": 0.7602,
+  "random32": 0.3341,
+  "oracle128": 0.9999
+ },
+ "lb_musique_0": {
+  "rope_tail16": 0.4135,
+  "nope_tail16": 0.4161,
+  "tail32": 0.7767,
+  "random32": 0.3202,
+  "oracle128": 1.0
+ },
+ "lb_narrativeqa_0": {
+  "rope_tail16": 0.5144,
+  "nope_tail16": 0.2182,
+  "tail32": 0.6926,
+  "random32": 0.2133,
+  "oracle128": 1.0
+ },
+ "lb_passage_retrieval_en_0": {
+  "rope_tail16": 0.6347,
+  "nope_tail16": 0.4165,
+  "tail32": 0.8202,
+  "random32": 0.2514,
+  "oracle128": 1.0
+ },
+ "lb_qasper_0": {
+  "rope_tail16": 0.5359,
+  "nope_tail16": 0.5222,
+  "tail32": 0.8826,
+  "random32": 0.3716,
+  "oracle128": 1.0
+ },
+ "needle32k": {
+  "rope_tail16": 0.7362,
+  "nope_tail16": 0.3273,
+  "tail32": 0.9672,
+  "random32": 0.4834,
+  "oracle128": 1.0
+ },
+ "natural32k": {
+  "rope_tail16": 0.6916,
+  "nope_tail16": 0.3193,
+  "tail32": 0.8255,
+  "random32": 0.2821,
+  "oracle128": 1.0
+ },
+ "MEAN8": {
+  "rope_tail16": 0.5759,
+  "nope_tail16": 0.387,
+  "tail32": 0.8113,
+  "random32": 0.3011,
+  "oracle128": 1.0
+ }
+}

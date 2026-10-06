@@ -1,0 +1,158 @@
+{
+    "2wikimqa-none-01221519.jsonl": {
+        "score": 48.9,
+        "budget": -1
+    },
+    "2wikimqa-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 47.86,
+        "budget": 1024.0
+    },
+    "2wikimqa-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 47.86,
+        "budget": 1024.0
+    },
+    "gov_report-none-01221519.jsonl": {
+        "score": 33.29,
+        "budget": -1
+    },
+    "gov_report-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 33.45,
+        "budget": 1024.0
+    },
+    "gov_report-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 33.34,
+        "budget": 1024.0
+    },
+    "hotpotqa-none-01221519.jsonl": {
+        "score": 60.93,
+        "budget": -1
+    },
+    "hotpotqa-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 61.53,
+        "budget": 1024.0
+    },
+    "hotpotqa-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 60.97,
+        "budget": 1024.0
+    },
+    "lcc-none-01221519.jsonl": {
+        "score": 67.92,
+        "budget": -1
+    },
+    "lcc-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 68.41,
+        "budget": 1024.0
+    },
+    "lcc-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 68.43,
+        "budget": 1024.0
+    },
+    "multi_news-none-01221519.jsonl": {
+        "score": 24.89,
+        "budget": -1
+    },
+    "multi_news-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 24.86,
+        "budget": 1024.0
+    },
+    "multi_news-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 24.87,
+        "budget": 1024.0
+    },
+    "multifieldqa_en-none-01221519.jsonl": {
+        "score": 49.53,
+        "budget": -1
+    },
+    "multifieldqa_en-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 49.96,
+        "budget": 1024.0
+    },
+    "multifieldqa_en-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 49.87,
+        "budget": 1024.0
+    },
+    "musique-none-01221519.jsonl": {
+        "score": 36.02,
+        "budget": -1
+    },
+    "musique-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 34.98,
+        "budget": 1024.0
+    },
+    "musique-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 33.71,
+        "budget": 1024.0
+    },
+    "narrativeqa-none-01221519.jsonl": {
+        "score": 27.77,
+        "budget": -1
+    },
+    "narrativeqa-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 27.93,
+        "budget": 1024.0
+    },
+    "narrativeqa-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 25.32,
+        "budget": 1024.0
+    },
+    "passage_retrieval_en-none-01221519.jsonl": {
+        "score": 100.0,
+        "budget": -1
+    },
+    "passage_retrieval_en-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 100.0,
+        "budget": 1024.0
+    },
+    "passage_retrieval_en-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 100.0,
+        "budget": 1024.0
+    },
+    "qasper-none-01221519.jsonl": {
+        "score": 44.58,
+        "budget": -1
+    },
+    "qasper-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 44.15,
+        "budget": 1024.0
+    },
+    "qasper-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 43.95,
+        "budget": 1024.0
+    },
+    "qmsum-none-01221519.jsonl": {
+        "score": 23.59,
+        "budget": -1
+    },
+    "qmsum-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 24.08,
+        "budget": 1024.0
+    },
+    "qmsum-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 24.16,
+        "budget": 1024.0
+    },
+    "repobench-none-01221519.jsonl": {
+        "score": 64.8,
+        "budget": -1
+    },
+    "repobench-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 63.98,
+        "budget": 1024.0
+    },
+    "repobench-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 63.79,
+        "budget": 1024.0
+    },
+    "triviaqa-none-01221519.jsonl": {
+        "score": 92.25,
+        "budget": -1
+    },
+    "triviaqa-tia_64_128_1024_c4-01261056.jsonl": {
+        "score": 92.25,
+        "budget": 1024.0
+    },
+    "triviaqa-tia_64_128_1024_c4_async-01271048.jsonl": {
+        "score": 92.25,
+        "budget": 1024.0
+    }
+}

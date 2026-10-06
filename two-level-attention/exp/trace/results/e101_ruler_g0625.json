@@ -1,0 +1,162 @@
+{
+ "note": "E101 审稿C4修复：E98 best 主臂配置（mavg α=0.125 β=0.375 γ=0.625，L1 全维 full 默认口径）RULER 11任务×3长度×n=100 重扫，统一论文 RULER 双表与 LongBench 主表臂（50.78）配置口径",
+ "TAG": "E101RULER_mavg_a0.125_b0.375_g0.625",
+ "config": {
+  "alpha": 0.125,
+  "beta": 0.375,
+  "gamma": 0.625,
+  "far_method": "minmax",
+  "near_method": "avg",
+  "subspace": "full(默认未传)",
+  "n_per_task": 100,
+  "lengths": [
+   4096,
+   8192,
+   16384
+  ],
+  "budget": "level1_topk 128 / level2_topk 1024 / cmp_ratio 4"
+ },
+ "scores": {
+  "L4096": {
+   "niah_single_1": 100.0,
+   "niah_single_2": 100.0,
+   "niah_single_3": 100.0,
+   "niah_multikey_1": 100.0,
+   "niah_multikey_2": 100.0,
+   "niah_multikey_3": 100.0,
+   "niah_multiquery": 25.0,
+   "niah_multivalue": 89.75,
+   "cwe": 82.0,
+   "fwe": 90.67,
+   "vt": 100.0,
+   "AVG": 89.77
+  },
+  "L8192": {
+   "niah_single_1": 100.0,
+   "niah_single_2": 100.0,
+   "niah_single_3": 100.0,
+   "niah_multikey_1": 100.0,
+   "niah_multikey_2": 100.0,
+   "niah_multikey_3": 96.0,
+   "niah_multiquery": 25.0,
+   "niah_multivalue": 68.5,
+   "cwe": 68.6,
+   "fwe": 91.0,
+   "vt": 100.0,
+   "AVG": 86.28
+  },
+  "L16384": {
+   "niah_single_1": 100.0,
+   "niah_single_2": 100.0,
+   "niah_single_3": 100.0,
+   "niah_multikey_1": 100.0,
+   "niah_multikey_2": 100.0,
+   "niah_multikey_3": 79.0,
+   "niah_multiquery": 25.0,
+   "niah_multivalue": 43.75,
+   "cwe": 55.5,
+   "fwe": 92.67,
+   "vt": 100.0,
+   "AVG": 81.45
+  }
+ },
+ "overall_AVG": 85.83,
+ "old_refs": {
+  "b25_g0125_b7s_paper_arm": {
+   "path": "/tmp/tli_chain/b7s_ruler_final.json",
+   "overall_AVG": 87.93
+  },
+  "b375_g0125_e72mavg": {
+   "path": "exp/results_ruler/ruler_e72mavg.json",
+   "overall_AVG": 87.59
+  }
+ },
+ "delta_vs_b25_g0125": {
+  "L4096": {
+   "niah_single_1": 0.0,
+   "niah_single_2": 0.0,
+   "niah_single_3": 0.0,
+   "niah_multikey_1": 0.0,
+   "niah_multikey_2": 0.0,
+   "niah_multikey_3": 0.0,
+   "niah_multiquery": 0.0,
+   "niah_multivalue": -0.5,
+   "cwe": -15.5,
+   "fwe": -3.0,
+   "vt": 0.0,
+   "AVG": -1.72
+  },
+  "L8192": {
+   "niah_single_1": 0.0,
+   "niah_single_2": 0.0,
+   "niah_single_3": 0.0,
+   "niah_multikey_1": 0.0,
+   "niah_multikey_2": 0.0,
+   "niah_multikey_3": -3.0,
+   "niah_multiquery": 0.0,
+   "niah_multivalue": -1.0,
+   "cwe": -20.0,
+   "fwe": -1.67,
+   "vt": 0.0,
+   "AVG": -2.34
+  },
+  "L16384": {
+   "niah_single_1": 0.0,
+   "niah_single_2": 0.0,
+   "niah_single_3": 0.0,
+   "niah_multikey_1": 0.0,
+   "niah_multikey_2": 0.0,
+   "niah_multikey_3": -1.0,
+   "niah_multiquery": 0.0,
+   "niah_multivalue": -0.5,
+   "cwe": -23.1,
+   "fwe": 0.0,
+   "vt": 0.0,
+   "AVG": -2.23
+  }
+ },
+ "delta_vs_b375_g0125": {
+  "L4096": {
+   "niah_single_1": 0.0,
+   "niah_single_2": 0.0,
+   "niah_single_3": 0.0,
+   "niah_multikey_1": 0.0,
+   "niah_multikey_2": 0.0,
+   "niah_multikey_3": 0.0,
+   "niah_multiquery": 0.0,
+   "niah_multivalue": -0.5,
+   "cwe": -14.2,
+   "fwe": -2.66,
+   "vt": 0.0,
+   "AVG": -1.57
+  },
+  "L8192": {
+   "niah_single_1": 0.0,
+   "niah_single_2": 0.0,
+   "niah_single_3": 0.0,
+   "niah_multikey_1": 0.0,
+   "niah_multikey_2": 0.0,
+   "niah_multikey_3": -2.0,
+   "niah_multiquery": 0.0,
+   "niah_multivalue": -1.0,
+   "cwe": -18.9,
+   "fwe": -0.67,
+   "vt": 0.0,
+   "AVG": -2.05
+  },
+  "L16384": {
+   "niah_single_1": 0.0,
+   "niah_single_2": 0.0,
+   "niah_single_3": 0.0,
+   "niah_multikey_1": 0.0,
+   "niah_multikey_2": 0.0,
+   "niah_multikey_3": 4.0,
+   "niah_multiquery": 0.0,
+   "niah_multivalue": -0.5,
+   "cwe": -21.8,
+   "fwe": 0.34,
+   "vt": 0.0,
+   "AVG": -1.63
+  }
+ }
+}

@@ -1,0 +1,35 @@
+{
+ "d4": {
+  "build_minmax_ms": 0.011462400108575821,
+  "build_avg_ms": 0.005212799832224846,
+  "score_minmax_ms": 0.08163520097732543,
+  "score_avg_ms": 0.025824001431465148,
+  "topk_page_ms": 0.019705599546432494,
+  "fine_gemm_ms": 1.8584928512573242,
+  "topk_token_ms": 0.06611199975013733,
+  "greedy_online_8k_ms": 675.5994262695312,
+  "greedy_online_64k_extrap_ms": 5404.79541015625
+ },
+ "d8": {
+  "build_minmax_ms": 0.014083200693130493,
+  "build_avg_ms": 0.00655680000782013,
+  "score_minmax_ms": 0.08064000010490417,
+  "score_avg_ms": 0.02597759962081909,
+  "topk_page_ms": 0.019247999787330626,
+  "fine_gemm_ms": 0.6097951889038086,
+  "topk_token_ms": 0.06278719902038574,
+  "greedy_online_8k_ms": 692.5731201171875,
+  "greedy_online_64k_extrap_ms": 5540.5849609375
+ },
+ "d32": {
+  "build_minmax_ms": 0.05066879987716675,
+  "build_avg_ms": 0.023423999547958374,
+  "score_minmax_ms": 0.08221759796142578,
+  "score_avg_ms": 0.004032000154256821,
+  "topk_page_ms": 0.02051839977502823,
+  "fine_gemm_ms": 0.6068480014801025,
+  "topk_token_ms": 0.05980799794197082,
+  "greedy_online_8k_ms": 706.0029907226562,
+  "greedy_online_64k_extrap_ms": 5648.02392578125
+ }
+}

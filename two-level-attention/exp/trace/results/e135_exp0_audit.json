@@ -1,0 +1,198 @@
+{
+  "meta": {
+    "experiment": "E135 / EXP0 raw 数据可复算性审计（审稿人要求：验证论文分数、区间、速度能否追到相同实现与真实样本）",
+    "date": "2026-10-06",
+    "mode": "只读审计：零 GPU 推理，仅 CPU/I/O 级验证；不修改任何实验代码与既有结果文件",
+    "recompute_method": "独立脚本 /tmp/e135_audit_recompute.py（audit 专用，非实验代码）：从 per-sample jsonl（pred+answers）按 benchmark.LongBench.eval 官方 scorer 口径（per-sample = max over ground_truths，含 triviaqa 截断）逐例重打分 → 任务均值 → 13 任务等权 AVG；bootstrap 按 analyze_e100 系列记录的 B=10000 / seed=20261004 / percentile 95% / 原 rng 消耗顺序复跑",
+    "two_level_head": "43ebf9d（工作区质量路径 sparse_attn/ + benchmark/ 干净；仅 probe_e108_sim_greedy.py 有未提交修改，不触及质量路径）",
+    "sglang_head": "657c4bfcd（论文速度数字绑定 commit 0a9fade 为其祖先）",
+    "paper_anchor_correction": "任务书对照值 musique FullKV=32.28 有误：论文主表（TLI_paper_en.tex L268 / TLI_paper.tex L266）musique 行为 FullKV 32.14 / Quest 27.25 / TIA 32.28 / C0 29.74 / PSI 34.71——32.28 是 TIA 列。本审计按 32.14 对照，与 e71_main_table.json / e100_bootstrap_ci.json 一致"
+  },
+  "A_quality": {
+    "e98_full_13tasks.json": {
+      "status": "verified",
+      "paper_value": "AVG 50.78（hotpotqa 55.44 / musique 34.71 / narrativeqa 26.31 等 13 任务）",
+      "recomputed_avg": 50.78,
+      "per_example_traceable": true,
+      "recompute_detail": "PSI per-sample：/tmp/e98_full/pred_E98BEST_mavg_a0.125_b0.375_g0.625/ 13 任务 jsonl 齐全（n=200×11 + multifieldqa_en 150 + lcc/repobench 500，与 LongBench 全集特例一致）；13/13 任务分数逐位一致（mismatch=0）",
+      "notes": "逐例字段 pred/answers/all_classes/length 保留；无显式 example ID（按行序配对，answers 逐位一致性可作配对校验代理）。存储风险：PSI per-sample 仅在 /tmp（易失），未入 two-level 仓库"
+    },
+    "e100_bootstrap_ci.json": {
+      "status": "verified",
+      "paper_value": "+0.42 的 95% CI [-0.18, +1.02]；held-out 11 任务 +0.08 [-0.46, +0.60]；musique +2.57 [-1.29, +6.37]；hotpotqa +1.97 [-1.44, +5.57]；sign test 8/5 p=0.5811",
+      "recomputed_avg": "全部逐位复现：main [-0.18,+1.02]、heldout [-0.46,+0.60]、musique [-1.29,+6.37]、hotpotqa [-1.44,+5.57]、sign 8/5 p=0.5811",
+      "per_example_traceable": true,
+      "recompute_detail": "从 PSI（/tmp/e98_full）与 FullKV（仓库 pred_1024/-none-）per-sample 独立重打分后按记录的 seed=20261004、B=10000、rng 消耗顺序（main→heldout→musique→hotpotqa）复跑 bootstrap，26/26 任务分数逐位一致、CI 端点逐位一致",
+      "notes": "CI 复算的可复现性依赖记录的 seed 与 rng 消耗顺序（生成脚本 analyze_e100_bootstrap_ci.py 已入库，顺序可查）；换顺序会得 ±0.01 量级的不同 percentile 端点，属 bootstrap 正常性质。FullKV musique=32.14（diff=2.57），论文 2.43 为旧遗留数字的快修口径（34.71−32.28=TIA 列误用风险已在论文表内自洽，正文 diff 表述需自查一处）"
+    },
+    "e100_tail_full.json": {
+      "status": "verified",
+      "paper_value": "tail32 L1 臂 AVG 50.53，delta_vs_full_L1 = -0.25",
+      "recomputed_avg": 50.53,
+      "per_example_traceable": true,
+      "recompute_detail": "per-sample：/tmp/e100_tail/pred_E100TAIL_mavg_a0.125_b0.375_g0.625/ 13 任务齐全；13/13 任务分数逐位一致（hotpotqa 53.63 / musique 35.04 / narrativeqa 25.02 …）",
+      "notes": "per-sample 仅在 /tmp，未入库"
+    },
+    "e100_tail_ci.json": {
+      "status": "verified",
+      "paper_value": "tail vs full：-0.25 [-0.57, +0.06]；tail vs FullKV：+0.16 [-0.43, +0.76]；sign 4/8",
+      "recomputed_avg": "两个 CI 均逐位复现（[-0.57,+0.06] / [-0.43,+0.76]）",
+      "per_example_traceable": true,
+      "notes": "同 seed 20261004、rng 顺序 tf→tk（脚本 analyze_e100_tail_ci.py 入库可查）"
+    },
+    "FullKV_per_sample_pred_1024": {
+      "status": "verified",
+      "paper_value": "FullKV AVG 50.36（musique 32.14 / hotpotqa 53.48 等）",
+      "recomputed_avg": 50.36,
+      "per_example_traceable": true,
+      "recompute_detail": "exp/results_longbench/Qwen3-8B/pred_1024/{task}-none-*.jsonl 13 任务全齐且已 commit 入库（86 文件，持久）；13/13 任务分数与 e71_main_table.json FullKV 行逐位一致",
+      "notes": "唯一 per-sample 已入库的基准臂——durability 无忧"
+    },
+    "e98_abg_full_grid.json": {
+      "status": "verified",
+      "paper_value": "mass 全网格（16 样本 × 3600 有效臂）；best 臂 mass 0.8801",
+      "recomputed_avg": "3600/3600 臂 mean 均可由 per_sample 复算（round(4) 口径 mismatch=0）；best=0.8801 复现",
+      "per_example_traceable": true,
+      "recompute_detail": "per_sample 54405 条与 16 分片 /tmp/e98_shard_*.json 逐位一致（bit-diff=0）；mavg α=0 β>0 全 81 配置 mass 相等（0.8979）的分区负收益结构信号在数据中可复核",
+      "notes": "分片与 trace 原始 layer .pt 在 /tmp；网格 JSON 本体（含 per_sample）已入库"
+    },
+    "e98_e2e_grid.json": {
+      "status": "verified",
+      "paper_value": "γ 截断坍缩实证：mavg_a0.125_b0.25_g0.75 与 _g0.375 同分 54.16/35.57；best 臂 55.44/34.71；参照臂 54.43/34.76",
+      "recomputed_avg": "抽查 4 臂全部逐位复现（54.16/35.57 ×2、55.44/34.71、54.43/34.76，n=200）",
+      "per_example_traceable": true,
+      "recompute_detail": "16 臂 per-sample 目录 /tmp/e98_e2e/pred_{arm}/ 齐全（hq+mu 两任务）",
+      "notes": "v1 坍缩教训与 v2 去重逻辑记录在 JSON note 与脚本头（/tmp/e98_e2e_grid_v2.sh）"
+    },
+    "e101_ruler_g0625.json": {
+      "status": "verified",
+      "paper_value": "RULER 主臂 overall 85.83（L4096 89.77 / L8192 86.28 / L16384 81.45）",
+      "recomputed_avg": 85.83,
+      "per_example_traceable": true,
+      "recompute_detail": "per-sample：/tmp/e101_ruler/L{4096,8192,16384}/pred_E101RULER_*/ 11 任务×n=100 齐全；按官方 string_match_all（与 benchmark/RULER/score_ruler.py 逐位一致）独立重算，三长度 AVG 与 overall 全部逐位一致",
+      "notes": "per-sample 仅在 /tmp"
+    },
+    "e104_ruler_32k.json": {
+      "status": "verified",
+      "paper_value": "32K：单池 60.77 / TIA 60.77 / 分区参照臂 60.78 / 主臂 58.63 / FullKV 59.38 / Quest 47.63",
+      "recomputed_avg": "6/6 臂 AVG 逐位复现（60.77/60.77/60.78/58.63/59.38/47.63）",
+      "per_example_traceable": true,
+      "recompute_detail": "per-sample：/tmp/e104_ruler_32k/L32768/ 下 6 个 pred_ 目录 11 任务齐全",
+      "notes": "「单池 60.77 ≈ 分区 60.78」的 e2e 层未判决口径如实；per-sample 仅在 /tmp"
+    },
+    "e103_kvhead_ablation.json": {
+      "status": "verified",
+      "paper_value": "B_per_q_head_same_K2 hq 53.79（vs A_shared 55.44）、mu 34.51；C_same_total hq 28.37 / mu 12.0",
+      "recomputed_avg": "B/C 两臂 4 个分数逐位复现（53.79/34.51、28.37/12.0）",
+      "per_example_traceable": true,
+      "recompute_detail": "per-sample：/tmp/e103_perqhead/pred_B、pred_C（hq+mu）；A_shared 取 e98_full 同配置数字（已独立 verified）",
+      "notes": "per-sample 仅在 /tmp"
+    },
+    "RULER_87.93_ref_arm_b7s": {
+      "status": "summary_only",
+      "paper_value": "RULER 合成针参照臂 87.93（γ.125 b7s 论文主源）",
+      "recomputed_avg": null,
+      "per_example_traceable": false,
+      "notes": "/tmp/tli_chain/b7s_ruler_final.json 存在且三长度 AVG（91.49/88.62/83.68）等权均值 = 87.93 可验算（summary 级可核）；但该臂 per-sample 预测未定位（疑早期 /tmp 目录已清），无法逐例重算——如审稿人要求逐例追溯需重跑 RULER 参照臂（11 任务×3 长度×n=100，约 2-3h GPU）"
+    },
+    "failure_runs_and_selection_order": {
+      "status": "summary_only",
+      "paper_value": "E98 选举链：mass 网格 → e2e v2 → 选举 → 13 任务全量",
+      "per_example_traceable": false,
+      "notes": "部分可追溯：e98_best_election.json（入库，含全排序与 ccluster 排除理由）、e98_e2e_grid.json note（v1 γ 坍缩教训）、/tmp/e98_e2e_runs.json（v1 13 臂）+ runs_v2.json（13 臂）+ 运行日志 e98_abg_grid.log / e98_e2e_grid{,_v2}.log / e98_full_13tasks.log + 断点续跑脚本（SKIP 逻辑可见）。但 runs ledger 与日志全部在 /tmp 未入库，且无正式的失败运行登记表——按审稿口径如实标「选择顺序可部分追溯、失败运行登记缺失」"
+    }
+  },
+  "B_timing": {
+    "c3_3arm_tp2_quest.json": {
+      "status": "summary_only",
+      "paper_value": "Quest total 62.06 / prefill 54.43（TP2 bs16 64K）",
+      "field_check": "字段与已知值一致；内部算术自洽：decode_s=total-prefill=7.63 ✓、ms/step=7.63/63×1000=121.1 ✓、tok/s=16×64/62.06=16.5 ✓",
+      "protocol_check": "生成脚本 /home/wangyuanshuo02/sglang/test_c3_3arm_tp2.py 在库：两遍相减法确认（pass1 max_new_tokens=1=纯 prefill；pass2 max_new_tokens=64=total；decode=total-prefill 按 63 有效步；disable_radix_cache 保证两遍独立 prefill；cuda graph 双段 disabled；单次 'hello' 预热）",
+      "deficiencies": "单次运行无重复（无中位数/无方差）、无 EOS 与实际生成 token 数记录（n_decode=64 为请求值非实测值）、无每步 timestamp、无墙钟日期/GPU 状态、生成文本仅存 80 字符截断、prompt token 数未记录（仅 chars=260000）",
+      "verdict": "字段级可核、测量级不可复算——按审稿口径维持 reported/unverified，须重测后才能关闭"
+    },
+    "c3_3arm_tp2_tli.json": {
+      "status": "summary_only",
+      "paper_value": "PSI total 141.95 / prefill 136.03",
+      "field_check": "字段一致；decode_s=5.92 ✓、tok/s=7.2 ✓；ms/step 记录 93.9 vs 用已舍入 decode_s 重算 94.0——差异为舍入路径（原脚本从未舍入 decode_s 计算），非错误",
+      "deficiencies": "同 quest 臂（单次、无 EOS/token 计数、无 timestamp）",
+      "notes": "E102 regression_note 如实记录：旧口径 total 115.28s（NaN 修复前 0928）vs 新 141.95s 的 TLI 侧 +23% 回归归因未结——重测时须一并归因"
+    },
+    "c3_3arm_tp2_triton.json": {
+      "status": "summary_only",
+      "paper_value": "dense total 106.13 / prefill 102.25",
+      "field_check": "字段一致；decode_s=3.88 ✓、ms/step=61.6 ✓、tok/s=9.6 ✓",
+      "deficiencies": "同上"
+    },
+    "c3_3arm_e2e_single_request": {
+      "status": "verified",
+      "paper_value": "单请求：Quest 32K 10.605 / 64K 14.86；triton 64K 23.63；TLI 64K 33.25（两遍法）",
+      "field_check": "JSON 内保存 pass1_runs_s / pass2_runs_s 原始计时（各 2 次）；min 规则、decode=total-prefill、ms/step 算术全部复算通过（9/9 组合 ALL OK）",
+      "deficiencies": "仍无 EOS/实际生成 token 数；2 次重复偏少；数据在 two-level exp/trace/results/c3_3arm_e2e.json（已入库）但原始 per-step 记录无",
+      "verdict": "原始计时样本在 JSON 内可复算——比 TP2 臂可核性高一档；EOS 缺口同在"
+    },
+    "tli_64k_tp2_legacy": {
+      "status": "summary_only",
+      "paper_value": "旧参考 total：tli 115.28 / triton 106.24（0928，NaN 修复前口径）",
+      "field_check": "仅 total_s 无 prefill/decode 拆分，已被 c3 三臂新口径取代（E102 verdict 明示旧速度句须改写）",
+      "verdict": "superseded——论文不应再引用"
+    }
+  },
+  "C_harness": {
+    "selector_code_binding": {
+      "status": "verified",
+      "detail": "PSI：python/sglang/srt/layers/attention/tli/{backend,indexer,config,kernels}.py + 5 个测试文件全部 commit 在库；Quest：quest/{backend,indexer,config}.py + test_quest_indexer.py 在库"
+    },
+    "scoring_script_and_version_records": {
+      "status": "verified",
+      "detail": "打分脚本 exp/trace/run_e71_eval.py 在库（方法→pred 目录→文件模式映射显式）；scorer = benchmark/LongBench/eval.py + metrics.py（在库、commit 绑定，本审计逐例重打分与其逐字一致实现）；模型/数据路径记录在生成脚本（Qwen3-8B=/mnt/dolphinfs/.../sunyueqing/Qwen3-8B，dataset=/home/wangyuanshuo02/datasets/LongBench/data，见 /tmp/e98_full_13tasks.sh）；RULER 官方生成器 clone 在 /tmp/ruler_official（易失）",
+      "notes": "生成脚本本体（e98_full_13tasks.sh 等）只在 /tmp——建议归档入库"
+    },
+    "sglang_commit_binding": {
+      "status": "verified",
+      "detail": "论文速度数字绑定 0a9fade（当前 HEAD 657c4bfcd 的祖先）。0a9fade..HEAD 期间触及质量路径（tli/quest）的 commit 仅 3add02624（#127 F1-F3：prefill 索引 chunk 增量化 + kq_f 惰性 + fp32 消除）；质量语义 bit-exact 由 #127 单测 test_incremental_prefill.py 背书（torch.equal 级 6 项验收：增量链 vs 全量重建 5 键逐位 / 分支 spy / 回退路径 / kmeans 臂回退 / 两 backend forward_extend torch.equal / kq_unpack 零构建）"
+    },
+    "two_level_quality_path_binding": {
+      "status": "verified",
+      "detail": "LongBench 质量数字由 two-level-attention 仓（transformers + sparse_attn patch，非 sglang）产出；数据落袋 commit db1838d 之后质量路径（sparse_attn/ + benchmark/）仅两处加法式改动（7c89f5b E103 --tli_per_q_head 开关、fde6ac0 RULER 32K pred_ruler CLI choices），不改 E98 默认语义；工作区该路径干净"
+    }
+  },
+  "verdict": {
+    "counts": {
+      "total_items": 21,
+      "verified": 15,
+      "summary_only": 6,
+      "missing": 0
+    },
+    "verified_list": [
+      "E98 主表臂 13 任务 AVG 50.78（per-sample 逐位）",
+      "FullKV 13 任务 AVG 50.36（per-sample 逐位，且已入库持久）",
+      "E100 bootstrap 主 CI [-0.18,+1.02] / heldout / musique / hotpotqa / sign test（seed 复跑逐位）",
+      "E100 tail 全量 50.53 与 tail CI [-0.57,+0.06] / [-0.43,+0.76]（seed 复跑逐位）",
+      "E98 mass 全网格 3600 臂（per_sample 复算 mismatch=0）",
+      "E98 e2e 网格抽查 4 臂含 γ 截断坍缩 54.16/35.57（逐位）",
+      "E101 RULER 85.83（11 任务×3 长度逐位）",
+      "E104 RULER 32K 六臂（逐位）",
+      "E103 kv-head 消融 B/C 臂（逐位）",
+      "E102 单请求三臂计时（原始双次计时在 JSON，算术+min 规则复算通过）",
+      "selector 代码 / 打分脚本 / scorer 版本 / 两仓 commit 绑定（含 #127 bit 级单测背书）"
+    ],
+    "unverified_list": [
+      "RULER 87.93 参照臂：summary 级可核（三长度均值验算通过）但 per-sample 未定位——reported/unverified（逐例级）",
+      "TP2 三臂计时（Quest 62.06/54.43、dense 106.13/102.25、PSI 141.95/136.03）：字段与派生算术自洽、脚本口径在库，但单次运行、无 EOS/实际 token 数、无 timestamp/重复——测量级 reported/unverified，须重测",
+      "失败运行登记：无正式登记表；选择顺序靠 /tmp ledger+日志+election JSON 部分可追溯",
+      "E102 TLI 侧 +23% 回归（115.28→141.95）归因未结"
+    ],
+    "minimal_rerun_recommendation": [
+      "P0（零 GPU，立即做）：把 /tmp 的 per-sample 预测（e98_full / e100_tail / e98_e2e 16 臂 / e101_ruler / e104_ruler_32k / e103_perqhead）、分片 e98_shard_*、runs ledger v1/v2、生成脚本（e98_full_13tasks.sh 等）、关键日志、b7s_ruler_final.json 迁入 two-level 仓库归档目录（如 exp/raw_archive/）——/tmp 一旦清空，全部 verified 判决退化为不可复算，需全量 GPU 重跑（≥13 任务×3 臂 + 网格 + RULER）",
+      "P1（GPU ~1-2h，关审稿 C3）：TP2 三臂重测——每臂 ≥3 次重复取中位数、记录实际生成 token 数/EOS、墙钟 timestamp、prompt token 数、每步延迟直方图；顺带归因 TLI 141.95 vs 旧 115.28 的 +23% 回归",
+      "P2（GPU ~2-3h，可选）：RULER γ.125 参照臂 87.93 重跑并保留 per-sample——若审稿人要求该数字逐例追溯才需要",
+      "质量主表（50.78/50.36/+0.42 及全部 CI）：无需重跑——本审计已从 immutable per-sample 输入 bit 级复算"
+    ],
+    "paper_claim_closure": {
+      "可关闭": "50.78 / 50.36 / +0.42 与 95% CI 含 0 / held-out +0.08 / musique 单任务 CI / sign test / tail32 口径 -0.25 [-0.57,+0.06] / RULER 85.83 / 32K 单池 60.77≈分区 60.78 / E103 kv-head / γ 截断坍缩 54.16/35.57——均可由 raw per-sample 复算，主张成立",
+      "维持 reported/unverified": "TP2 三臂 e2e 计时（协议缺陷未补齐前）；RULER 87.93（逐例级）",
+      "措辞风险提示": "论文摘要「musique 34.71 为含 FullKV 在内所有方法最高」在主表口径内成立（外部基线最高为 TIA 32.28/FullKV 32.14），但内部 TLI 变体臂 γ.125 参照臂 34.76、E100 tail 臂 35.04 均高于 34.71——建议措辞限定为「主表各方法列中最高」防审稿人抓内部臂反例"
+    }
+  }
+}

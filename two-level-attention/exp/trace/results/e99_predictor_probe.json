@@ -1,0 +1,370 @@
+{
+ "task": "E99 #104 第一阶段：α/β/γ 预测器可行性初探（纯 CPU 数据分析）",
+ "data": {
+  "e2e_arms": 13,
+  "e2e_arm_tags": [
+   "mavg_a0.125_b0.25_g0.75",
+   "mavg_a0.125_b0.25_g0.375",
+   "mavg_a0.125_b0.375_g0.625",
+   "mminmax_a0.875_b0.875_g0.5",
+   "mminmax_a0.75_b0.75_g0.5",
+   "mminmax_a0.625_b0.625_g0.5",
+   "aavg_a0.875_b0.875_g0.375",
+   "aavg_a0.875_b0.75_g0.5",
+   "aavg_a0.75_b0.75_g0.5",
+   "cavg_a0.125_b0.375_g0.625",
+   "cavg_a0.125_b0.25_g0.75",
+   "cavg_a0.125_b0.25_g0.375",
+   "mavg_a0.125_b0.375_g0.125"
+  ],
+  "n_discrepancy_note": "任务描述写 16 臂，e2e_grid.json 实为 13 臂（12 选举臂+1 参照臂），以 JSON 为准",
+  "mass_grid_samples": 16,
+  "region_decomposition_available": false,
+  "region_decomposition_note": "全网格每臂仅标量 mass（mean 与 per_sample 均为 coverage 标量），无 far/near 分区分解与 nt_near 逐臂记录，分区特征不可得"
+ },
+ "correlation_table": [
+  {
+   "feature": "beta",
+   "e2e_avg_spearman": -0.023,
+   "e2e_avg_spearman_p": 0.9414,
+   "e2e_avg_pearson": -0.263,
+   "e2e_hq_spearman": 0.342,
+   "e2e_hq_spearman_p": 0.2528,
+   "e2e_hq_pearson": 0.098,
+   "e2e_mu_spearman": -0.031,
+   "e2e_mu_spearman_p": 0.9195,
+   "e2e_mu_pearson": -0.364,
+   "e2e_avg_spearman_p_BH": 0.9857
+  },
+  {
+   "feature": "mass_hq",
+   "e2e_avg_spearman": 0.259,
+   "e2e_avg_spearman_p": 0.3923,
+   "e2e_avg_pearson": 0.22,
+   "e2e_hq_spearman": 0.128,
+   "e2e_hq_spearman_p": 0.6778,
+   "e2e_hq_pearson": 0.029,
+   "e2e_mu_spearman": 0.27,
+   "e2e_mu_spearman_p": 0.3717,
+   "e2e_mu_pearson": 0.259,
+   "e2e_avg_spearman_p_BH": 0.6165
+  },
+  {
+   "feature": "mass_min",
+   "e2e_avg_spearman": -0.43,
+   "e2e_avg_spearman_p": 0.1421,
+   "e2e_avg_pearson": 0.097,
+   "e2e_hq_spearman": -0.405,
+   "e2e_hq_spearman_p": 0.1698,
+   "e2e_hq_pearson": -0.081,
+   "e2e_mu_spearman": -0.452,
+   "e2e_mu_spearman_p": 0.1206,
+   "e2e_mu_pearson": 0.152,
+   "e2e_avg_spearman_p_BH": 0.521
+  },
+  {
+   "feature": "mass_mu",
+   "e2e_avg_spearman": 0.281,
+   "e2e_avg_spearman_p": 0.3517,
+   "e2e_avg_pearson": 0.161,
+   "e2e_hq_spearman": 0.139,
+   "e2e_hq_spearman_p": 0.6513,
+   "e2e_hq_pearson": -0.021,
+   "e2e_mu_spearman": 0.309,
+   "e2e_mu_spearman_p": 0.3043,
+   "e2e_mu_pearson": 0.206,
+   "e2e_avg_spearman_p_BH": 0.6165
+  },
+  {
+   "feature": "mass_natural32k",
+   "e2e_avg_spearman": -0.314,
+   "e2e_avg_spearman_p": 0.2953,
+   "e2e_avg_pearson": 0.067,
+   "e2e_hq_spearman": -0.283,
+   "e2e_hq_spearman_p": 0.3489,
+   "e2e_hq_pearson": -0.096,
+   "e2e_mu_spearman": -0.298,
+   "e2e_mu_spearman_p": 0.3228,
+   "e2e_mu_pearson": 0.122,
+   "e2e_avg_spearman_p_BH": 0.6165
+  },
+  {
+   "feature": "mass_needle32k",
+   "e2e_avg_spearman": -0.006,
+   "e2e_avg_spearman_p": 0.9857,
+   "e2e_avg_pearson": 0.117,
+   "e2e_hq_spearman": -0.006,
+   "e2e_hq_spearman_p": 0.9856,
+   "e2e_hq_pearson": -0.05,
+   "e2e_mu_spearman": -0.028,
+   "e2e_mu_spearman_p": 0.9287,
+   "e2e_mu_pearson": 0.164,
+   "e2e_avg_spearman_p_BH": 0.9857
+  },
+  {
+   "feature": "mass_other12",
+   "e2e_avg_spearman": -0.05,
+   "e2e_avg_spearman_p": 0.872,
+   "e2e_avg_pearson": 0.107,
+   "e2e_hq_spearman": -0.194,
+   "e2e_hq_spearman_p": 0.525,
+   "e2e_hq_pearson": -0.076,
+   "e2e_mu_spearman": 0.0,
+   "e2e_mu_spearman_p": 1.0,
+   "e2e_mu_pearson": 0.163,
+   "e2e_avg_spearman_p_BH": 0.9857
+  },
+  {
+   "feature": "mass_screen",
+   "e2e_avg_spearman": 0.29,
+   "e2e_avg_spearman_p": 0.3371,
+   "e2e_avg_pearson": 0.193,
+   "e2e_hq_spearman": 0.175,
+   "e2e_hq_spearman_p": 0.568,
+   "e2e_hq_pearson": 0.007,
+   "e2e_mu_spearman": 0.295,
+   "e2e_mu_spearman_p": 0.3275,
+   "e2e_mu_pearson": 0.236,
+   "e2e_avg_spearman_p_BH": 0.6165
+  },
+  {
+   "feature": "mass_screen_minus_other",
+   "e2e_avg_spearman": 0.463,
+   "e2e_avg_spearman_p": 0.1107,
+   "e2e_avg_pearson": 0.134,
+   "e2e_hq_spearman": 0.466,
+   "e2e_hq_spearman_p": 0.1085,
+   "e2e_hq_pearson": 0.29,
+   "e2e_mu_spearman": 0.469,
+   "e2e_mu_spearman_p": 0.106,
+   "e2e_mu_pearson": 0.049,
+   "e2e_avg_spearman_p_BH": 0.521
+  },
+  {
+   "feature": "mass_std",
+   "e2e_avg_spearman": 0.502,
+   "e2e_avg_spearman_p": 0.0804,
+   "e2e_avg_pearson": -0.008,
+   "e2e_hq_spearman": 0.444,
+   "e2e_hq_spearman_p": 0.1287,
+   "e2e_hq_pearson": 0.143,
+   "e2e_mu_spearman": 0.557,
+   "e2e_mu_spearman_p": 0.0479,
+   "e2e_mu_pearson": -0.067,
+   "e2e_avg_spearman_p_BH": 0.521
+  },
+  {
+   "feature": "mass_total",
+   "e2e_avg_spearman": 0.166,
+   "e2e_avg_spearman_p": 0.5889,
+   "e2e_avg_pearson": 0.129,
+   "e2e_hq_spearman": -0.011,
+   "e2e_hq_spearman_p": 0.9713,
+   "e2e_hq_pearson": -0.054,
+   "e2e_mu_spearman": 0.188,
+   "e2e_mu_spearman_p": 0.5394,
+   "e2e_mu_pearson": 0.18,
+   "e2e_avg_spearman_p_BH": 0.8097
+  }
+ ],
+ "mass_vs_e2e_avg_bootstrap_CI": [
+  -0.333,
+  0.553
+ ],
+ "pick_table": [
+  {
+   "feature": "beta",
+   "argmax_tag": "mminmax_a0.875_b0.875_g0.5",
+   "argmax_e2e_avg": 43.9,
+   "argmax_regret": 1.18,
+   "argmin_tag": "mavg_a0.125_b0.25_g0.75",
+   "argmin_e2e_avg": 44.86,
+   "argmin_regret": 0.21
+  },
+  {
+   "feature": "mass_hq",
+   "argmax_tag": "mminmax_a0.625_b0.625_g0.5",
+   "argmax_e2e_avg": 43.46,
+   "argmax_regret": 1.62,
+   "argmin_tag": "aavg_a0.75_b0.75_g0.5",
+   "argmin_e2e_avg": 43.81,
+   "argmin_regret": 1.27
+  },
+  {
+   "feature": "mass_min",
+   "argmax_tag": "cavg_a0.125_b0.375_g0.625",
+   "argmax_e2e_avg": 42.81,
+   "argmax_regret": 2.26,
+   "argmin_tag": "aavg_a0.875_b0.875_g0.375",
+   "argmin_e2e_avg": 43.9,
+   "argmin_regret": 1.18
+  },
+  {
+   "feature": "mass_mu",
+   "argmax_tag": "mminmax_a0.875_b0.875_g0.5",
+   "argmax_e2e_avg": 43.9,
+   "argmax_regret": 1.18,
+   "argmin_tag": "aavg_a0.75_b0.75_g0.5",
+   "argmin_e2e_avg": 43.81,
+   "argmin_regret": 1.27
+  },
+  {
+   "feature": "mass_natural32k",
+   "argmax_tag": "mminmax_a0.875_b0.875_g0.5",
+   "argmax_e2e_avg": 43.9,
+   "argmax_regret": 1.18,
+   "argmin_tag": "aavg_a0.875_b0.875_g0.375",
+   "argmin_e2e_avg": 43.9,
+   "argmin_regret": 1.18
+  },
+  {
+   "feature": "mass_needle32k",
+   "argmax_tag": "mminmax_a0.875_b0.875_g0.5",
+   "argmax_e2e_avg": 43.9,
+   "argmax_regret": 1.18,
+   "argmin_tag": "aavg_a0.75_b0.75_g0.5",
+   "argmin_e2e_avg": 43.81,
+   "argmin_regret": 1.27
+  },
+  {
+   "feature": "mass_other12",
+   "argmax_tag": "mminmax_a0.875_b0.875_g0.5",
+   "argmax_e2e_avg": 43.9,
+   "argmax_regret": 1.18,
+   "argmin_tag": "aavg_a0.75_b0.75_g0.5",
+   "argmin_e2e_avg": 43.81,
+   "argmin_regret": 1.27
+  },
+  {
+   "feature": "mass_screen",
+   "argmax_tag": "mminmax_a0.875_b0.875_g0.5",
+   "argmax_e2e_avg": 43.9,
+   "argmax_regret": 1.18,
+   "argmin_tag": "aavg_a0.75_b0.75_g0.5",
+   "argmin_e2e_avg": 43.81,
+   "argmin_regret": 1.27
+  },
+  {
+   "feature": "mass_screen_minus_other",
+   "argmax_tag": "aavg_a0.875_b0.875_g0.375",
+   "argmax_e2e_avg": 43.9,
+   "argmax_regret": 1.18,
+   "argmin_tag": "cavg_a0.125_b0.25_g0.75",
+   "argmin_e2e_avg": 43.58,
+   "argmin_regret": 1.5
+  },
+  {
+   "feature": "mass_std",
+   "argmax_tag": "aavg_a0.875_b0.875_g0.375",
+   "argmax_e2e_avg": 43.9,
+   "argmax_regret": 1.18,
+   "argmin_tag": "cavg_a0.125_b0.375_g0.625",
+   "argmin_e2e_avg": 42.81,
+   "argmin_regret": 2.26
+  },
+  {
+   "feature": "mass_total",
+   "argmax_tag": "mminmax_a0.875_b0.875_g0.5",
+   "argmax_e2e_avg": 43.9,
+   "argmax_regret": 1.18,
+   "argmin_tag": "aavg_a0.75_b0.75_g0.5",
+   "argmin_e2e_avg": 43.81,
+   "argmin_regret": 1.27,
+   "picked_tag": "mminmax_a0.875_b0.875_g0.5",
+   "picked_e2e_avg": 43.9
+  }
+ ],
+ "pick_table_note": "argmax/argmin 双报：方向事后取优 = 乐观偏差（真实部署须先验定方向）；所有 mass 派生信号的最优方向 regret 均 >= 1.18",
+ "oracle": {
+  "oracle_arm": "mavg_a0.125_b0.375_g0.625",
+  "oracle_avg": 45.075,
+  "baseline_fixed_mavg_b025": 44.86,
+  "baseline_ref_arm": 44.595,
+  "oracle_gain_vs_b025": 0.21,
+  "oracle_gain_vs_ref": 0.48,
+  "mass_pick_arm": "mminmax_a0.875_b0.875_g0.5",
+  "mass_pick_avg": 43.9,
+  "mass_pick_loss_vs_oracle": 1.18
+ },
+ "mavg_family": {
+  "n": 4,
+  "note": "γ 截断坍缩后 mavg β.25 各臂同分；唯一分化 = β.375 vs β.25",
+  "arms": [
+   {
+    "tag": "mavg_a0.125_b0.25_g0.75",
+    "mass": 0.8822,
+    "e2e_avg": 44.864999999999995,
+    "beta": 0.25
+   },
+   {
+    "tag": "mavg_a0.125_b0.25_g0.375",
+    "mass": 0.8805,
+    "e2e_avg": 44.864999999999995,
+    "beta": 0.25
+   },
+   {
+    "tag": "mavg_a0.125_b0.375_g0.625",
+    "mass": 0.8801,
+    "e2e_avg": 45.075,
+    "beta": 0.375
+   },
+   {
+    "tag": "mavg_a0.125_b0.375_g0.125",
+    "mass": 0.8728,
+    "e2e_avg": 44.595,
+    "beta": 0.375
+   }
+  ],
+  "mass_vs_e2e_spearman": 0.316,
+  "mass_vs_e2e_spearman_p": 0.6838,
+  "b375_arm_mass_rank": 3,
+  "b375_arm_mass_rank_note": "mass 排名中 β.375（e2e 家族内最优）的位次；靠后=mass 在家族内主动误导"
+ },
+ "dedup_sensitivity": {
+  "n_raw": 13,
+  "n_dedup": 10,
+  "collapsed_groups": {
+   "(54.16, 35.57)": [
+    "mavg_a0.125_b0.25_g0.75",
+    "mavg_a0.125_b0.25_g0.375"
+   ],
+   "(54.4, 33.4)": [
+    "mminmax_a0.875_b0.875_g0.5",
+    "aavg_a0.875_b0.875_g0.375"
+   ],
+   "(54.38, 33.24)": [
+    "mminmax_a0.75_b0.75_g0.5",
+    "aavg_a0.75_b0.75_g0.5"
+   ]
+  },
+  "note": "同分臂 = γ 截断 / 预算坍缩后的同有效配置（E98 v1 教训），去重后重算主相关",
+  "mass_vs_e2e_spearman_dedup": 0.2,
+  "mass_vs_e2e_spearman_p_dedup": 0.5796
+ },
+ "prior_alignment": {
+  "E75_per_task_oracle_gain": 0.08,
+  "E79a_per_layer_oracle_gain": 0.0008,
+  "E79b_arm_selector_net_gain": 0.0,
+  "E99_oracle_gain_vs_b025": 0.21,
+  "consistency": "四组数字同量级（≤0.5 分），α/β/γ 参数面平坦结论跨任务/层/信号/臂四粒度一致"
+ },
+ "verdict": {
+  "recommendation": "NO-GO",
+  "reasoning": [
+   "主信号 mass_total vs e2e_avg Spearman=0.166 (p=0.5889, n=13, bootstrap 95% CI 含 0)",
+   "mass 冠军选臂（mminmax_a0.875_b0.875_g0.5）e2e 43.9, 比 oracle 亏 1.18——mass 选臂不是中性而是主动有害",
+   "oracle 上限仅 +0.21（vs 固定 β.25）/+0.48（vs 参照臂），与 E75 per-task oracle +0.08 同量级；n=13 下连上限本身都不稳定",
+   "任务匹配 mass / 离散度 / 合成侧 mass 等 12 个候选特征（含对照列 beta）无一 BH 校正后显著，且小样本+多特征本身即多重比较陷阱；所有 mass 派生信号即使方向事后取优，regret 也 >= 1.18",
+   "唯一系统性分化（mavg β.375 vs β.25, avg +0.21）是 hq/mu 任务形态交互（hq +1.28/mu −0.86），不是任何 mass 侧量能表达的方向——与 E75 判决「信号-臂不可分」同构",
+   "E75(+0.08)/E79a(+0.0008)/E79b(0) 三重否定先验 + 本次 n=13 复证：平坦性是参数面结构性属性而非测量问题，预测器无杠杆可撬"
+  ],
+  "positive_note": "部署最优解仍是全局固定配置（E98 best mavg a.125/b.375/g.625）；平坦性本身是部署简单卖点（论文 §4.4 既有转译）",
+  "e2e_prior_alignment": {
+   "E75_per_task_oracle_gain": 0.08,
+   "E79a_per_layer_oracle_gain": 0.0008,
+   "E79b_arm_selector_net_gain": 0.0,
+   "E99_oracle_gain_vs_b025": 0.21,
+   "consistency": "四组数字同量级（≤0.5 分），α/β/γ 参数面平坦结论跨任务/层/信号/臂四粒度一致"
+  }
+ }
+}

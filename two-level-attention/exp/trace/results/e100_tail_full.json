@@ -1,0 +1,36 @@
+{
+ "note": "E100 审稿C1修复：tail32 L1 臂 13 任务全量（E98 best 配置 + tli_subspace tail），对照 full-L1 主表臂 50.78",
+ "TAG": "E100TAIL_mavg_a0.125_b0.375_g0.625",
+ "tasks": {
+  "hotpotqa": 53.63,
+  "2wikimqa": 38.71,
+  "musique": 35.04,
+  "passage_retrieval_en": 99.5,
+  "qasper": 44.19,
+  "multifieldqa_en": 52.96,
+  "gov_report": 33.21,
+  "qmsum": 23.48,
+  "multi_news": 24.51,
+  "narrativeqa": 25.02,
+  "triviaqa": 90.57,
+  "lcc": 69.25,
+  "repobench": 66.77,
+  "AVG": 50.53
+ },
+ "delta_vs_full_L1": {
+  "hotpotqa": -1.81,
+  "2wikimqa": -0.61,
+  "musique": 0.33,
+  "passage_retrieval_en": 0.5,
+  "qasper": 0.24,
+  "multifieldqa_en": -0.09,
+  "gov_report": -0.31,
+  "qmsum": -0.1,
+  "multi_news": 0.07,
+  "narrativeqa": -1.29,
+  "triviaqa": 0.0,
+  "lcc": -0.03,
+  "repobench": -0.2,
+  "AVG": -0.25
+ }
+}

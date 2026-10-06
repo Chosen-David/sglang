@@ -1,0 +1,35 @@
+{
+ "arms": {
+  "signear8_tail (GPU0)": {
+   "hotpotqa": 55.08,
+   "musique": 31.19,
+   "n": 200
+  },
+  "mavg_tail (GPU1)": {
+   "hotpotqa": 54.83,
+   "musique": 33.22,
+   "n": 200,
+   "note": "argparse bug 修复重跑，详见 e87c_mavg_tail.json"
+  }
+ },
+ "reference": {
+  "near_sigma8_full128 (E87)": {
+   "hotpotqa": 55.12,
+   "musique": 31.83
+  },
+  "twolvl_tail32_B7s": {
+   "hotpotqa": 54.23,
+   "musique": 32.82
+  },
+  "twolvl_full128_E90": {
+   "hotpotqa": 54.72,
+   "musique": 32.82
+  }
+ },
+ "verdict": {
+  "dimension_effect_on_sigma_arm": "hq 55.08 vs 55.12 = -0.04 噪声级 / mu 31.19 vs 31.83 = -0.64——top-σ 臂的维度效应远小于 twolvl 臂（E90 的 +0.49），top-σ 选择锚（sink_max−σ）本身与打分维度弱耦合",
+  "sigma_net_effect_tail": "hq 55.08−54.23 = +0.85 vs twolvl tail：near σ8 的质量增益在 tail 口径完整复现，E87 判决不受维度混杂影响",
+  "musique": "sigma 在 musique 双口径皆负（full 31.83 / tail 31.19 vs twolvl 32.82）——多跳 far 检索仍需两级分区，与 E87 终判一致",
+  "ranking_hq": "rope64 55.98 > nearσ8 full 55.12 > nearσ8 tail 55.08 > full128 54.72 > tail32 twolvl 54.23"
+ }
+}

@@ -1,0 +1,32 @@
+{
+ "arms": {
+  "mavg_tail (GPU1 重跑, α.125/β.375, tail32)": {
+   "hotpotqa": 54.83,
+   "musique": 33.22,
+   "n": 200,
+   "note": "argparse bug 修复后重跑（--tli_far_method minmax --tli_near_method avg --tli_beta 0.375）"
+  }
+ },
+ "reference": {
+  "mavg_full128 (E72, 同配置 α.125/β.375)": {
+   "hotpotqa": 54.43,
+   "musique": 34.76
+  },
+  "B7s (mavg α.125/β.25, tail32)": {
+   "hotpotqa": 54.23,
+   "musique": 32.82
+  },
+  "E90_full (mavg α.125/β.25, full128)": {
+   "hotpotqa": 54.72,
+   "musique": 32.82
+  }
+ },
+ "verdict": {
+  "dimension_effect_mavg_arm": "tail−full = hq +0.40 / mu −1.54——与 twolvl 臂（E90 full−B7s = hq +0.49 full 占优）方向相反：维度效应非可加常数，存在 method(beta)×dimension 交互，E90 的 +0.49 不能跨臂移植校准——【语义修正】该维度效应的载体是 L1 粗筛上界维度（128 维 fp 上界 vs 32 维子空间上界），L2 细筛两臂数学等价 tail32",
+  "beta_effect_tail_paired": "同维干净配对（tail 口径）β.375 vs β.25：hq +0.60 / mu +0.40——hq 幅度接近噪声级（E75 非 musique |Δ| 中位 0.17），musique 正向与 full 口径 +1.94 同向",
+  "beta_effect_full_paired": "full 口径 β.375 vs β.25：hq −0.29 / mu +1.94——hq 的 β 效应随维度符号翻转，musique β.375 两口径皆正",
+  "e72_calibration": "此前「E72 mavg 组合净 −0.29」是 full 同维配对的 β 效应；tail 配对反转为 +0.60——E72 五臂 screen 排序在 tail 口径下 mavg 冠军地位不变且优势略增",
+  "ranking_hq": "rope64 55.98 > nearσ8 full 55.12 > nearσ8 tail 55.08 > mavg_tail β.375 54.83 > E90 full 54.72 > mavg full β.375 54.43 > B7s 54.23"
+ },
+ "code_semantics_correction": "【10-03 09:00 代码级核实】tli_subspace=full 的真实混杂语义 = L1 块级 minmax 上界在全维 128 维计算（fp 无量化；tail 模式只在 32 维子空间算上界）。L2 细筛 k_qat 在 full 模式回退默认 tail32 indices、其余维零填充（tli_indexer.py L223-225），einsum 零维贡献恒 0 → 细筛数学上仍等价 tail32 子空间。此前『E72/E87 全维细筛』的记忆与论文措辞均为误判，混杂实为 L1 上界维度；本 JSON 全部判决数字不变。"
+}

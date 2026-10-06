@@ -1,0 +1,74 @@
+{
+ "qwen3-8b/lb_gov_report_0": {
+  "minmax": 0.7983,
+  "avg": 0.5345
+ },
+ "qwen3-8b/lb_gov_report_1": {
+  "minmax": 0.8304,
+  "avg": 0.628
+ },
+ "qwen3-8b/lb_hotpotqa_0": {
+  "minmax": 0.9404,
+  "avg": 0.766
+ },
+ "qwen3-8b/lb_hotpotqa_1": {
+  "minmax": 0.919,
+  "avg": 0.7086
+ },
+ "qwen3-8b/lb_multifieldqa_en_0": {
+  "minmax": 0.9725,
+  "avg": 0.7402
+ },
+ "qwen3-8b/lb_multifieldqa_en_1": {
+  "minmax": 0.9871,
+  "avg": 0.9058
+ },
+ "qwen3-8b/lb_musique_0": {
+  "minmax": 0.9107,
+  "avg": 0.7145
+ },
+ "qwen3-8b/lb_musique_1": {
+  "minmax": 0.9358,
+  "avg": 0.7702
+ },
+ "qwen3-8b/lb_narrativeqa_0": {
+  "minmax": 0.781,
+  "avg": 0.5126
+ },
+ "qwen3-8b/lb_narrativeqa_1": {
+  "minmax": 0.781,
+  "avg": 0.5126
+ },
+ "qwen3-8b/lb_passage_retrieval_en_0": {
+  "minmax": 0.9466,
+  "avg": 0.8422
+ },
+ "qwen3-8b/lb_passage_retrieval_en_1": {
+  "minmax": 0.957,
+  "avg": 0.8178
+ },
+ "qwen3-8b/lb_qasper_0": {
+  "minmax": 0.8872,
+  "avg": 0.6871
+ },
+ "qwen3-8b/lb_qasper_1": {
+  "minmax": 0.883,
+  "avg": 0.6435
+ },
+ "qwen3-8b/natural32k": {
+  "minmax": 0.8535,
+  "avg": 0.564
+ },
+ "qwen3-8b/needle32k": {
+  "minmax": 0.8205,
+  "avg": 0.5786
+ },
+ "qwen3-30b/lb_hotpotqa_0": {
+  "minmax": 0.9917,
+  "avg": 0.9729
+ },
+ "qwen3-30b/lb_hotpotqa_1": {
+  "minmax": 0.9428,
+  "avg": 0.9227
+ }
+}

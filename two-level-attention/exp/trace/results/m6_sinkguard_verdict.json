@@ -1,0 +1,41 @@
+{
+ "note": "M6 sink-guard 判决第一臂：SnapKV+sinkguard128 13 任务全量（预算 1024+sink 128 计外，PSI 严格口径对齐）",
+ "snapkv_sinkguard": {
+  "hotpotqa": 32.8,
+  "musique": 12.69,
+  "2wikimqa": 27.96,
+  "passage_retrieval_en": 7.0,
+  "qasper": 17.28,
+  "multifieldqa_en": 26.99,
+  "gov_report": 23.01,
+  "qmsum": 18.16,
+  "multi_news": 20.09,
+  "narrativeqa": 12.25,
+  "triviaqa": 73.91,
+  "lcc": 67.76,
+  "repobench": 50.27,
+  "AVG": 30.01
+ },
+ "reference": {
+  "SnapKV_original": {
+   "AVG": 27.7,
+   "hotpotqa": 23.64,
+   "musique": 8.61,
+   "passage": 25.1
+  },
+  "FullKV": {
+   "AVG": 50.36,
+   "hotpotqa": 53.48
+  },
+  "PSI": {
+   "AVG": 50.54
+  }
+ },
+ "verdict": {
+  "delta_vs_original": "AVG +2.31（30.01 vs 27.70）",
+  "eos_bug_repair": "「首 token EOS」崩坏级损失被 sink 保送修复：hotpotqa 2.68→32.80（+30.1）、narrativeqa→12.25、musique 8.61→12.69——冒烟判决在全量复现",
+  "insufficiency": "必要非充分：修复崩坏后仍距 FullKV −20 分（passage 7.0 vs 94.5、musique 12.69 vs 32.14）——静态压缩的候选质量损失与 sink 无关，是方法固有",
+  "conclusion": "审稿 M6「有药不吃」闭环：baseline 崩坏主因确为 sink 缺失（可修复），但 sink-guard 修复后仍非 PSI 对手——PSI 的优势不止 sink，还有分区预算+两级检索"
+ },
+ "pending": "h2o_sinkguard（GPU0 在跑）、pyramidkv_sinkguard（GPU1 7/13）完成后补齐三行完整对照"
+}

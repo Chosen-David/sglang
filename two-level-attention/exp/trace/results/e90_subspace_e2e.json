@@ -1,0 +1,71 @@
+{
+ "note": "E90 子空间 e2e 消融（对齐 E3 mass 口径）；twolvl 配置 α.125/β.25/γ.125，仅 --tli_subspace 变化",
+ "reference": {
+  "tail32_B7s": {
+   "hotpotqa": 54.23,
+   "musique": 32.82
+  },
+  "full128_E90": {
+   "hotpotqa": 54.72,
+   "musique": 32.82
+  }
+ },
+ "dimension_effect": {
+  "hotpotqa": 0.49,
+  "musique": 0.0,
+  "comment": "E90full−B7s = 纯细筛维度效应；E87/E72 全维臂混杂据此校准"
+ },
+ "arms": {
+  "full": {
+   "hotpotqa": 54.72,
+   "musique": 32.82
+  },
+  "rope": {
+   "hotpotqa": 55.98,
+   "musique": 32.96
+  },
+  "nope": {
+   "hotpotqa": 52.4,
+   "musique": 30.8
+  },
+  "random": {
+   "hotpotqa": 46.01,
+   "musique": 24.08
+  },
+  "highfreq": {
+   "hotpotqa": 33.8,
+   "musique": 14.26
+  }
+ },
+ "calibrated": {
+  "E72_mavg_vs_B7s": {
+   "raw": 0.2,
+   "dim_adjusted": -0.29,
+   "comment": "hq 54.43−54.23=+0.20，扣维度 +0.49 后组合本身 −0.29"
+  },
+  "E87_near_sigma8_vs_B7s": {
+   "raw": 0.89,
+   "dim_adjusted": 0.4,
+   "comment": "hq 55.12−54.23=+0.89，扣维度后 sigma 本身 +0.40"
+  },
+  "E87_near_sigma8_vs_E90full": {
+   "delta": 0.4,
+   "comment": "同全维口径下 55.12−54.72 = +0.40，sigma 净效应"
+  },
+  "E72_aavg_hq": {
+   "note": "54.72 恰与 E90full 同分，全维下 avg 打分已无差距"
+  }
+ },
+ "findings": {
+  "rope_first64": "hq 55.98 全配置新高 / mu 32.96——E3 trace 排序（rope16 0.576 远差于 tail32 0.811）在 e2e 反转：64 维旋转段信息量足，trace 16 维小样本排序不可替代 e2e",
+  "nope_last64": "hq 52.4 / mu 30.8 双降——非旋转维代表性弱于旋转维，方向与 trace 一致",
+  "ordering_e2e": "rope64 > full128 > tail32 > nope64 >> random32（hq）；E3 trace 排序（tail32 0.811 >> rope16 0.576 ≈ random 0.32）中 rope/random 两档在 e2e 反转/同向，仅 random 崩塌是双向共识",
+  "random_seed20261002": "hq 46.01 / mu 24.08 重崩——与 E3 trace 口径（random32 mass 0.320 崩）方向一致的唯一臂：位置稳定子空间选择的必要性双向证据",
+  "highfreq_head32": "hq 33.8 / mu 14.26 重崩——与 E3 trace（0.137 崩）同向，高频维无位置稳定代表性",
+  "complete_verdict": {
+   "ordering_hq": "rope64 55.98 > full128 54.72 > tail32 54.23 > nope64 52.4 >> random32 46.01 >> highfreq32 33.8",
+   "trace_e2e_agreement": "崩塌级同向（random/highfreq 双口径皆崩）；可用级反转（rope trace 差→e2e 新高）",
+   "necessity": "位置稳定子空间是必要条件（random/highfreq 双崩），但最优选择以 e2e 为准（rope64 新高，成本=4×tail32 存储与打分）"
+  }
+ }
+}

@@ -1,0 +1,47 @@
+import torch
+import torch.nn.functional as F
+from einops import rearrange, repeat, einsum
+
+def eager_decoding_attn(
+    q: torch.Tensor, # [1, tq, hq, d]
+    k: torch.Tensor, # [1, tk, h, d]
+    v: torch.Tensor, # [1, tk, h, d]
+    mask: torch.Tensor,
+    block_size: int,
+    cu_seqlens_k: torch.Tensor,
+    softmax_scale: float = None,
+):
+    if softmax_scale is None:
+        softmax_scale = k.shape[-1] ** -0.5
+    q, k, v, mask = (x.squeeze(0) for x in (q, k, v, mask))
+    o = q.new_zeros(q.shape[:-1] + (v.shape[-1],))
+    G = q.shape[-2] // k.shape[-2]
+    bos_k, eos_k = cu_seqlens_k[0], cu_seqlens_k[1]
+    # ---- E103：kv-head 共享消融消费端 ----
+    # 共享口径：mask [Hkv, tk]（kv-head 级），repeat 后 [Hkv, tk*bs] 直接广播到组内
+    # 全部 G 个 q-head（b_mask[:, None, :]）——「同组共享同一份选择」的落点；
+    # per_q_head 口径：mask [H, tk]（q-head 级），按 G 拆回 [Hkv, G, tk*bs]
+    # 逐元素对应——每个 q-head 用自己的选择，不做组内广播。
+    m0 = mask[0]
+    per_qh = m0.shape[0] != k.shape[-2]
+    if per_qh:
+        g_m = m0.shape[0] // k.shape[-2]
+        b_mask = repeat(
+            m0, '(h g) tk -> h g (tk bs)', g=g_m, bs=block_size
+        )[:, :eos_k - bos_k]
+    else:
+        b_mask = repeat(mask[0], 'h tk -> h (tk bs)', bs=block_size)[:, :eos_k - bos_k]
+
+    b_q = rearrange(q[0] * softmax_scale, '(h g) d -> h g d', g=G).to(torch.float32)
+    b_k = k.to(torch.float32)
+    b_v = v
+    b_s = einsum(b_q, b_k, 'h g d, t h d -> h g t')
+    if per_qh:
+        # E103：b_mask 已是 [Hkv, G, T] 与 b_s 同形，逐元素对应（每 q-head 自己的选择）
+        b_s = torch.where(b_mask, b_s, float('-inf'))
+    else:
+        b_s = torch.where(b_mask[:, None, :], b_s, float('-inf'))
+    b_p = F.softmax(b_s, dim=-1).to(q.dtype)
+    b_o = rearrange(einsum(b_p, b_v, 'h g t, t h d -> h g d'), 'h g d -> (h g) d')
+    o[0] = b_o
+    return o.unsqueeze(0)

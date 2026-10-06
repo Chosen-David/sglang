@@ -1,0 +1,140 @@
+{
+ "note": "E100 审稿 C1 判决配套：tail32-L1 臂 vs full-L1 主表臂逐样本配对 bootstrap CI",
+ "method": {
+  "bootstrap": "任务内有放回重采样逐样本配对差 → 任务均值 → 13 任务等权平均",
+  "B": 10000,
+  "seed": 20261004,
+  "ci": "percentile 95%",
+  "scoring": "per-sample = max over ground_truths（与 scorer 逐字一致，含 triviaqa 截断）",
+  "pairing": "tail/full 同 pred.py 同数据顺序，answers 逐位 assert 校验"
+ },
+ "claim": {
+  "tail_avg": 50.53,
+  "full_avg": 50.78,
+  "diff": -0.25
+ },
+ "task_table": {
+  "hotpotqa": {
+   "n": 200,
+   "tail": 53.63,
+   "full": 55.44,
+   "fkv": 53.48,
+   "tail_minus_full": -1.81,
+   "tail_minus_fkv": 0.15
+  },
+  "2wikimqa": {
+   "n": 200,
+   "tail": 38.71,
+   "full": 39.32,
+   "fkv": 38.29,
+   "tail_minus_full": -0.61,
+   "tail_minus_fkv": 0.42
+  },
+  "musique": {
+   "n": 200,
+   "tail": 35.04,
+   "full": 34.71,
+   "fkv": 32.14,
+   "tail_minus_full": 0.33,
+   "tail_minus_fkv": 2.9
+  },
+  "passage_retrieval_en": {
+   "n": 200,
+   "tail": 99.5,
+   "full": 99.0,
+   "fkv": 100.0,
+   "tail_minus_full": 0.5,
+   "tail_minus_fkv": -0.5
+  },
+  "qasper": {
+   "n": 200,
+   "tail": 44.19,
+   "full": 43.95,
+   "fkv": 44.17,
+   "tail_minus_full": 0.24,
+   "tail_minus_fkv": 0.02
+  },
+  "multifieldqa_en": {
+   "n": 150,
+   "tail": 52.96,
+   "full": 53.05,
+   "fkv": 53.4,
+   "tail_minus_full": -0.09,
+   "tail_minus_fkv": -0.44
+  },
+  "gov_report": {
+   "n": 200,
+   "tail": 33.21,
+   "full": 33.52,
+   "fkv": 33.17,
+   "tail_minus_full": -0.31,
+   "tail_minus_fkv": 0.04
+  },
+  "qmsum": {
+   "n": 200,
+   "tail": 23.48,
+   "full": 23.58,
+   "fkv": 23.53,
+   "tail_minus_full": -0.1,
+   "tail_minus_fkv": -0.05
+  },
+  "multi_news": {
+   "n": 200,
+   "tail": 24.51,
+   "full": 24.44,
+   "fkv": 24.93,
+   "tail_minus_full": 0.07,
+   "tail_minus_fkv": -0.42
+  },
+  "narrativeqa": {
+   "n": 200,
+   "tail": 25.02,
+   "full": 26.31,
+   "fkv": 25.61,
+   "tail_minus_full": -1.3,
+   "tail_minus_fkv": -0.59
+  },
+  "triviaqa": {
+   "n": 200,
+   "tail": 90.57,
+   "full": 90.57,
+   "fkv": 90.71,
+   "tail_minus_full": 0.0,
+   "tail_minus_fkv": -0.14
+  },
+  "lcc": {
+   "n": 500,
+   "tail": 69.25,
+   "full": 69.28,
+   "fkv": 68.81,
+   "tail_minus_full": -0.03,
+   "tail_minus_fkv": 0.44
+  },
+  "repobench": {
+   "n": 500,
+   "tail": 66.77,
+   "full": 66.97,
+   "fkv": 66.5,
+   "tail_minus_full": -0.2,
+   "tail_minus_fkv": 0.28
+  }
+ },
+ "tail_vs_full_ci": {
+  "mean": -0.25,
+  "ci95_lo": -0.57,
+  "ci95_hi": 0.06,
+  "contains_zero": true
+ },
+ "tail_vs_fullkv_ci": {
+  "mean": 0.16,
+  "ci95_lo": -0.43,
+  "ci95_hi": 0.76,
+  "contains_zero": true
+ },
+ "sign_test_tail_vs_full": {
+  "wins": 4,
+  "losses": 8,
+  "two_sided_binomial_p": 0.3877
+ },
+ "verdict": "tail-full AVG 差 -0.25 的 95% CI [-0.57, 0.06] 含 0：L1 上界维度口径（tail32 vs 全维 128）对主表结论统计不可分，主表臂可换 tail 口径与论文描述系统对齐（了结审稿 C1）；tail 口径下 vs FullKV 差 +0.16（CI [-0.43, 0.76]）"
+}

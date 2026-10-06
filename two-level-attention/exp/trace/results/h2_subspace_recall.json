@@ -1,0 +1,66 @@
+{
+ "natural32k": {
+  "32": {
+   "recall_mean": 0.464996337890625,
+   "recall_p5": 0.29345703125,
+   "remote_recall_mean": 0.41370186237767903,
+   "hbm_ratio": 0.25
+  },
+  "48": {
+   "recall_mean": 0.49200439453125,
+   "recall_p5": 0.3494873046875,
+   "remote_recall_mean": 0.41838076477475494,
+   "hbm_ratio": 0.375
+  },
+  "64": {
+   "recall_mean": 0.5061170789930556,
+   "recall_p5": 0.402099609375,
+   "remote_recall_mean": 0.44982516622346935,
+   "hbm_ratio": 0.5
+  },
+  "96": {
+   "recall_mean": 0.5132242838541666,
+   "recall_p5": 0.3970947265625,
+   "remote_recall_mean": 0.4889971487827276,
+   "hbm_ratio": 0.75
+  },
+  "128": {
+   "recall_mean": 0.5055135091145834,
+   "recall_p5": 0.393310546875,
+   "remote_recall_mean": 0.48274326460232647,
+   "hbm_ratio": 1.0
+  }
+ },
+ "needle32k": {
+  "32": {
+   "recall_mean": 0.3900417751736111,
+   "recall_p5": 0.21630859375,
+   "remote_recall_mean": 0.27842122502370414,
+   "hbm_ratio": 0.25
+  },
+  "48": {
+   "recall_mean": 0.4294026692708333,
+   "recall_p5": 0.2725830078125,
+   "remote_recall_mean": 0.2950891173971878,
+   "hbm_ratio": 0.375
+  },
+  "64": {
+   "recall_mean": 0.4394192165798611,
+   "recall_p5": 0.2640380859375,
+   "remote_recall_mean": 0.32796941626431975,
+   "hbm_ratio": 0.5
+  },
+  "96": {
+   "recall_mean": 0.4673902723524306,
+   "recall_p5": 0.26806640625,
+   "remote_recall_mean": 0.40733246338057594,
+   "hbm_ratio": 0.75
+  },
+  "128": {
+   "recall_mean": 0.466766357421875,
+   "recall_p5": 0.26806640625,
+   "remote_recall_mean": 0.40869169426782015,
+   "hbm_ratio": 1.0
+  }
+ }
+}
