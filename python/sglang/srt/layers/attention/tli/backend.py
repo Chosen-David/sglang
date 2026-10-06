@@ -651,18 +651,46 @@ class TLISparseAttnBackend(AttentionBackend):
                 continue
             indexer = self._get_indexer(layer_id)
             k_buf = pool.get_kv_buffer(layer_id)[0]
-            k_all = k_buf[locs].float()  # [S, Hkv, D]
-            index = indexer.build_block_index(k_all)
             # M4：写入共享 index pool（decode 增量起点；不再存 per-request dict）
             pool_l = self._get_pool(layer_id)
             self._ensure_pool_s(pool_l, S)
             row = self._alloc_row(pool_l, req)
-            pool_l["kq_q"][row, :S] = index["kq_q"]
-            pool_l["kq_sc"][row, :S] = index["kq_sc"]
-            pool_l["kq_mn"][row, :S] = index["kq_mn"]
-            pool_l["kmin"][row, : index["nblk"]] = index["kmin"]
-            pool_l["kmax"][row, : index["nblk"]] = index["kmax"]
-            pool_l["S"][row] = S
+            S_st = pool_l["S"][row]
+            t0 = self.timer.tick()
+            if (
+                S_st == prefix
+                and prefix > 0
+                and not self.profile.far_kmeans
+                and self.profile.far_select != "cluster"
+            ):
+                # F1（#127，Quest 对齐）：chunked prefill 增量分支——S_st ==
+                # prefix 说明 pool 行内容恰为 [0, prefix)，只取本 chunk 新
+                # token 增量更新（O(nq)，替代每 chunk O(S) 全量重建）。
+                # kq 4bit 逐 token 独立 append；kmin/kmax 块界结合律合并
+                # （复用 decode 侧 update_block_index，含尾块精确界口径），
+                # 与全量重建逐位一致（test_incremental_prefill.py 对拍）。
+                # F2：只物化新 chunk 的 fp32（不再 k_buf[locs].float() 全宽，
+                # 64K 请求 8K chunk 少付 ~7/8 的 gather+cast 带宽）。
+                k_new = k_buf[locs[prefix:S]].float()  # [nq, Hkv, D]
+                indexer.update_block_index(
+                    self._row_views(pool_l, row, prefix), k_new
+                )
+                pool_l["S"][row] = S
+                index = self._row_views(pool_l, row, S)
+                self.timer.add("increment", time.time() - t0)
+            else:
+                # 首 chunk / 行复用 / S 跳变（branch miss）/ kmeans 消融臂
+                # （far_centroids/far_assign 是 prefill 全局聚类，无法增量）：
+                # 全量重建
+                k_all = k_buf[locs].float()  # [S, Hkv, D]
+                index = indexer.build_block_index(k_all)
+                pool_l["kq_q"][row, :S] = index["kq_q"]
+                pool_l["kq_sc"][row, :S] = index["kq_sc"]
+                pool_l["kq_mn"][row, :S] = index["kq_mn"]
+                pool_l["kmin"][row, : index["nblk"]] = index["kmin"]
+                pool_l["kmax"][row, : index["nblk"]] = index["kmax"]
+                pool_l["S"][row] = S
+                self.timer.add("build", time.time() - t0)
             t_arr = torch.arange(prefix, S, device=q.device)
             sel = indexer.select_batched(
                 index, q_b, t_arr, t_min_hint=prefix

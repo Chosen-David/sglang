@@ -142,6 +142,11 @@ def gpu_kmeans(x: torch.Tensor, K: int, niter: int = 20, seed: int = 0):
     """GEMM 距离 kmeans（创新点 B；复用 KMeans/CPU 调研的 GEMM 技巧）。"""
     g = torch.Generator().manual_seed(seed)
     N, d = x.shape
+    # 存量 bug 修复（#127 单测触发）：N < K 时 randperm(N)[:K] 静默只给
+    # N 个中心，bincount(minlength=K) 掩码与中心数不匹配 → IndexError。
+    # clamp 后 = 少样本退化（每 token 近自成中心）；N ≥ K 的既有路径
+    # （实验全部 S >> far_clusters）行为零变化。
+    K = min(K, N)
     c = x[torch.randperm(N, generator=g)[:K]].clone()
     for _ in range(niter):
         assign = (x @ c.T).argmax(dim=1)
@@ -579,8 +584,18 @@ class TLIIndexer:
         kq = index["kq_q"]  # M6 uint8 格点（tok_c < S，容量 padding 无害）
         t_arr = t_arr.to(device)
         pos = torch.arange(S, device=device)
-        # M7：共享反量化表（快路径直接 einsum；慢路径 gather 打分也用）
-        kq_f = kq_unpack(kq[:S], index["kq_sc"][:S], index["kq_mn"][:S])
+        # M7：共享反量化表（快路径直接 einsum；慢路径 gather 打分也用）。
+        # F3（#127）：惰性构建——M10 kernel 路径（寄存器内 dequant）不
+        # 需要全宽 fp32 表（[S,Hkv,nd2]，131K 时 ~134MB/层/调用纯白付），
+        # 只在 fast path / eager 慢路径 / kernel 路径 empty 行兜底首次
+        # 实际使用时才物化；多次调用同一表仍只建一次。
+        kq_f_l: list[torch.Tensor | None] = [None]
+
+        def _kq_f() -> torch.Tensor:
+            if kq_f_l[0] is None:
+                kq_f_l[0] = kq_unpack(kq[:S], index["kq_sc"][:S], index["kq_mn"][:S])
+            return kq_f_l[0]
+
         out = []
         for r0 in range(0, Nq, rc):
             r1 = min(r0 + rc, Nq)
@@ -664,10 +679,10 @@ class TLIIndexer:
             if fast_path:
                 if q_agg_max:
                     fine = torch.einsum(
-                        "ahgd,shd->ahgs", q_g, kq_f
+                        "ahgd,shd->ahgs", q_g, _kq_f()
                     ).max(2).values  # [n, Hkv, S]
                 else:
-                    fine = torch.einsum("ahd,shd->ahs", q2, kq_f)  # [n, Hkv, S]
+                    fine = torch.einsum("ahd,shd->ahs", q2, _kq_f())  # [n, Hkv, S]
                 causal_full = pos.view(1, S) <= t_c.view(-1, 1)  # [n, S]
                 fine = fine.masked_fill(~causal_full.unsqueeze(1), float("-inf"))
             elif _kern_ok:
@@ -779,7 +794,7 @@ class TLIIndexer:
                     if bool(empty.any()):
                         q2_e = q2[empty]           # [ne, Hkv, nd2]
                         t_e = t_c[empty]           # [ne]
-                        fine_e = torch.einsum("ahd,shd->ahs", q2_e, kq_f)
+                        fine_e = torch.einsum("ahd,shd->ahs", q2_e, _kq_f())
                         causal_full = pos.view(1, S) <= t_e.view(-1, 1)
                         fine_e = fine_e.masked_fill(~causal_full.unsqueeze(1), float("-inf"))
                         sw_off = torch.arange(p.sliding_window, device=device)
@@ -808,7 +823,7 @@ class TLIIndexer:
                 tok_c = tok.clamp(max=S - 1)
 
                 # ---- L2: 4bit 部分维精筛 → scatter 进 fine [n, Hkv, S] ----
-                kq_c = kq_f[tok_c]  # [n, Tc, Hkv, nd2]（共享表 gather，替代逐 chunk 反量化）
+                kq_c = _kq_f()[tok_c]  # [n, Tc, Hkv, nd2]（共享表 gather，替代逐 chunk 反量化）
                 if q_agg_max:
                     s2 = torch.einsum(
                         "ahgd,athd->ahgt", q_g, kq_c
