@@ -284,3 +284,13 @@ artifacts/
 
 # Internal, non-published docs
 internal-docs/
+paper/project_context.md
+*.aux
+*.pdf
+paper/archive/*/TLI_paper.pdf
+paper/archive/*/TLI_paper_en.pdf
+
+# 研究工作区本地产物（2026-10-10 整理）
+.local/
+.venv_pptx/
+__pycache__/

@@ -1,0 +1,676 @@
+l针对近邻远邻两种方案的混合kernel设计
+
+l远邻token的捞取留在CPU部分处理，进行overlap（CPU会不会过慢？）
+
+l瓶颈avg的话先全局k求avg，打分完成后对于不同的q选择不同的k_avg设计TC-CC混合kernel加速。也即可能多个q选中多个k_avg则拼成GEMM，反之单个k_avg被多个q选中时候拼成GEMV实现CUDA Core和Tensor Core两种计算单元的高效利用（如何设置激活频率以及能不能打过fused kernel?）
+
+这个方向可以形成一个更完整的“近邻/远邻异构 + TC/CC 混合执行”系统故事，但两个点都必须先过性能可行性门槛：
+
+$$ \boxed{\text{Near：GPU 高频、规则路径}} \parallel \boxed{\text{Far：CPU 低频、语义 Cluster 路径}} $$
+
+然后 GPU 内部再根据 q → k_avg 的复用密度动态选择：
+
+$$ \boxed{\text{Tensor Core dense GEMM}} \quad\text{or}\quad \boxed{\text{CUDA Core sparse GEMV/dot}} $$
+
+我会把它设计成下面这样。
+
+1. 整体架构：Near / Far 两条异构路径
+                         Query batch Q
+                              │
+                 ┌────────────┴────────────┐
+                 │                         │
+              Near path                 Far path
+                 │                         │
+                GPU                       CPU
+                 │                         │
+        page avg / min-max          cluster / ANN routing
+                 │                         │
+      q → candidate k_avg          far cluster/page IDs
+                 │                         │
+      TC/CC adaptive kernel        async H2D (only IDs)
+                 │                         │
+                 └────────────┬────────────┘
+                              │
+                       merge candidates
+                              │
+                    GPU token-level L2
+                              │
+                       Sparse Attention
+
+最重要的一条：
+
+CPU 上只保存/查询 far 的 index metadata，不把 KV 本体搬到 CPU。
+
+CPU 最后只返回：
+
+page_id / cluster_id / token candidate id
+
+比如 256 个 int32：
+
+$$ 256\times4=1\text{ KB} $$
+
+通信几乎不是问题。
+
+真正需要担心的是：
+
+$$ \boxed{\text{CPU search latency}} $$
+2. CPU 处理 Far 会不会太慢？
+
+非常可能。
+
+特别是在 decode 场景，每生成一个 token 都要重新有一个 q。
+
+如果：
+
+$$ T_{\text{near-GPU}}=20\mu s $$
+
+而：
+
+$$ T_{\text{far-CPU}}=70\mu s $$
+
+那么所谓 overlap 实际变成：
+
+GPU  [near 20us] |---------- wait ----------|
+
+CPU  [------------- far 70us ---------------]
+
+最终还是约：
+
+$$ 70\mu s $$
+
+而不是 20 μs。
+
+所以 CPU far 成立的必要条件是：
+
+$$ \boxed{ T_{\text{CPU-route}} + T_{\text{ID transfer}} \le T_{\text{GPU hidden window}} } $$
+
+这里 hidden window 不一定只有 near retrieval，还可以包括：
+
+当前层其他计算；
+前一层/下一层 pipeline；
+batch 中其他 request；
+attention 前处理。
+你的第一项实验甚至不需要改模型
+
+直接测：
+
+CPU far microbenchmark
+
+固定真实 far cluster index：
+
+Batch    S    cluster 数    top clusters    CPU latency
+1    32K    ...    ...    ?
+8    32K            
+32    64K            
+32    128K            
+
+同时测：
+
+$$ T_{\text{near-GPU}} $$
+
+然后画：
+
+$$ \frac{T_{\text{CPU-far}}}{T_{\text{near-GPU}}} $$
+
+如果普遍：
+
+$$ >1.5\sim2 $$
+
+那每 token CPU far 基本就可以 No-Go 了。
+
+3. 我反而更建议 CPU 做“维护”，GPU 做查询
+
+更稳的是：
+
+CPU background:
+KV append
+   ↓
+far cluster assignment
+   ↓
+centroid update
+   ↓
+inverted lists maintenance
+
+而在线：
+
+GPU:
+q
+↓
+score 512 / 1024 centroids
+↓
+top clusters
+↓
+token L2
+
+这样：
+
+$$ 100K\ far\ tokens \rightarrow 1024\ centroids $$
+
+GPU 实际只扫 1024 个 centroid。
+
+CPU 负责：
+
+$$ \boxed{\text{build / update}} $$
+
+GPU 负责：
+
+$$ \boxed{\text{online retrieval}} $$
+
+这个风险会小很多。
+
+4. 你说的 Avg + TC/CC 混合 kernel，其实很有意思
+
+你的想法可以正式写成：
+
+假设所有 page 先有：
+
+$$ k^{avg}_j = \frac{1}{P} \sum_{i\in page_j}k_i $$
+
+每一个 query \(q_i\) 会选择一组：
+
+$$ \mathcal C_i = \{k^{avg}_{j_1},k^{avg}_{j_2},...\} $$
+
+对于一个 batch 内很多 q：
+
+q0 → k1 k2 k7
+q1 → k1 k2 k4
+q2 → k1 k2 k8
+q3 → k1 k6
+...
+
+这其实构成了一个二部图：
+
+$$ Q \leftrightarrow K_{avg} $$
+5. “激活频率”应该怎么定义？
+
+可以直接借用类似 CuNeS 的思想。
+
+对于每一个 \(k^{avg}_j\)，定义：
+
+$$ f_j = \sum_i \mathbf 1 [j\in \mathcal C_i] $$
+
+即：
+
+这个 page representative 被多少个 query 选中了。
+
+例如：
+
+k1 → q0 q1 q2 q3 q4 q5   f=6
+k2 → q0 q1 q2 q4         f=4
+k7 → q0                   f=1
+k9 → q5                   f=1
+
+那么可以分：
+
+$$ f_j \ge \tau \Rightarrow Hot\ K $$ $$ f_j < \tau \Rightarrow Cold\ K $$
+6. Hot 为什么适合 Tensor Core？
+
+假设有：
+
+$$ M=32 $$
+
+个 queries，同时有：
+
+$$ N=32 $$
+
+个 hot \(k_{avg}\)。
+
+就可以拼成：
+
+$$ Q_{32\times d} K_{avg,32\times d}^T $$
+
+得到：
+
+$$ 32\times32 $$
+
+score matrix。
+
+这就是标准：
+
+$$ \boxed{\text{GEMM}} $$
+
+特别适合 Tensor Core。
+
+7. Cold 为什么适合 CUDA Core？
+
+例如：
+
+k17 只有 q2 用
+k33 只有 q9 用
+k89 只有 q13 用
+
+如果为了这几个 pair 强行做：
+
+$$ 32\times32 $$
+
+GEMM，就会计算大量无用 score。
+
+这时候直接：
+
+score = dot(q_i, k_avg_j);
+
+就可以。
+
+属于：
+
+$$ \boxed{\text{sparse GEMV / dot}} $$
+
+用 CUDA Core 更合适。
+
+8. 你刚刚描述里有一点要稍微修改
+
+你说：
+
+多个 q 选中多个 k_avg → GEMM
+单个 k_avg 被多个 q 选中 → GEMV
+
+基本正确，但真正决定 TC/CC 的不能只是“一个还是多个”。
+
+应该看：
+
+$$ \boxed{\text{Q-K selection matrix 的密度}} $$
+
+例如：
+
+          k0 k1 k2 k3
+q0        1  1  1  1
+q1        1  1  1  1
+q2        1  1  1  1
+q3        1  1  1  1
+
+这是：
+
+$$ density=100\% $$
+
+非常适合 TC。
+
+但：
+
+          k0 k1 k2 k3
+q0        1  0  0  0
+q1        0  1  0  0
+q2        0  0  1  0
+q3        0  0  0  1
+
+虽然也是 4 q + 4 k：
+
+$$ density=25\% $$
+
+但 GEMM 要算 16 个 score，只有 4 个有用。
+
+这时候 TC 就未必值。
+
+9. 所以不能只使用 activation frequency
+
+建议定义两个指标。
+
+① frequency
+$$ f_j = \#query(k_j) $$
+
+衡量某个 k 的复用。
+
+② tile density
+
+对一个 query-key tile：
+
+$$ \rho = \frac{\#valid\ pairs} {M\times N} $$
+
+然后 runtime dispatch：
+
+if M >= M_min
+and N >= N_min
+and density >= rho_min:
+        Tensor Core
+else:
+        CUDA Core
+
+即：
+
+$$ \boxed{ TC\ iff\ C_{TC}(M,N,\rho) < C_{CC}(E) } $$
+
+其中：
+
+$$ E=\#valid\ qk\ pairs $$
+10. activation threshold τ 不应该手拍
+
+不要论文里写：
+
+frequency > 8 使用 Tensor Core。
+
+更严谨的是做一个offline microbenchmark-based cost model。
+
+例如扫：
+
+$$ M=\{1,2,4,8,16,32,64\} $$ $$ N=\{1,2,4,8,16,32,64\} $$ $$ \rho=\{0.125,0.25,0.5,0.75,1\} $$ $$ d=\{64,128,256\} $$
+
+分别测：
+
+CUDA sparse kernel
+$$ T_{CC}(M,N,\rho,d) $$
+Tensor Core dense GEMM
+$$ T_{TC}(M,N,d) $$
+
+然后得到 crossover surface：
+
+$$ T_{TC}<T_{CC} $$
+
+最后 runtime 根本不用复杂模型。
+
+存一个 LUT：
+
+if (M >= 16 &&
+    N >= 16 &&
+    density >= 0.5)
+    use_tensor_core();
+else
+    use_cuda_core();
+
+具体阈值必须由 H100/A100 实测决定。
+
+11. 这能不能打过 fused kernel？
+
+这是你这个想法最大的风险。
+
+答案是：
+
+bs 小、candidate 稀疏时，很可能打不过。
+
+因为 fused CUDA kernel 可以：
+
+load q
+load selected k_avg
+dot
+topk
+
+一次完成。
+
+几乎没有：
+
+packing；
+launch；
+dense waste。
+
+而你的 TC 路径多了：
+
+frequency count
+↓
+partition
+↓
+pack Q
+↓
+pack K
+↓
+GEMM
+↓
+mask invalid entries
+↓
+scatter results
+
+如果这些 overhead 很大：
+
+$$ T_{partition}+T_{pack}+T_{TC} > T_{fused} $$
+
+那就输了。
+
+12. TC 路径什么时候最有可能赢？
+
+我认为至少需要下面三个条件。
+
+条件 1：batch 足够大
+
+例如：
+
+$$ BS \ge 16/32 $$
+
+否则 M 太小。
+
+条件 2：query selection overlap 高
+
+也就是很多 q 会选择相同 page。
+
+比如：
+
+$$ f_j/B $$
+
+较大。
+
+条件 3：候选矩阵具有 dense block
+
+而不是完全随机：
+
+$$ \rho>0.5 $$
+
+甚至更高。
+
+所以你的关键 observation 不应该只是：
+
+page 被选多少次。
+
+而是需要统计：
+
+$$ \boxed{ \text{candidate reuse distribution} } $$
+
+以及：
+
+$$ \boxed{ \text{Q-K selection matrix block density} } $$
+13. 这个 observation 非常值得先测
+
+直接在真实 trace 上画：
+
+图 1：k_avg activation frequency
+
+x：
+
+$$ f_j $$
+
+y：
+
+$$ \#pages $$
+
+如果出现：
+
+很多 page：f=1/2
+少量 page：f=20/30
+
+长尾明显，那么 TC/CC hybrid 有希望。
+
+也就是：
+
+$$ \text{hot few + cold many} $$
+图 2：多少计算属于 hot pages
+
+定义：
+
+$$ Work_{hot} = \frac{\sum_{j:f_j>\tau}f_j} {\sum_jf_j} $$
+
+如果比如：
+
+$$ 20\% page $$
+
+承载：
+
+$$ 70\% q-k pairs $$
+
+这个 story 就非常漂亮。
+
+14. 再进一步可以做成 CuNeS 式双队列
+                  Q-K pair stream
+                        │
+                 frequency counter
+                        │
+          ┌─────────────┴─────────────┐
+          │                           │
+       HOT queue                   COLD queue
+          │                           │
+ dense tile assembler           sparse pair list
+          │                           │
+ Tensor Core GEMM             CUDA Core dot/GEMV
+          │                           │
+          └─────────────┬─────────────┘
+                        │
+                     scores
+
+这个跟你之前 CuNeS 的思想其实高度一致：
+
+用 workload skewness 把工作映射到不同 GPU execution engines。
+
+只不过以前：
+
+$$ neuron\ activation $$
+
+现在变成：
+
+$$ page/k_{avg}\ retrieval\ frequency $$
+15. 这里甚至可以产生一个新的研究假设
+
+你的 H2 可以写成：
+
+Candidate page reuse is highly skewed across concurrent queries. A small fraction of page representatives are repeatedly selected, while most are accessed by only a few queries.
+
+如果成立：
+
+$$ hot\ pages \rightarrow TC $$ $$ cold\ pages \rightarrow CC $$
+
+就有了数据依据。
+
+16. Near/Far 还能和这个结合
+
+甚至可以观察：
+
+$$ f_j^{near} $$
+
+和
+
+$$ f_j^{far} $$
+
+是不是分布不同。
+
+我其实预期：
+
+Near
+
+因为多个请求的最近 token 不同：
+
+$$ reuse $$
+
+不一定很高。
+
+但如果同 batch 是相似长度/page position：
+
+page-level layout 可能比较规整。
+
+Far
+
+某些公共 sink / semantic cluster 可能被多个 q 共同访问：
+
+可能出现更高 semantic reuse。
+
+这个必须实测。
+
+17. 一个最终比较完整的架构
+
+我觉得你现在可以研究这个版本：
+
+                           queries
+                              │
+          ┌───────────────────┴───────────────────┐
+          │                                       │
+        Near                                    Far
+          │                                       │
+     GPU position index                  CPU semantic cluster
+          │                              (async routing)
+          │                                       │
+          └────────────── candidates ─────────────┘
+                              │
+                     activation profiler
+                              │
+                  count reuse of k_avg
+                              │
+                ┌─────────────┴─────────────┐
+                │                           │
+              HOT                         COLD
+                │                           │
+        dense tile assembler          sparse pairs
+                │                           │
+        Tensor Core GEMM          CUDA Core GEMV/dot
+                │                           │
+                └─────────────┬─────────────┘
+                              │
+                          final Top-K
+                              │
+                         token L2
+18. 我会把研究分成两个独立假设
+
+不要一上来全绑死。
+
+H2-A：CPU-GPU Near/Far overlap
+
+验证：
+
+$$ T_{CPU-far} $$
+
+能否被：
+
+$$ T_{GPU-near} $$
+
+隐藏。
+
+如果不行：
+
+CPU offload 直接砍掉。
+
+H2-B：TC/CC hybrid page scoring
+
+验证真实 trace 是否存在：
+
+$$ hot/cold\ skew $$
+
+以及：
+
+$$ T_{hybrid} < T_{fused} $$
+
+如果没有明显 skew：
+
+TC/CC hybrid 也砍掉。
+
+19. 最核心的实验表
+
+我建议马上测：
+
+Experiment    关键变量    Go 条件
+Candidate reuse    BS=1/8/16/32/64    明显 hot/cold 长尾
+Tile density    \(\rho\) distribution    大量工作 \(\rho>0.5\)
+TC vs CC microbench    M/N/d/ρ    存在稳定 crossover
+Packing overhead    candidate count    < TC 节省的 20–30%
+Hybrid vs fused    真实 trace    至少 1.2× 才值得继续
+CPU far    BS/S/cluster #    能被 GPU near 基本隐藏
+CPU+GPU E2E    decode latency    不增加 critical path
+
+这里的 1.2× 是工程上的 go/no-go 建议，不是文献事实。如果只能：
+
+$$ 1.03\times $$
+
+通常撑不起额外系统复杂度。
+
+最后我对你这两个想法的判断
+Far → CPU + overlap
+
+研究价值有，但风险偏高。
+
+最大问题：
+
+$$ decode\ latency $$
+
+太敏感。
+
+优先验证，不要先实现大系统。
+
+\(k_{avg}\) activation-frequency → TC/CC hybrid
+
+这个我反而觉得更值得重点验证。
+
+因为它形成了非常清楚的逻辑链：
+
+$$ \text{different queries} \rightarrow \text{skewed }k_{avg}\text{ reuse} \rightarrow \text{hot/cold workloads} \rightarrow \text{GEMM/GEMV heterogeneity} \rightarrow \text{TC/CC co-execution} $$
+
+如果真实 trace 里确实有明显的复用偏斜，而且 hybrid kernel 能稳定超过当前 fused kernel，那么这个系统创新点就会比简单的 kernel fusion 强很多。。作图统计k_avg和q的选中01图，以及设计真实实验分析可行性以及如何和系统层面overlap以及时间的测量。没错，我是说重启cluster+avg的方法

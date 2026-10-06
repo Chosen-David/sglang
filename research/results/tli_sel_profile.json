@@ -1,0 +1,34 @@
+{
+ "q_agg": "sum",
+ "ds_topk": true,
+ "chunks": [
+  {
+   "chunk": 0,
+   "S": 5250,
+   "n": 5250,
+   "wall_ms": 15.2
+  },
+  {
+   "chunk": 1,
+   "S": 10500,
+   "n": 5250,
+   "wall_ms": 15.5
+  },
+  {
+   "chunk": 2,
+   "S": 15750,
+   "n": 5250,
+   "wall_ms": 17.7
+  },
+  {
+   "chunk": 3,
+   "S": 21000,
+   "n": 5250,
+   "wall_ms": 20.6
+  }
+ ],
+ "ds_jaccard_mean": 0.9961,
+ "ds_jaccard_min": 0.9903,
+ "total_48layers_s": 3.31,
+ "op_table": "-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \n                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  \n-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \n                      _tli_l2_score_batched_dual_kernel         0.00%       0.000us         0.00%       0.000us       0.000us       8.235ms        52.46%       8.235ms     748.665us            11  \nvoid topk_select_bf16_normal::topk_kernel<topk_selec...         0.00%       0.000us         0.00%       0.000us       0.000us       1.748ms        11.14%       1.748ms      79.471us            22  \nvoid topk_select_bf16_normal::topk_kernel<topk_selec...         0.00%       0.000us         0.00%       0.000us       0.000us       1.426ms         9.09%       1.426ms     129.673us            11  \nvoid at::native::vectorized_elementwise_kernel<2, at...         0.00%       0.000us         0.00%       0.000us       0.000us     732.260us         4.66%     732.260us       6.052us           121  \n                                            aten::clamp         2.69%     563.995us         4.54%     952.638us       8.660us     657.318us         4.19%     657.318us       5.976us           110  \n                                           aten::gather         1.44%     302.613us         2.32%     486.666us      11.061us     630.753us         4.02%     630.753us      14.335us            44  \n                                            aten::copy_         1.29%     270.477us         2.34%     492.195us       8.789us     520.070us         3.31%     520.070us       9.287us            56  \n                                            aten::fill_         1.58%     330.888us         3.42%     718.652us       6.533us     383.838us         2.45%     383.838us       3.489us           110  \n                                            aten::clone         0.21%      44.299us         1.58%     332.593us      15.118us       0.000us         0.00%     381.058us      17.321us            22  \n                                aten::repeat_interleave         0.21%      44.308us         1.22%     255.832us      23.257us       0.000us         0.00%     333.311us      30.301us            11  \nvoid at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     333.311us         2.12%     333.311us      30.301us            11  \nvoid at::native::_scatter_gather_elementwise_kernel<...         0.00%       0.000us         0.00%       0.000us       0.000us     317.089us         2.02%     317.089us      14.413us            22  \nvoid at::native::_scatter_gather_elementwise_kernel<...         0.00%       0.000us         0.00%       0.000us       0.000us     313.664us         2.00%     313.664us      14.257us            22  \nvoid at::native::vectorized_elementwise_kernel<2, at...         0.00%       0.000us         0.00%       0.000us       0.000us     304.255us         1.94%     304.255us       5.532us            55  \n                                             aten::full         0.31%      65.740us         2.20%     461.431us      10.487us       0.000us         0.00%     250.209us       5.687us            44  \n                                              aten::cat         0.71%     149.420us         1.02%     213.284us      17.774us     244.864us         1.56%     244.864us      20.405us            12  \n                                           aten::einsum         1.50%     314.960us         8.29%       1.742ms      79.172us       0.000us         0.00%     235.231us      10.692us            22  \n                                    _tli_compact_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     224.801us         1.43%     224.801us      20.436us            11  \n                                           aten::cumsum         0.40%      84.634us         1.22%     255.805us      23.255us     152.831us         0.97%     186.818us      16.983us            11  \n                                            aten::index         1.27%     266.187us         1.92%     404.074us      18.367us     172.932us         1.10%     172.932us       7.861us            22  \nvoid at::native::index_elementwise_kernel<128, 4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     172.932us         1.10%     172.932us       7.861us            22  \n                                              aten::add         2.11%     443.683us         3.36%     706.080us       9.052us     167.615us         1.07%     167.615us       2.149us            78  \n-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \nSelf CPU time total: 20.999ms\nSelf CUDA time total: 15.699ms\n"
+}

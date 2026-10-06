@@ -1,0 +1,52 @@
+{
+ "kernel1": {
+  "results": [
+   {
+    "bs": 8,
+    "prefill_s": 43.644,
+    "decode_s": 5.419,
+    "step_ms": 84.7,
+    "tok_per_s": 94.48
+   },
+   {
+    "bs": 16,
+    "prefill_s": 84.283,
+    "decode_s": 6.03,
+    "step_ms": 94.2,
+    "tok_per_s": 169.83
+   },
+   {
+    "bs": 32,
+    "prefill_s": 150.488,
+    "decode_s": 6.486,
+    "step_ms": 101.3,
+    "tok_per_s": 315.76
+   }
+  ]
+ },
+ "kernel0": {
+  "results": [
+   {
+    "bs": 8,
+    "prefill_s": 43.934,
+    "decode_s": 6.43,
+    "step_ms": 100.5,
+    "tok_per_s": 79.63
+   },
+   {
+    "bs": 16,
+    "prefill_s": 84.66,
+    "decode_s": 7.79,
+    "step_ms": 121.7,
+    "tok_per_s": 131.46
+   },
+   {
+    "bs": 32,
+    "prefill_s": 150.751,
+    "decode_s": 9.909,
+    "step_ms": 154.8,
+    "tok_per_s": 206.68
+   }
+  ]
+ }
+}

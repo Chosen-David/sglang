@@ -1,0 +1,29 @@
+{
+ "backend": "quest",
+ "bs": 16,
+ "chars": 260000,
+ "n_decode": 64,
+ "prefill_s": 54.43,
+ "total_s": 62.06,
+ "decode_s": 7.63,
+ "decode_ms_per_step": 121.1,
+ "tok_per_s": 16.5,
+ "texts": [
+  " \"Jacob's Ladder\" is a supernatural thriller about a Vietnam War veteran who, af",
+  " This screenplay, *True Romance*, follows Clarence Worley, a young man who, afte",
+  " The story follows Bill and Abby, two young people fleeing a violent past, as th",
+  " A man awakens in the year 2419 after being trapped in a mine for nearly 500 yea",
+  " The Ghostbusters return to battle a powerful evil spirit, Vigo the Carpathian, ",
+  " A young boy named Otto, orphaned and maimed by a rival baron, is raised in a mo",
+  " Mary, a sensitive and thoughtful young woman, endures profound sorrow and inner",
+  " \"Justice\" is a play by John Galsworthy that explores the moral and emotional co",
+  " The Coxon Fund is a story about the complex relationships and moral dilemmas su",
+  " A woman, haunted by a cursed videotape that kills anyone who watches it within ",
+  " \n\nThe Knight, Antonius Block, is a crusader returning home after a decade of wa",
+  " The federal government faces persistent cybersecurity challenges in protecting ",
+  " The report examines the regulatory burdens faced by community banks and credit ",
+  " The Clean Water Act established a federal program to fund municipal wastewater ",
+  " The Department of Homeland Security (DHS) has established acquisition managemen",
+  " The Gerald R. Ford (CVN-78) class aircraft carrier program, which includes four"
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "gate_on": {
+  "musique": 27.42,
+  "qasper": 40.2,
+  "multifieldqa_en": 46.41,
+  "AVG": 38.01
+ },
+ "gate_off": {
+  "musique": 27.57,
+  "qasper": 40.37,
+  "multifieldqa_en": 46.59,
+  "AVG": 38.18
+ },
+ "e5b_TIA_ref_transformers": {
+  "musique": 32.28,
+  "qasper": 44.03,
+  "multifieldqa_en": 53.19,
+  "AVG": 43.17
+ },
+ "sglang_triton_dense_musique": 30.32
+}

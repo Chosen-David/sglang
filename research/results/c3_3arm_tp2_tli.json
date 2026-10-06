@@ -1,0 +1,29 @@
+{
+ "backend": "tli",
+ "bs": 16,
+ "chars": 260000,
+ "n_decode": 64,
+ "prefill_s": 136.03,
+ "total_s": 141.95,
+ "decode_s": 5.92,
+ "decode_ms_per_step": 93.9,
+ "tok_per_s": 7.2,
+ "texts": [
+  " A traumatized Vietnam veteran, Jacob Singer, grapples with hallucinations of de",
+  " A young man named Clarence, who has just married a call girl named Alabama, is ",
+  " \n\nThe story follows Bill, a young man from Chicago, and his sister Abby, who fl",
+  "**\nThe story follows Anthony Rogers, a man who awakens from a 500-year-long susp",
+  " \nThe Ghostbusters, now back in business after a period of obscurity, must confr",
+  " Otto of the Silver Hand, a gentle and wise boy born into a world of violence an",
+  " Mary, a sensitive and intelligent woman, endures profound sorrow and loss throu",
+  " \n\nThe play \"Justice\" by John Galsworthy tells the tragic story of William Falde",
+  " The Coxon Fund is a story about the complex relationships and moral dilemmas su",
+  " \n\nThe cursed videotape, created by the vengeful spirit of Sadako, a girl murder",
+  " \n\nThe Knight, Antonius Block, delays his death by playing chess with Death, \ndu",
+  " The federal government faces significant cybersecurity and privacy challenges i",
+  " The text examines the regulatory burdens faced by community banks and credit un",
+  " The Clean Water Act and Safe Drinking Water Act established federal programs to",
+  " The Department of Homeland Security (DHS) has established policies and processe",
+  " The U.S. Navy's CVN-78 class aircraft carrier program, which includes the Geral"
+ ]
+}
