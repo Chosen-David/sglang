@@ -286,9 +286,12 @@ artifacts/
 internal-docs/
 paper/project_context.md
 *.aux
+# 编译产物，但论文 PDF 本身需要跟踪
 *.pdf
-paper/archive/*/TLI_paper.pdf
-paper/archive/*/TLI_paper_en.pdf
+!paper/TLI_paper.pdf
+!paper/TLI_paper_en.pdf
+!paper/archive/*/TLI_paper.pdf
+!paper/archive/*/TLI_paper_en.pdf
 
 # 研究工作区本地产物（2026-10-10 整理）
 .local/
