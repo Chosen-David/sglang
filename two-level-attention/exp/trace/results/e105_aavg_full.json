@@ -1,0 +1,22 @@
+{
+ "arm": "aavg (avg,avg) a0.875 b0.875 g0.375",
+ "n": 13,
+ "scores": {
+  "hotpotqa": 54.4,
+  "2wikimqa": 38.82,
+  "musique": 33.4,
+  "passage_retrieval_en": 99.5,
+  "qasper": 43.19,
+  "multifieldqa_en": 53.2,
+  "gov_report": 33.62,
+  "qmsum": 23.85,
+  "multi_news": 24.94,
+  "narrativeqa": 24.22,
+  "triviaqa": 89.82,
+  "lcc": 69.14,
+  "repobench": 65.7
+ },
+ "AVG": 50.29,
+ "ref_mavg_50_78": 50.78,
+ "delta_vs_mavg": -0.49
+}
