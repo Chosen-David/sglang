@@ -429,21 +429,43 @@ class TLIIndexer:
             sc1 = sc1.masked_fill(blk_end.view(1, 1, -1) > t, float("-inf"))
 
             # D'：跳过远端的层——只保留 sink(块0) + 近端窗块
+            _skip_src = None  # skip_far：topk 结果的 rank 截断源（见下）
             if self.skip_far:
                 near_blks = max(1, (t + 1 - 2048) // p.block_size)
                 keep = torch.zeros(nblk, dtype=torch.bool, device=device)
                 keep[: min(2, nblk)] = True
                 keep[max(0, near_blks) :] = True
                 sc1 = sc1.masked_fill(~keep.view(1, 1, -1), float("-inf"))
-                # D' 真正兑现省算：topk 截断到有效块数（否则 -inf 块填满 K1 白算）
-                K1 = min(K1, max(1, int(keep.sum().item())))
+                # F5（#129）：原版 K1 = min(K1, max(1, int(keep.sum().item())))
+                # 是 GPU 同步。改法与 select_batched 的 skip_far 分支同构：
+                # K1 保持静态（不收缩——t 小时 keep=全部块），旧动态宽
+                # w = min(K1, keep 计数) 用 device 标量 rank 截断复刻（单行
+                # 无 sub-max 泄漏，rank < w 的截断集 = 旧 topk(w) 选择集）。
+                # 2048 是本分支的硬编码近端长（保留原口径不动）。
+                _skip_src = (
+                    torch.arange(K1, device=device).view(1, -1)
+                    < keep.sum().clamp(min=1, max=K1)
+                ).expand(Hkv, K1)  # [Hkv, K1]（device 截断，零同步）
 
             cand_blk = torch.topk(sc1, K1, dim=-1).indices[0]  # [Hkv, K1]（不含滑窗）
             cand_blk = torch.cat(
                 [cand_blk, force_blks.unsqueeze(0).expand(Hkv, -1)], dim=1
             )  # 重复无碍（mask 化）
             blk_onehot = torch.zeros(Hkv, nblk, dtype=torch.bool, device=device)
-            blk_onehot.scatter_(1, cand_blk, True)
+            if _skip_src is not None:
+                # 滑窗强制块恒 True；topk 段按 rank 截断（见上注释）
+                src = torch.cat(
+                    [
+                        _skip_src,
+                        torch.ones(
+                            force_blks.shape[0], dtype=torch.bool, device=device
+                        ).unsqueeze(0).expand(Hkv, -1),
+                    ],
+                    dim=1,
+                )
+                blk_onehot.scatter_(1, cand_blk, src)
+            else:
+                blk_onehot.scatter_(1, cand_blk, True)
 
         # ---- L2: 4bit 部分维 token 精筛 ----
         # fused 分区 kernel（单 launch/head：精筛分数 + far/near 分区 topk +
@@ -614,12 +636,28 @@ class TLIIndexer:
                 blk_end.view(1, 1, -1) > t_c.view(-1, 1, 1), float("-inf")
             )
             # D'：跳过远端层——只保留 sink + 近端窗块
+            _skip_rank_src = None  # skip_far：topk 结果的 rank 截断源（见下）
             if self.skip_far:
                 near_blks = ((t_c + 1 - p.near_len) // bs).clamp(min=0)
                 keep = torch.arange(nblk, device=device).view(1, -1) >= near_blks.view(-1, 1)
                 keep[:, : min(2, nblk)] = True
                 sc1 = sc1.masked_fill(~keep.unsqueeze(1), float("-inf"))
-                K1 = min(K1, max(1, int(keep.sum(1).max().item())))
+                # F5（#129，host 同步消除）：原版 K1 = min(K1, max(1,
+                # int(keep.sum(1).max().item()))——每 chunk 一次 GPU 同步
+                # （#126 ⑥）。改法：K1 保持静态（min(k1_blocks, nblk)，
+                # 不收缩——t 小时 keep=全部块，收缩上界反而小于旧宽），
+                # 旧动态宽 w = min(K1, max(1, keep 计数最大值)) 改用 device
+                # 标量作 rank 截断：rank < w 的槽位 scatter True，其余
+                # False——复刻旧版 topk(w) 的前缀选择集（含旧版 sub-max
+                # 行的 -inf 泄漏块——忠实保留而非"修正"，泄漏块也是旧
+                # D' 臂口径的一部分）。tie 风险：截断区 -inf 并列的
+                # torch.topk sorted 输出按索引升序（实测稳定），
+                # test_async_prefill.py 有 skip_far 对拍兜底。DS 路径
+                # （use_ds_topk）的前缀性质未验证，默认关。
+                _skip_rank_src = (
+                    torch.arange(K1, device=device).view(1, 1, -1)
+                    < keep.sum(1).max().clamp(min=1, max=K1)
+                ).expand(n, Hkv, K1)  # [n, Hkv, K1]（广播 device 截断）
             # #64：L1 块 topk → DeepSelect（torch.topk 占 select CUDA 62%）。
             # bf16 cast 的 tie 翻转由候选池并集语义吸收（onehot 展开多选无害）
             if getattr(p, "use_ds_topk", False) and _ds_available():
@@ -638,7 +676,13 @@ class TLIIndexer:
             # ---- 候选块并集（select 的 blk_onehot.any(0) 语义）----
             # topk 块 ∪ 滑窗块（per row），跨 head 展开为共享 token 池
             onehot = torch.zeros(n, nblk, dtype=torch.bool, device=device)
-            onehot.scatter_(1, cand_blk.reshape(n, -1), True)
+            if _skip_rank_src is not None:
+                # skip_far：rank 截断源（复刻旧动态宽度选择集，见上注释）
+                onehot.scatter_(
+                    1, cand_blk.reshape(n, -1), _skip_rank_src.reshape(n, -1)
+                )
+            else:
+                onehot.scatter_(1, cand_blk.reshape(n, -1), True)
             f_blk = (
                 t_c.view(-1, 1) // bs - torch.arange(p.sliding_blocks, device=device)
             ).clamp(min=0)  # 块级滑窗（select 的 force_blks 同语义）
@@ -675,6 +719,14 @@ class TLIIndexer:
                 and not getattr(p, "dyn_far_gate", False)
             )
             if not _kern_ok:
+                # F5 豁免说明：此处 .all() → bool 是 GPU 同步，但仅当 kernel
+                # 路径不可用（_kern_ok=False：dyn_far_gate 开 / q_agg=max /
+                # Hkv 或 nd2 非二次幂 / n<2 / kq 非连续）才执行——生产默认
+                # 配置（use_prefill_kernel=True，mavg 臂 q_agg=sum、gate 关）
+                # 恒走 _kern_ok，此同步零触发。fast/slow 两路径计算结构
+                # 不同（全宽 einsum vs 候选 gather），无法用 device 掩码
+                # 无条件合并（须双算两遍才可消除，负收益），故保留分支同步
+                # 并以 _kern_ok 短路守卫。
                 fast_path = bool((sel_mask.sum(1) >= t_c + 1).all())
             if fast_path:
                 if q_agg_max:
@@ -783,6 +835,14 @@ class TLIIndexer:
                 # near_len+far_lo 时无 empty 行、t ≥ K2 时无 early 行——
                 # 跳过 .any() GPU 同步（生产 ~60 forward×16 req×36 层，
                 # 每次同步排空队列 = e2e 隐藏大头）
+                # F5（#129）豁免说明：此处的 bool(empty.any()) 保留——
+                # 兜底计算需要 q2[empty]/t_c[empty] 的**数据依赖形状**
+                # 布尔索引（CUDA 上无论 any() 还是掩码索引本身都是 host
+                # 同步；改全行 einsum = #65 的 67ms/首chunk 回归）。缓解
+                # 已就位：① t_min_hint（prefix ≥ near_len+far_lo 的 chunk，
+                # 即除首 chunk 外全部）整段跳过；② F3 惰性化后 kq_f 仅在
+                # 该兜底实际触发时构建。残余同步 = 每请求每层首 chunk
+                # 恰一次（36 层 × 1 = 每请求 36 次，对比原版每 chunk）。
                 empty = far_hi_t <= far_lo_k  # [n] device
                 # t_c < K2 的行末尾被 #58 uniform grid 整行覆盖 → 无需算
                 _no_empty = (
@@ -817,7 +877,16 @@ class TLIIndexer:
                 # 掩码位置 → 定长候选张量（topk 最小值技巧：哨兵 S 排最后补 pad）
                 seq = pos.view(1, S).expand(n, S)
                 seq_m = torch.where(sel_mask, seq, torch.full_like(seq, S))
-                Tc = int(sel_mask.sum(1).max().item())
+                # F5（#129，host 同步消除）：原版 Tc = int(sel_mask.sum(1)
+                # .max().item()) 是每 chunk 一次 GPU 同步（#126 ⑥ 同步点）。
+                # 改静态上界（与 select_decode_batched / M10 慢路径 kernel 的
+                # Tc_k 同一推导）：候选并集 = 每 head top-K1 块 ∪ 滑窗块，
+                # 跨 head 并集上界 (K1*Hkv + sliding_blocks)*bs，另受 nblk*bs
+                # 与 S 截断。多付 topk-min 全排序宽度（动态值→上界），换取
+                # 队列不排空；valid 掩码（tok < S）已消化多出的哨兵 pad 行
+                # ——topk largest=False 时哨兵 S 恰好排在末尾被 pad，与原版
+                # 动态宽度逐位一致（torch.topk 对 -inf/哨兵的排序稳定）。
+                Tc = min((K1 * Hkv + p.sliding_blocks) * bs, nblk * bs, S)
                 tok = torch.topk(seq_m, Tc, dim=-1, largest=False).values  # [n, Tc]
                 valid = tok < S
                 tok_c = tok.clamp(max=S - 1)
@@ -864,15 +933,22 @@ class TLIIndexer:
                 # 远端区为空的行（t+1 ≤ near_len+far_lo，首 chunk 早段行）：
                 # 与 select 同语义 = 整体 topk(fine, budget)（此时 [far_lo,S)
                 # 全部按定义属于近端，分区只会选出 -inf 垃圾位）
+                # F5（#129）：残余同步 bool(empty.any()) 消除——整体 topk
+                # 无条件计算（形状静态 [n, Hkv, budget]，正常行结果被
+                # torch.where 丢弃），ne=0 时多付一次 topk（μs 级，远小于
+                # 队列排空代价）。语义与 if-gated 版逐位一致。
                 empty = far_hi <= far_lo  # [n]
-                if bool(empty.any()):
-                    i_g = torch.topk(fine, min(p.token_budget, S), dim=-1).indices
-                    res = torch.where(empty.view(n, 1, 1), i_g, res)
+                i_g = torch.topk(fine, min(p.token_budget, S), dim=-1).indices
+                res = torch.where(empty.view(n, 1, 1), i_g, res)
                 # #60：末 row chunk 统计 per-layer far mass（行×Hkv 平均，
                 # softmax 在因果区归一化）→ decode 动态 skip_far 依据。
                 # M10 kernel 慢路径不物化 fine（far_sc 池表口径不同），
                 # 统计仅 eager/fast_path 路径——dyn gate 实验先跑 eager。
                 if getattr(p, "dyn_far_gate", False) and r1 == Nq:
+                    # F5 豁免：float(fm.mean()) 是有意的一次 host 同步——
+                    # gate 统计量本身是 host 标量（decode 侧阈值判断用），
+                    # 且仅在 dyn_far_gate 开 + 末 row chunk 触发（每请求每层
+                    # 恰一次），非热点路径。
                     # 滑窗强制位是 +inf（topk 强制语义）→ softmax(inf)=nan，
                     # 统计前剔除（权重 0；sw=128 << far 区尺度，口径影响 <1%）
                     fine_s = fine.masked_fill(fine == float("inf"), float("-inf"))
@@ -899,7 +975,12 @@ class TLIIndexer:
         _no_early = (
             t_min_hint is not None and t_min_hint >= res_all.shape[-1]
         )
-        if not _no_early and bool(early.any()):
+        # F5（#129）：残余同步 bool(early.any()) 消除——无条件执行向量
+        # 化构造（全部 device op；ne=0 时 nonzero 返回空张量，scatter
+        # no-op，多付 ~5 个微 launch 远小于队列排空）。reps.clamp(min=1)
+        # 防 device 除零（仅影响非 early 行的垃圾 lane，不写回）。语义与
+        # if-gated 版逐位一致。
+        if not _no_early:
             # #65 向量化：旧版逐行 Python 循环（arange+repeat_interleave+
             # cat+index_put × 每早期行，首 chunk 1024 行 → ~5K launch +
             # 3K 次 .item() 同步，chunk0 65ms 的主因）。等价构造：
@@ -908,8 +989,8 @@ class TLIIndexer:
             Hkv2 = res_all.shape[1]
             e_idx = early.nonzero().squeeze(-1)  # [ne]
             L = t_arr[e_idx] + 1                 # [ne] 因果位置数
-            reps = K2 // L                        # [ne]
-            cut = (reps * L).view(-1, 1)          # [ne,1]
+            reps = (K2 // L).clamp(min=1)        # [ne]（clamp 见上注释）
+            cut = (reps * L).view(-1, 1)         # [ne,1]（early 行 reps≥1，clamp 恒无操作）
             j = torch.arange(K2, device=res_all.device).view(1, -1)
             grid = torch.where(
                 j < cut, j // reps.view(-1, 1), j - cut

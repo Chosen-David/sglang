@@ -109,6 +109,11 @@ class TLISparseAttnBackend(AttentionBackend):
         self._pool_r_cap_floor = 0
         self._graph_rows_l: dict[int, torch.Tensor] = {}  # layer → [max_bs] pool 行号
         self._graph_arange: torch.Tensor | None = None
+        # P2（#129）：forward_extend 索引构建的 persistent 侧流（lazy 创建；
+        # 仅 prefill 路径使用，decode/M5 CUDA graph 零接触）。SGLANG_TLI_
+        # SIDE_STREAM=0 关闭回退同步执行。
+        self._side_stream: torch.cuda.Stream | None = None
+        self._side_stream_tried = False
         self.timer = _PhaseTimer()
         if runner is not None:
             self._init_from_runner(runner)
@@ -256,6 +261,26 @@ class TLISparseAttnBackend(AttentionBackend):
         pool_l["free"].extend(range(r0, r1))
         pool_l["S"].extend([-1] * add)
         pool_l["R_cap"] = r1
+
+    def _get_side_stream(self) -> torch.cuda.Stream | None:
+        """P2（#129）：forward_extend 索引构建侧流（lazy 单例）。
+
+        关闭（SGLANG_TLI_SIDE_STREAM=0）或 CUDA 不可用时返回 None =
+        原同步行为。**只用于 forward_extend**——decode 与 M5 CUDA graph
+        路径零接触（graph 只包 decode；侧流操作永不进入 capture 区域）。
+        """
+        if self._side_stream_tried:
+            return self._side_stream
+        self._side_stream_tried = True
+        if not self.profile.use_side_stream or not torch.cuda.is_available():
+            return None
+        dev = self.runner.device if self.runner is not None else None
+        if dev is not None and dev != torch.cuda.current_device():
+            with torch.cuda.device(dev):
+                self._side_stream = torch.cuda.Stream(device=dev)
+        else:
+            self._side_stream = torch.cuda.Stream()
+        return self._side_stream
 
     def _row_views(self, pool_l: dict, row: int, S: int) -> dict:
         """构造 per-request select()/update_block_index() 兼容的 view dict。
@@ -634,63 +659,138 @@ class TLISparseAttnBackend(AttentionBackend):
         extend_prefix_lens = forward_batch.extend_prefix_lens
         out = torch.empty(T, H * self.head_dim, dtype=q.dtype, device=q.device)
         layer_id = layer.layer_id
-        # 新版 ForwardBatch 无 extend_seq_lens_cumulative：自行 cumsum
-        ends = torch.cumsum(extend_seq_lens, dim=0).tolist()
+        # 新版 ForwardBatch 无 extend_seq_lens_cumulative：自行 cumsum。
+        # F5（#129）：优先读 CPU 镜像（forward_batch_info.py L526-527，
+        # chunked prefill 恒填充），避免 device cumsum→.tolist() 的每层
+        # 一次 GPU 队列排空（36 层 × 60 forward = e2e 隐藏大头之一）；
+        # 镜像缺失（非 chunked 路径 / mock 测试）兜底原 device 路径。
+        _esl_cpu = getattr(forward_batch, "extend_seq_lens_cpu", None)
+        _epl_cpu = getattr(forward_batch, "extend_prefix_lens_cpu", None)
+        if _esl_cpu is not None and _epl_cpu is not None:
+            lens_l = [int(x) for x in _esl_cpu]
+            prefix_l = [int(x) for x in _epl_cpu]
+        else:
+            lens_l = torch.cumsum(extend_seq_lens, dim=0).tolist()
+            prefix_l = (
+                extend_prefix_lens.tolist()
+                if extend_prefix_lens is not None
+                else [0] * len(lens_l)
+            )
+        ends = [0] * len(lens_l)
+        acc = 0
+        for i, x in enumerate(lens_l):
+            acc += x
+            ends[i] = acc
         starts = [0] + ends[:-1]  # starts[b]..ends[b] = 第 b 个请求的 token 范围
+        # F5：req 行号一次 .tolist()（或 CPU 镜像），替代循环内逐请求
+        # int(device_tensor[b]) 的 b 次 GPU 同步
+        try:
+            reqs_l = list(forward_batch.req_pool_indices.tolist())
+        except (TypeError, AttributeError):
+            reqs_l = [int(x) for x in forward_batch.req_pool_indices]
+        # ---- P2（#129）：侧流索引构建三阶段编排 ----
+        # TODO(#129 P3，跨请求流水，只设计不实现)：本 for 循环即
+        # overlap_kernel_design.md 的 Ov-3(a)/F4 站点——build(i+1) ∥
+        # select(i) 双流乒乓 + 跨请求批量化（ragged build + batched
+        # select）。当前实现只做「单次 forward_extend 内」的侧流提交
+        # （阶段 A 提交 → 阶段 B dense → 阶段 C select+attn），跨
+        # forward 调用的双 buffer 轮转见设计文档 §4 Ov-3(a)。
+        #
+        # 事件链（防竞态的完整依赖图）：
+        #   主流: save_kv_cache 写 KV pool ──record(ev_kv)──┐
+        #   侧流: wait(ev_kv) → update/build（读 k_buf、写 index pool 行）
+        #         ──record(ev_done_b)──┐
+        #   主流: wait(ev_done_b) → select_batched（读 index pool 行）→
+        #         _sparse_extend_one（读 k_buf）
+        # 约束：
+        #   - 全部 _alloc_row/_ensure_pool_s（可能 realloc/替换 pool 张量）
+        #     必须在首个侧流提交**之前**完成（阶段 A 前置）——主流 copy
+        #     旧张量与侧流写旧张量并发 = 撕裂写；
+        #   - 本函数返回前，每个 ev_done 都已被主流 wait → 侧流在飞工作
+        #     清零，后续 forward 的 pool realloc 安全（无悬垂侧流引用）；
+        #   - 侧流上下文内分配的临时张量由 allocator 按流归属管理，
+        #     pool 主张量长生命周期且返回前已同步，无需 record_stream。
+        side = self._get_side_stream()
+        ev_kv = None
+        if side is not None:
+            ev_kv = torch.cuda.Event()
+            ev_kv.record()  # 主流：本 forward 全部 KV 写入完成点
+        # 阶段 A0：dense/sparse 分诊 + 容量预扩 + 行分配（全部 host 侧，
+        # 必须先于任何侧流提交，见上事件链约束）
+        dense_jobs = []  # (b, S)
+        sparse_jobs = []  # (b, req, nq, prefix, S, row)
+        pool_l = None
+        indexer = None
+        k_buf = None
         for b in range(len(starts)):
-            req = int(forward_batch.req_pool_indices[b])
+            req = reqs_l[b]
             nq = ends[b] - starts[b]
-            prefix = int(extend_prefix_lens[b]) if extend_prefix_lens is not None else 0
+            # F5：prefix 优先用 CPU 镜像（与上方 lens_l 同源），避免
+            # device tensor 的 int() 同步；镜像缺失兜底原 device 路径
+            prefix = (
+                prefix_l[b] if _epl_cpu is not None
+                else int(extend_prefix_lens[b]) if extend_prefix_lens is not None
+                else 0
+            )
             S = prefix + nq  # 已写池总长（前缀 + 当前 chunk）
-            locs = req_to_token[req, :S]
-            q_b = q[starts[b] : ends[b]].float()
             if S <= self.dense_threshold:
-                out[starts[b] : ends[b]] = self._dense_extend_one(
-                    q_b, locs, pool, layer_id, Hkv, G
-                ).to(q.dtype)
+                dense_jobs.append((b, S))
                 continue
-            indexer = self._get_indexer(layer_id)
-            k_buf = pool.get_kv_buffer(layer_id)[0]
-            # M4：写入共享 index pool（decode 增量起点；不再存 per-request dict）
-            pool_l = self._get_pool(layer_id)
+            if pool_l is None:
+                indexer = self._get_indexer(layer_id)
+                k_buf = pool.get_kv_buffer(layer_id)[0]
+                # M4：写入共享 index pool（decode 增量起点）
+                pool_l = self._get_pool(layer_id)
             self._ensure_pool_s(pool_l, S)
             row = self._alloc_row(pool_l, req)
+            sparse_jobs.append((b, req, nq, prefix, S, row))
+        # 阶段 A1：索引 build/update 提交（侧流 or 原地主流）
+        evs_done = [None] * len(sparse_jobs)
+        for ji, (b, req, nq, prefix, S, row) in enumerate(sparse_jobs):
+            locs = req_to_token[req, :S]
             S_st = pool_l["S"][row]
-            t0 = self.timer.tick()
-            if (
+            incremental = (
                 S_st == prefix
                 and prefix > 0
                 and not self.profile.far_kmeans
                 and self.profile.far_select != "cluster"
-            ):
-                # F1（#127，Quest 对齐）：chunked prefill 增量分支——S_st ==
-                # prefix 说明 pool 行内容恰为 [0, prefix)，只取本 chunk 新
-                # token 增量更新（O(nq)，替代每 chunk O(S) 全量重建）。
-                # kq 4bit 逐 token 独立 append；kmin/kmax 块界结合律合并
-                # （复用 decode 侧 update_block_index，含尾块精确界口径），
-                # 与全量重建逐位一致（test_incremental_prefill.py 对拍）。
-                # F2：只物化新 chunk 的 fp32（不再 k_buf[locs].float() 全宽，
-                # 64K 请求 8K chunk 少付 ~7/8 的 gather+cast 带宽）。
-                k_new = k_buf[locs[prefix:S]].float()  # [nq, Hkv, D]
-                indexer.update_block_index(
-                    self._row_views(pool_l, row, prefix), k_new
-                )
-                pool_l["S"][row] = S
-                index = self._row_views(pool_l, row, S)
-                self.timer.add("increment", time.time() - t0)
+            )
+            t0 = self.timer.tick()
+            if side is not None:
+                side.wait_event(ev_kv)  # 侧流等主流 KV 写入完成
+                with torch.cuda.stream(side):
+                    self._extend_update_index(
+                        indexer, pool_l, row, k_buf, locs,
+                        prefix, S, S_st, incremental,
+                    )
+                evs_done[ji] = torch.cuda.Event()
+                evs_done[ji].record(side)  # 侧流本请求索引就绪点
             else:
-                # 首 chunk / 行复用 / S 跳变（branch miss）/ kmeans 消融臂
-                # （far_centroids/far_assign 是 prefill 全局聚类，无法增量）：
-                # 全量重建
-                k_all = k_buf[locs].float()  # [S, Hkv, D]
-                index = indexer.build_block_index(k_all)
-                pool_l["kq_q"][row, :S] = index["kq_q"]
-                pool_l["kq_sc"][row, :S] = index["kq_sc"]
-                pool_l["kq_mn"][row, :S] = index["kq_mn"]
-                pool_l["kmin"][row, : index["nblk"]] = index["kmin"]
-                pool_l["kmax"][row, : index["nblk"]] = index["kmax"]
-                pool_l["S"][row] = S
-                self.timer.add("build", time.time() - t0)
+                self._extend_update_index(
+                    indexer, pool_l, row, k_buf, locs,
+                    prefix, S, S_st, incremental,
+                )
+            self.timer.add("increment" if incremental else "build", time.time() - t0)
+        # 阶段 B：dense 请求主流计算（与侧流 build 并发——读 k_buf 无
+        # pool 交互，天然无竞态）
+        for b, S in dense_jobs:
+            locs = req_to_token[reqs_l[b], :S]
+            q_b = q[starts[b] : ends[b]].float()
+            out[starts[b] : ends[b]] = self._dense_extend_one(
+                q_b, locs, pool, layer_id, Hkv, G
+            ).to(q.dtype)
+        # 阶段 C：sparse 请求 select + attention（主流；select 前等该请求
+        # 的侧流 ev_done——build(ji+1) 侧流工作与 select(ji) 主流计算重叠）
+        for ji, (b, req, nq, prefix, S, row) in enumerate(sparse_jobs):
+            if evs_done[ji] is not None:
+                torch.cuda.current_stream().wait_event(evs_done[ji])
+            locs = req_to_token[req, :S]
+            q_b = q[starts[b] : ends[b]].float()
+            # select 统一读 pool 行 view（增量/全量两分支同源——
+            # test_incremental_prefill.py [5] 已证 view 与 build dict
+            # 输出 torch.equal；容量 padding 由 select_batched 按
+            # nblk/S 切片规避）
+            index = self._row_views(pool_l, row, S)
             t_arr = torch.arange(prefix, S, device=q.device)
             sel = indexer.select_batched(
                 index, q_b, t_arr, t_min_hint=prefix
@@ -701,6 +801,41 @@ class TLISparseAttnBackend(AttentionBackend):
             ).to(q.dtype)
         # 返回约定：[T, H*D]（helper 已按此形状返回）
         return out
+
+    def _extend_update_index(
+        self, indexer, pool_l, row, k_buf, locs, prefix, S, S_st, incremental
+    ) -> None:
+        """P2（#129）：forward_extend 的索引维护段（在调用方给定的当前
+        stream 上执行——主流或侧流皆可，内部零 host 同步）。
+        增量分支 = F1；全量分支 = 首 chunk / 行复用 / S 跳变 / kmeans
+        消融臂。写 index pool 行，host 簿记 pool_l["S"]。
+        """
+        if incremental:
+            # F1（#127，Quest 对齐）：chunked prefill 增量分支——S_st ==
+            # prefix 说明 pool 行内容恰为 [0, prefix)，只取本 chunk 新
+            # token 增量更新（O(nq)，替代每 chunk O(S) 全量重建）。
+            # kq 4bit 逐 token 独立 append；kmin/kmax 块界结合律合并
+            # （复用 decode 侧 update_block_index，含尾块精确界口径），
+            # 与全量重建逐位一致（test_incremental_prefill.py 对拍）。
+            # F2：只物化新 chunk 的 fp32（不再 k_buf[locs].float() 全宽，
+            # 64K 请求 8K chunk 少付 ~7/8 的 gather+cast 带宽）。
+            k_new = k_buf[locs[prefix:S]].float()  # [nq, Hkv, D]
+            indexer.update_block_index(
+                self._row_views(pool_l, row, prefix), k_new
+            )
+            pool_l["S"][row] = S
+        else:
+            # 首 chunk / 行复用 / S 跳变（branch miss）/ kmeans 消融臂
+            # （far_centroids/far_assign 是 prefill 全局聚类，无法增量）：
+            # 全量重建
+            k_all = k_buf[locs].float()  # [S, Hkv, D]
+            index = indexer.build_block_index(k_all)
+            pool_l["kq_q"][row, :S] = index["kq_q"]
+            pool_l["kq_sc"][row, :S] = index["kq_sc"]
+            pool_l["kq_mn"][row, :S] = index["kq_mn"]
+            pool_l["kmin"][row, : index["nblk"]] = index["kmin"]
+            pool_l["kmax"][row, : index["nblk"]] = index["kmax"]
+            pool_l["S"][row] = S
 
     # ---------------- 内部工具 ---------------- #
 

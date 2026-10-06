@@ -113,6 +113,12 @@ class TLIProfile:
         self.pool_rows: int = _env_int("SGLANG_TLI_POOL_R", 32)
         # 短序列退 dense
         self.dense_threshold: int = _env_int("SGLANG_TLI_DENSE_THRESHOLD", 2048)
+        # ---- P2（#129）：forward_extend 索引构建侧流（SGLANG_TLI_SIDE_STREAM，
+        # 默认开）。增量/全量 build 提交到 persistent side stream，主流继续
+        # dense 计算，select 前 event wait（Ov-3(a) 的单 forward 内子集；
+        # 跨 forward 的双流乒乓见 overlap_kernel_design.md，未实现）。关 =
+        # 原同步执行（对拍口径）。decode / M5 CUDA graph 路径零接触。----
+        self.use_side_stream: bool = _env_bool("SGLANG_TLI_SIDE_STREAM", True)
         # ---- #58 消融开关：L2 打分的 q 侧 GQA 聚合方式（sum | max）。
         # max = 逐 q-head 打分取组内 max。注：G-sum 符号冲突曾被怀疑为
         # 30B 崩坏根因，终局诊断（#58）证实真根因是 select_batched 早期
