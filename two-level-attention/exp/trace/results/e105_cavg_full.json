@@ -1,0 +1,37 @@
+{
+ "arm": "E105_cavg_a0.125_b0.25_g0.75",
+ "n": 13,
+ "scores": {
+  "hotpotqa": 54.1,
+  "2wikimqa": 37.4,
+  "musique": 32.51,
+  "passage_retrieval_en": 100.0,
+  "qasper": 43.61,
+  "multifieldqa_en": 53.49,
+  "gov_report": 33.22,
+  "qmsum": 23.93,
+  "multi_news": 24.63,
+  "narrativeqa": 24.4,
+  "triviaqa": 89.66,
+  "lcc": 70.36,
+  "repobench": 67.19
+ },
+ "AVG": 50.34615384615385,
+ "ref_mavg_50_78": {
+  "hotpotqa": 55.44,
+  "2wikimqa": 39.32,
+  "musique": 34.71,
+  "passage_retrieval_en": 99.0,
+  "qasper": 43.95,
+  "multifieldqa_en": 53.05,
+  "gov_report": 33.52,
+  "qmsum": 23.58,
+  "multi_news": 24.44,
+  "narrativeqa": 26.31,
+  "triviaqa": 90.57,
+  "lcc": 69.28,
+  "repobench": 66.97,
+  "AVG": 50.78
+ },
+ "delta_vs_mavg": -0.43
+}
