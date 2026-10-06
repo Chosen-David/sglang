@@ -303,11 +303,11 @@ RULER-33 & \textbf{87.93} & 87.59 \\
 
 \textbf{自适应 $\alpha/\beta$ 的否定。}per-request 在线分派 $\alpha/\beta$ 判 No-Go：oracle 上限 LongBench +0.08 / RULER +0.00，且 +0.08 全部可由噪声正向选择偏差解释（非 musique 12 任务 $|\Delta|$ 中位 0.17）。信号零成本可得，但参数面平坦使自适应无杠杆。同一信号的最佳用途是 gate（安全价值）而非 $\beta$ 分派（无精度价值）。粒度细化到层同样无杠杆（per-layer oracle 增益均值 +0.0008）；细化到配置臂粒度复证（13 个端到端配置臂）：逐臂 oracle 上限 $+0.21$（vs 固定 $\beta{=}0.25$）/$+0.49$（vs 部署参照臂），12 个候选代理特征（任务匹配 mass、质量离散度、合成侧 mass 等）经 BH 校正后无一显著，mass 总量与端到端精度的秩相关 0.166（bootstrap 95\% CI 含 0），按 mass 选臂相对 oracle 亏 1.18——代理选臂主动有害而非中性。任务、层、样本、配置臂四粒度否定收敛于同一结论：\textbf{平坦性是参数面的结构性属性，预测器无杠杆可撬}，转译为部署简单性论据。
 
-\textbf{双口径参数网格与配置选举。}主表配置的选举方法学：离线质量网格在 5 个方法组合（far/near 打分的 (minmax, avg)、(minmax, minmax)、(avg, avg)、(cluster, avg)、(cluster, cluster)）上扫描 $9\times9\times9$ 的 $(\alpha,\beta,\gamma)$（0.125 步长、合法性约束过滤后 3600 个有效配置，16 样本 trace 均值，块池 $BP{=}64$、总预算 $B_{\mathrm{TOK}}{=}2048$）；端到端网格把质量口径各组合最优配置按端到端有效预算去重后精选 13 个配置臂，在 LongBench hotpotqa+musique（各 n=200，$K_1{=}128$/$K_2{=}1024$）上实测。两条口径教训如实入册。其一，$\gamma$ 的截断坍缩：质量网格 $B_{\mathrm{TOK}}{=}2048$ 与端到端 $K_2{=}1024$ 的 2 倍预算差使 $\gamma$ 经近端细筛配额的 $\min(\cdot,\,K_2^{\mathrm{mid}})$ 截断作用于有效预算——质量口径下互异的 $\gamma$ 臂（0.375 与 0.75）在端到端逐位同分（54.16/35.57），跨口径选臂必须按目标口径的有效配置去重。其二，排序反转：质量口径的四组合排序 (minmax, minmax) 0.896 $>$ (minmax, avg) 0.882 $>$ (cluster, avg) 0.879 $>$ (avg, avg) 0.796，端到端反转为 (minmax, avg) 45.08 $>$ (minmax, minmax) 43.90 $\approx$ (avg, avg) 43.90 $>$ (cluster, avg) 43.58（图~\ref{fig:reversal}）；(cluster, cluster) 组合近端侧聚类无端到端实现路径、仅质量数据，如实排除。因此\textbf{选举只认端到端实测}：最优臂 (minmax, avg) $\alpha{=}0.125/\beta{=}0.375/\gamma{=}0.625$ 平均分居首（45.08）：hotpotqa 55.44 为全部 13 臂最高，musique 34.71 仅次于 $\beta{=}0.25$ 臂的 35.57（该臂平均分 44.86 更低）；相对部署参照臂（$\gamma{=}0.125$）+0.49、相对固定 $\beta{=}0.25$ +0.21——增益幅度本身再次印证参数面平坦。13 臂的完整配置与双任务分列于表~\ref{tab:e2egrid}：选取规则为各组合质量口径最优配置按端到端有效预算 $(\alpha,\beta,\mathrm{nt\_near})$ 去重后取 top-3，加部署参照臂；$\gamma$ 截断坍缩对（0.375 与 0.75）在表内逐位同分直接可见。
+\textbf{双口径参数网格与配置选举。}主表配置的选举方法学：离线质量网格在 5 个方法组合（far/near 打分的 (minmax, avg)、(minmax, minmax)、(avg, avg)、(cluster, avg)、(cluster, cluster)）上扫描 $9\times9\times9$ 的 $(\alpha,\beta,\gamma)$（0.125 步长、合法性约束过滤后 3600 个有效配置，16 样本 trace 均值，块池 $BP{=}64$、总预算 $B_{\mathrm{TOK}}{=}2048$）；端到端网格把质量口径各组合最优配置按端到端有效预算去重后精选 13 个配置臂，在 LongBench hotpotqa+musique（各 n=200，$K_1{=}128$/$K_2{=}1024$）上实测。两条口径教训如实入册。其一，$\gamma$ 的截断坍缩：质量网格 $B_{\mathrm{TOK}}{=}2048$ 与端到端 $K_2{=}1024$ 的 2 倍预算差使 $\gamma$ 经近端细筛配额的 $\min(\cdot,\,K_2^{\mathrm{mid}})$ 截断作用于有效预算——质量口径下互异的 $\gamma$ 臂（0.375 与 0.75）在端到端逐位同分（54.16/35.57），跨口径选臂必须按目标口径的有效配置去重。其二，排序反转：质量口径的四组合排序 (minmax, minmax) 0.896 $>$ (minmax, avg) 0.882 $>$ (cluster, avg) 0.879 $>$ (avg, avg) 0.796，端到端反转为 (minmax, avg) 45.08 $>$ (minmax, minmax) 43.90 $\approx$ (avg, avg) 43.90 $>$ (cluster, avg) 43.58（图~\ref{fig:reversal}）；(cluster, cluster) 组合近端侧聚类无端到端实现路径、仅质量数据，如实排除。(cluster, avg) 组合即 ClusterKV 式聚类代表流（prefill 语义聚类 + 按簇选取~\cite{clusterkv}）在本文统一管线内的对应臂：mass 口径 0.879 几乎追平 (minmax, avg) 的 0.882，e2e 却落后 1.50 分（43.58 对 45.08）——语义组织的候选质量优势在紧 token 预算下兑现不了，与 \S4.4 聚类负结果判决一致。因此\textbf{选举只认端到端实测}：最优臂 (minmax, avg) $\alpha{=}0.125/\beta{=}0.375/\gamma{=}0.625$ 平均分居首（45.08）：hotpotqa 55.44 为全部 13 臂最高，musique 34.71 仅次于 $\beta{=}0.25$ 臂的 35.57（该臂平均分 44.86 更低）；相对部署参照臂（$\gamma{=}0.125$）+0.49、相对固定 $\beta{=}0.25$ +0.21——增益幅度本身再次印证参数面平坦。13 臂的完整配置与双任务分列于表~\ref{tab:e2egrid}：选取规则为各组合质量口径最优配置按端到端有效预算 $(\alpha,\beta,\mathrm{nt\_near})$ 去重后取 top-3，加部署参照臂；$\gamma$ 截断坍缩对（0.375 与 0.75）在表内逐位同分直接可见。
 
 \begin{table}[h]\centering
 \small\setlength{\tabcolsep}{4pt}
-\caption{端到端网格 13 配置臂全表（LongBench hotpotqa/musique 各 n=200，$K_1{=}128$/$K_2{=}1024$；mass 为离线质量口径 16 样本 trace 均值，仅作并读不作选举依据；选取规则=各组合质量最优配置按 $(\alpha,\beta,\mathrm{nt\_near})$ 去重取 top-3 + 部署参照臂；mavg $\beta{=}0.25$ 的 $\gamma{=}0.375/0.75$ 两臂逐位同分，即 $\gamma$ 截断坍缩的直接实证）。}
+\caption{端到端网格 13 配置臂全表（LongBench hotpotqa/musique 各 n=200，$K_1{=}128$/$K_2{=}1024$；mass 为离线质量口径 16 样本 trace 均值，仅作并读不作选举依据；选取规则=各组合质量最优配置按 $(\alpha,\beta,\mathrm{nt\_near})$ 去重取 top-3 + 部署参照臂；mavg $\beta{=}0.25$ 的 $\gamma{=}0.375/0.75$ 两臂逐位同分，即 $\gamma$ 截断坍缩的直接实证；cavg 组合 = ClusterKV 式聚类代表在本文统一管线内的对应臂）。}
 \label{tab:e2egrid}
 \begin{tabular}{lllllll}
 \toprule
@@ -359,7 +359,7 @@ e2e 三臂对照终值（Qwen3-30B-A3B，H20，同机同协议同 env：PSI vs Q
 
 \textbf{训练类索引。}DSA~\cite{dsa}（DeepSeek V3.2）用 $I=\sum w\cdot\mathrm{ReLU}(q\cdot k)$ 训练选择器，64 头 $\times$128 维 FP8 top-2048，warm-up 1000 步；MoBA~\cite{moba} 用门控块稀疏。PSI training-free/weight-free，与其在 kernel 级统一 harness 对比；我们另将 MoBA 的 chunk-mean 门控复现进本文统一 e2e 管线（decode 同稀疏口径，官方 wrapper 的 decode 为 full-attention 回退不可比），其无上界门控相对 PSI 的 token 级质量差距见 §4.2。两者构成方法论分界：DSA 用训练换选择能力，可学任意投影；training-free 只能依赖与查询分布无关的位置先验——trace 离线成立而 e2e 崩坏的口径鸿沟正是这条分界线的实证刻画。
 
-\textbf{两级结构。}HISA（COLM 2026）验证 block-coarse + token-refine 形态有效；InfLLM~\cite{infllm} 用块摘要构建 context memory 做两级检索，Landmark Attention~\cite{landmark} 以 landmark 块代表实现上下文随机访问——「two-level/块单元选取」本身不是本文创新。PSI 的增量是两个正交维度的系统刻画：表示（上界 vs 下界——前述方法均无上界保证）与预算组织（分区 vs 全池）的质量-速度影响。
+\textbf{两级结构。}HISA（COLM 2026）验证 block-coarse + token-refine 形态有效；InfLLM~\cite{infllm} 用块摘要构建 context memory 做两级检索，Landmark Attention~\cite{landmark} 以 landmark 块代表实现上下文随机访问，ClusterKV~\cite{clusterkv} 以 prefill 语义聚类组织 KV 并按簇选取——「two-level/块/簇单元选取」本身不是本文创新；其中聚类代表的簇中心不是上界，存在漏选理论空洞。PSI 的增量是两个正交维度的系统刻画：表示（上界 vs 下界——前述方法均无上界保证）与预算组织（分区 vs 全池）的质量-速度影响。
 
 \textbf{推理系统。}FlashAttention 系优化计算核，PagedAttention/vLLM 优化显存组织。PSI 与它们正交，在 sglang 生产形态集成。
 
@@ -439,6 +439,10 @@ M.~Fan, W.~Wang, R.~Ren, X.~Lin, J.~Guo, F.~Wang, and T.-S.~Chua. InfLLM: Traini
 \bibitem{landmark}
 % TODO: 投稿前核对正式条目
 B.~Chiang, S.~T. T. Le, and Moonton. Landmark Attention: Random-Access Infinite Context Length for Transformers. In \emph{ICLR}, 2024.
+
+\bibitem{clusterkv}
+% TODO: 投稿前核对正式条目（本环境论文页不可达，arXiv 编号与作者待补）
+ClusterKV: Manipulating LLM KV Cache in Semantic Space. 2025.
 
 \bibitem{ruler}
 C.-P. Hsieh, S.~Sun, S.~Kriman, S.~Ganti, J.~Zhang, B.~Kulis, K.~Papayiannis, M.~Fofanos, N.~Rudrajit, and C.~Tigges. RULER: What's the Real Context Size of Your Long-Context Language Models? arXiv:2404.06654, 2024.
