@@ -1,0 +1,80 @@
+{
+ "psi_task_scores": {
+  "hotpotqa": 55.44,
+  "2wikimqa": 39.32,
+  "musique": 34.71,
+  "passage_retrieval_en": 99.0,
+  "qasper": 43.95,
+  "multifieldqa_en": 53.05,
+  "gov_report": 33.52,
+  "qmsum": 23.58,
+  "multi_news": 24.44,
+  "narrativeqa": 26.31,
+  "triviaqa": 90.57,
+  "lcc": 69.28,
+  "repobench": 66.97
+ },
+ "fkv_task_scores": {
+  "hotpotqa": 53.48,
+  "2wikimqa": 38.29,
+  "musique": 32.14,
+  "passage_retrieval_en": 100.0,
+  "qasper": 44.17,
+  "multifieldqa_en": 53.4,
+  "gov_report": 33.17,
+  "qmsum": 23.53,
+  "multi_news": 24.93,
+  "narrativeqa": 25.61,
+  "triviaqa": 90.71,
+  "lcc": 68.81,
+  "repobench": 66.5
+ },
+ "psi_avg": 50.78,
+ "fkv_avg": 50.36,
+ "diff": 0.42,
+ "ns": {
+  "hotpotqa": 200,
+  "2wikimqa": 200,
+  "musique": 200,
+  "passage_retrieval_en": 200,
+  "qasper": 200,
+  "multifieldqa_en": 150,
+  "gov_report": 200,
+  "qmsum": 200,
+  "multi_news": 200,
+  "narrativeqa": 200,
+  "triviaqa": 200,
+  "lcc": 500,
+  "repobench": 500
+ },
+ "main_ci": {
+  "mean": 0.42,
+  "lo": -0.18,
+  "hi": 1.02,
+  "contains_zero": true
+ },
+ "heldout_ci": {
+  "mean": 0.08,
+  "lo": -0.46,
+  "hi": 0.6,
+  "contains_zero": true
+ },
+ "musique_ci": {
+  "mean": 2.53,
+  "lo": -1.29,
+  "hi": 6.37,
+  "contains_zero": true
+ },
+ "hotpotqa_ci": {
+  "mean": 1.97,
+  "lo": -1.44,
+  "hi": 5.57,
+  "contains_zero": true
+ },
+ "sign_test": {
+  "wins": 8,
+  "losses": 5,
+  "p": 0.5811
+ },
+ "pairing_ok": true
+}

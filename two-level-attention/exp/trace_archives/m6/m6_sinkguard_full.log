@@ -1,0 +1,79 @@
+==== snapkv hotpotqa ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/hotpotqa-snapkv_sinkguard-054010.jsonl
+==== snapkv musique ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/musique-snapkv_sinkguard-054722.jsonl
+==== snapkv 2wikimqa ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/2wikimqa-snapkv_sinkguard-055612.jsonl
+==== snapkv passage_retrieval_en ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/passage_retrieval_en-snapkv_sinkguard-060039.jsonl
+==== snapkv qasper ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/qasper-snapkv_sinkguard-060743.jsonl
+==== snapkv multifieldqa_en ====
+DONE saved 150 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/multifieldqa_en-snapkv_sinkguard-061119.jsonl
+==== snapkv gov_report ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/gov_report-snapkv_sinkguard-061527.jsonl
+==== snapkv qmsum ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/qmsum-snapkv_sinkguard-065430.jsonl
+==== snapkv narrativeqa ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/narrativeqa-snapkv_sinkguard-070608.jsonl
+==== snapkv triviaqa ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/triviaqa-snapkv_sinkguard-071835.jsonl
+==== snapkv multi_news ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/multi_news-snapkv_sinkguard-072748.jsonl
+==== snapkv lcc ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/lcc-snapkv_sinkguard-081135.jsonl
+==== snapkv repobench-p ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/snapkv_sinkguard/repobench-p-snapkv_sinkguard-081942.jsonl
+==== h2o hotpotqa ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/hotpotqa-h2o_sinkguard-083133.jsonl
+==== h2o musique ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/musique-h2o_sinkguard-085805.jsonl
+==== h2o 2wikimqa ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/2wikimqa-h2o_sinkguard-093056.jsonl
+==== h2o passage_retrieval_en ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/passage_retrieval_en-h2o_sinkguard-094212.jsonl
+==== h2o qasper ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/qasper-h2o_sinkguard-100531.jsonl
+==== h2o multifieldqa_en ====
+DONE saved 150 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/multifieldqa_en-h2o_sinkguard-101201.jsonl
+==== h2o gov_report ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/gov_report-h2o_sinkguard-102132.jsonl
+==== h2o qmsum ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/qmsum-h2o_sinkguard-111040.jsonl
+==== h2o narrativeqa ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/narrativeqa-h2o_sinkguard-114801.jsonl
+==== h2o triviaqa ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/triviaqa-h2o_sinkguard-125321.jsonl
+==== h2o multi_news ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/multi_news-h2o_sinkguard-131845.jsonl
+==== h2o lcc ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/lcc-h2o_sinkguard-140225.jsonl
+==== h2o repobench-p ====
+DONE saved 200 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/h2o_sinkguard/repobench-p-h2o_sinkguard-141141.jsonl
+==== pyramidkv hotpotqa ====
+SKIP hotpotqa (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/hotpotqa-pyramidkv_sinkguard-073218.jsonl)
+==== pyramidkv musique ====
+SKIP musique (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/musique-pyramidkv_sinkguard-073934.jsonl)
+==== pyramidkv 2wikimqa ====
+SKIP 2wikimqa (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/2wikimqa-pyramidkv_sinkguard-074830.jsonl)
+==== pyramidkv passage_retrieval_en ====
+SKIP passage_retrieval_en (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/passage_retrieval_en-pyramidkv_sinkguard-075258.jsonl)
+==== pyramidkv qasper ====
+SKIP qasper (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/qasper-pyramidkv_sinkguard-080001.jsonl)
+==== pyramidkv multifieldqa_en ====
+DONE saved 150 preds -> /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/multifieldqa_en-pyramidkv_sinkguard-143816.jsonl
+==== pyramidkv gov_report ====
+SKIP gov_report (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/gov_report-pyramidkv_sinkguard-080756.jsonl)
+==== pyramidkv qmsum ====
+SKIP qmsum (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/qmsum-pyramidkv_sinkguard-085134.jsonl)
+==== pyramidkv narrativeqa ====
+SKIP narrativeqa (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/narrativeqa-pyramidkv_sinkguard-090346.jsonl)
+==== pyramidkv triviaqa ====
+SKIP triviaqa (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/triviaqa-pyramidkv_sinkguard-091619.jsonl)
+==== pyramidkv multi_news ====
+SKIP multi_news (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/multi_news-pyramidkv_sinkguard-092535.jsonl)
+==== pyramidkv lcc ====
+SKIP lcc (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/lcc-pyramidkv_sinkguard-100906.jsonl)
+==== pyramidkv repobench-p ====
+SKIP repobench-p (已有完整 200 行: /home/wangyuanshuo02/two-level-attention/exp/results_longbench/Qwen3-8B/pred_kvcf/pyramidkv_sinkguard/repobench-p-pyramidkv_sinkguard-101717.jsonl)
+M6_SINKGUARD_GPU0_DONE

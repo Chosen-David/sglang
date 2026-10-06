@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/wangyuanshuo02/two-level-attention/exp/trace/analyze_e87b_sigma_calibration.py", line 228, in <module>
+    main()
+  File "/home/wangyuanshuo02/two-level-attention/exp/trace/analyze_e87b_sigma_calibration.py", line 167, in main
+    out = eval_layer(f"{TRACE}/{name}/layer{li:02d}.pt", device)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/wangyuanshuo02/two-level-attention/exp/trace/analyze_e87b_sigma_calibration.py", line 89, in eval_layer
+    row_std = sc_mid.std(dim=-1)                            # [Hkv]
+              ^^^^^^
+UnboundLocalError: cannot access local variable 'sc_mid' where it is not associated with a value

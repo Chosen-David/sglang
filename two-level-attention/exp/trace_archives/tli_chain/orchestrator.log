@@ -1,0 +1,319 @@
+=== [orchestrator 09-29 16:28:18] ===
+[T1] E64j 进行中 15/16
+=== [orchestrator 09-29 16:30:06] ===
+== E64j 五组合各自最佳配置（16 样本 AVG, mass coverage）==
+  mavg+mavg  best a=0.375 b=0.375 mass=0.9116
+  mavg+aavg  best a=0.125 b=0.375 mass=0.9012
+  cavg+cavg  best a=0.125 b=0.25 mass=0.9096
+  cavg+aavg  best a=0.125 b=0.375 mass=0.9033
+  aavg+aavg  best a=0.125 b=0.25 mass=0.8036
+  mavg_mono 0.9166
+  cavg_mono 0.9093
+  aavg_mono 0.8109
+saved -> /tmp/tli_chain/e64j_best.json
+[T1] E64j best 提取完成
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 16:34:11] ===
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 16:51:16] ===
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 17:17:48] ===
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 17:25:38] ===
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 17:30:45] ===
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 17:51:16] ===
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 18:17:48] ===
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 18:25:37] ===
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 18:29:56] ===
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 18:51:16] ===
+[T2] 等 GPU0（B7s LongBench 主段未完成）
+E64J_DONE
+=== [orchestrator 09-29 18:59:36] ===
+arms: {'mminmax': (0.375, 0.375, False), 'mavg': (0.125, 0.375, False), 'aavg': (0.125, 0.25, False), 'cavg': (0.125, 0.375, False)}
+[T2] 快筛已启动 (pid 915645)
+=== [screen mminmax a=0.375 b=0.375 $(date +%H:%M:%S)] ===
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 19:23:33] ===
+ave_budget: 1024.0
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 19:25:37] ===
+ave_budget: 1024.0
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 19:27:50] ===
+[T3] 快筛进行中：1/4 臂完成，落盘 1/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 19:29:04] ===
+[T3] 快筛进行中：1/4 臂完成，落盘 1/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 19:32:51] ===
+[T3] 快筛进行中：1/4 臂完成，落盘 1/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 19:51:17] ===
+[T3] 快筛进行中：2/4 臂完成，落盘 2/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 20:19:08] ===
+[T3] 快筛进行中：3/4 臂完成，落盘 4/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 20:21:01] ===
+[T3] 快筛进行中：3/4 臂完成，落盘 4/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 20:35:47] ===
+[T3] 快筛进行中：3/4 臂完成，落盘 5/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 20:51:13] ===
+[T3] 快筛进行中：3/4 臂完成，落盘 5/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 21:17:46] ===
+[T3] 快筛进行中：4/4 臂完成，落盘 7/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 21:25:36] ===
+[T3] 快筛进行中：4/4 臂完成，落盘 7/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 21:28:51] ===
+[T3] 快筛进行中：4/4 臂完成，落盘 7/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 21:34:40] ===
+[T3] 快筛进行中：4/4 臂完成，落盘 7/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 21:40:11] ===
+[T3] 快筛进行中：4/4 臂完成，落盘 7/8 任务
+E64J_DONE
+SCREEN_LAUNCHED
+=== [orchestrator 09-29 21:43:47] ===
+mavg(B7s) {'hotpotqa': 54.23, 'musique': 32.82, 'screen_avg': 43.52}
+mminmax {'hotpotqa': 53.27, 'musique': 34.14, 'screen_avg': 43.7}
+mavg {'hotpotqa': 54.43, 'musique': 34.76, 'screen_avg': 44.59}
+aavg {'hotpotqa': 54.72, 'musique': 32.82, 'screen_avg': 43.77}
+cavg {'hotpotqa': 53.43, 'musique': 32.31, 'screen_avg': 42.87}
+
+== 快筛排名 ==
+  mavg           44.59
+  aavg           43.77
+  mminmax        43.7
+  mavg(B7s)      43.52
+  cavg           42.87
+best arm -> mavg
+[T3] 快筛打分完成
+best=mavg a=0.125 b=0.375：双卡全量脚本已生成（GPU0 6 + GPU1 7 任务）
+[T4] best 臂双卡全量已启动 (pid 947786)
+[T4] 全量进行中：GPU0 1/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-29 21:45:52] ===
+[T4] 全量进行中：GPU0 1/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-29 21:51:16] ===
+[T4] 全量进行中：GPU0 1/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-29 22:17:48] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-29 22:25:37] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-29 22:31:39] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-29 22:51:16] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-29 23:17:48] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-29 23:25:38] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-29 23:28:38] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-29 23:51:17] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 1/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 00:17:50] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 2/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 00:25:36] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 2/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 00:27:31] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 2/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 00:36:09] ===
+[T4] 全量进行中：GPU0 2/6 段，GPU1 3/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 01:18:46] ===
+[T4] 全量进行中：GPU0 3/6 段，GPU1 3/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 01:25:36] ===
+[T4] 全量进行中：GPU0 3/6 段，GPU1 3/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 01:33:50] ===
+[T4] 全量进行中：GPU0 3/6 段，GPU1 3/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 02:17:48] ===
+[T4] 全量进行中：GPU0 6/6 段，GPU1 4/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 02:25:38] ===
+[T4] 全量进行中：GPU0 6/6 段，GPU1 4/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 02:31:08] ===
+[T4] 全量进行中：GPU0 6/6 段，GPU1 4/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 03:17:49] ===
+[T4] 全量进行中：GPU0 6/6 段，GPU1 5/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 03:25:38] ===
+[T4] 全量进行中：GPU0 6/6 段，GPU1 5/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 03:30:07] ===
+[T4] 全量进行中：GPU0 6/6 段，GPU1 5/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 03:51:49] ===
+[T4] 全量进行中：GPU0 6/6 段，GPU1 7/7 段
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+=== [orchestrator 09-30 04:17:49] ===
+[T4] best 臂双卡全量完成
+{
+ "hotpotqa": 54.43,
+ "2wikimqa": 39.23,
+ "musique": 34.76,
+ "passage_retrieval_en": 99.5,
+ "qasper": 44.51,
+ "multifieldqa_en": 52.92,
+ "gov_report": 33.29,
+ "qmsum": 23.52,
+ "multi_news": 24.62,
+ "narrativeqa": 23.83,
+ "triviaqa": 90.16,
+ "lcc": 69.62,
+ "repobench": 66.67,
+ "AVG": 50.54
+}
+[T5] best 臂全量打分完成
+# E72 五组合 e2e 真实精度对比（Qwen3-8B LongBench, F1 口径）
+
+| method 组合 | 最佳 α/β | 数据集精度 | far 跳层 | 速率 |
+|---|---|---|---|---|
+| mavg=(minmax,avg) | α=0.125 β=0.375 γ=0.125 | hotpotqa 54.43 / musique 34.76；12任务全量 AVG 50.54 | 未启用（E5b：静态跨任务掉分→需 per-task 校准；E6 静态版可跳 13/36 层 far 损失<0.3%） | ~16.3 min/样本(e2e 含 prefill) |
+| aavg=(avg,avg) | α=0.125 β=0.25 γ=0.125 | hotpotqa 54.72 / musique 32.82 | 未启用（E5b：静态跨任务掉分→需 per-task 校准；E6 静态版可跳 13/36 层 far 损失<0.3%） | ~9.4 min/样本(e2e 含 prefill) |
+| mminmax=(minmax,minmax) | α=0.375 β=0.375 γ=0.125 | hotpotqa 53.27 / musique 34.14 | 未启用（E5b：静态跨任务掉分→需 per-task 校准；E6 静态版可跳 13/36 层 far 损失<0.3%） | ~9.5 min/样本(e2e 含 prefill) |
+| mavg=(minmax,avg)[B7s] | α=0.125 β=0.375 γ=0.125 | hotpotqa 54.23 / musique 32.82 | 未启用（E5b：静态跨任务掉分→需 per-task 校准；E6 静态版可跳 13/36 层 far 损失<0.3%） | ~16.3 min/样本(e2e 含 prefill) |
+| cavg=(cluster,avg) | α=0.125 β=0.375 γ=0.125 | hotpotqa 53.43 / musique 32.31 | 未启用（E5b：静态跨任务掉分→需 per-task 校准；E6 静态版可跳 13/36 层 far 损失<0.3%） | ~11.6 min/样本(e2e 含 prefill) |
+
+**best arm: mavg**
+
+- trace 口径（E64j mass，B_TOK=2048 宽预算）：mono mavg 0.9166 > mminmax 0.9116 > ccluster 0.9096 > cavg 0.9033 > mavg 0.9012 > aavg 0.8036——与 e2e F1 排名不一致，快筛判决以 e2e 为准（trace mass 排名不可替代 e2e 判决）
+- kernel 速度资产（与 method 无关的公共开销）：L1 fused 3.6×/L2 级联 1.63×（E8-2）
+- ccluster 仅 trace 评估；如 trace 显著最优需补 e2e near-cluster 参数化
+[T5] 任务链全部完成
+E64J_DONE
+SCREEN_LAUNCHED
+SCREEN_SCORED
+FULL_LAUNCHED
+FULL_DONE
+CHAIN_DONE

@@ -1,0 +1,26 @@
+{
+ "mminmax": {
+  "alpha": 0.375,
+  "beta": 0.375,
+  "src": "mavg+mavg",
+  "trace_mass": 0.9116
+ },
+ "mavg": {
+  "alpha": 0.125,
+  "beta": 0.375,
+  "src": "mavg+aavg",
+  "trace_mass": 0.9012
+ },
+ "aavg": {
+  "alpha": 0.125,
+  "beta": 0.25,
+  "src": "aavg+aavg",
+  "trace_mass": 0.8036
+ },
+ "cavg": {
+  "alpha": 0.125,
+  "beta": 0.375,
+  "src": "cavg+aavg",
+  "trace_mass": 0.9033
+ }
+}

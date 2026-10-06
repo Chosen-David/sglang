@@ -1,0 +1,6 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading checkpoint shards:   0%|          | 0/5 [00:00<?, ?it/s]Loading checkpoint shards:  20%|██        | 1/5 [03:05<12:21, 185.29s/it]Loading checkpoint shards:  40%|████      | 2/5 [03:10<03:58, 79.54s/it] Loading checkpoint shards:  60%|██████    | 3/5 [03:15<01:30, 45.40s/it]Loading checkpoint shards:  80%|████████  | 4/5 [03:19<00:29, 29.01s/it]Loading checkpoint shards: 100%|██████████| 5/5 [03:19<00:00, 18.69s/it]Loading checkpoint shards: 100%|██████████| 5/5 [03:19<00:00, 39.97s/it]
+register qwen3 attn: [model.layers.0.self_attn]
+Generating train split: 0 examples [00:00, ? examples/s]Generating train split: 5 examples [00:00, 811.91 examples/s]
+  0%|          | 0/5 [00:00<?, ?it/s] 20%|██        | 1/5 [00:05<00:20,  5.23s/it] 40%|████      | 2/5 [00:11<00:17,  5.73s/it] 60%|██████    | 3/5 [00:17<00:11,  5.90s/it] 80%|████████  | 4/5 [00:22<00:05,  5.63s/it]100%|██████████| 5/5 [00:27<00:00,  5.34s/it]100%|██████████| 5/5 [00:27<00:00,  5.49s/it]
+ave_budget: 1024.0

@@ -1,0 +1,3 @@
+[E98 proc10/16] device=cpu samples=['lb_passage_retrieval_en_0']
+[E98 proc10] done lb_passage_retrieval_en_0 arms=3270
+[E98 proc10] shard saved

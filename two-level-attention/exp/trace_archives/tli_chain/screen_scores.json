@@ -1,0 +1,27 @@
+{
+ "mavg(B7s)": {
+  "hotpotqa": 54.23,
+  "musique": 32.82,
+  "screen_avg": 43.52
+ },
+ "mminmax": {
+  "hotpotqa": 53.27,
+  "musique": 34.14,
+  "screen_avg": 43.7
+ },
+ "mavg": {
+  "hotpotqa": 54.43,
+  "musique": 34.76,
+  "screen_avg": 44.59
+ },
+ "aavg": {
+  "hotpotqa": 54.72,
+  "musique": 32.82,
+  "screen_avg": 43.77
+ },
+ "cavg": {
+  "hotpotqa": 53.43,
+  "musique": 32.31,
+  "screen_avg": 42.87
+ }
+}

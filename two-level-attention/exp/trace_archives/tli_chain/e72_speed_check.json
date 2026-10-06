@@ -1,0 +1,18 @@
+{
+ "note": "E72 best \u81c2\uff08mavg \u03b1.125/\u03b2.375\uff09\u4e0e B7s\uff08\u540c method \u03b2.25\uff09\u540c\u4efb\u52a1\u8017\u65f6\u5bf9\u7167\u2014\u2014\u9a8c\u8bc1 \u03b2 \u53d8\u5316\u65e0\u901f\u5ea6\u5f00\u9500",
+ "pairs": [
+  {
+   "task": "narrativeqa",
+   "e72f_mavg": "31min",
+   "b7s": "~31min(20:xx \u843d\u76d8)",
+   "delta": "0"
+  },
+  {
+   "task": "multi_news",
+   "e72f_mavg": "2h21m (41.6s/it)",
+   "b7s": "2h24m",
+   "delta": "-3min(\u566a\u58f0\u7ea7)"
+  }
+ ],
+ "conclusion": "mavg \u5206\u533a\u9009\u62e9\u96f6\u989d\u5916 kernel \u5f00\u9500\u2014\u2014method/\u03b2 \u53ea\u6539\u53d8\u6253\u5206\u4e0e\u9884\u7b97\u5206\u914d\u8def\u5f84\uff08\u540c kernel \u5f62\u6001\uff09"
+}

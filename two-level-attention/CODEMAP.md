@@ -23,3 +23,10 @@
 - **任务集口径**：E71/E72/E98 主表 13 任务含 multi_news、无 trec/samsum（与 E81/M6 口径不同）；任务键集从 `e71_main_table.json` 取，勿手写。
 - **键名映射**：repobench-p（文件/目录名）↔ repobench（eval.py 键名）；multifieldqa_en 全集 150 条非截断。
 - **method 组合名映射**：mavg=(minmax,avg)、mminmax=(minmax,minmax)、aavg=(avg,avg)、cavg=(cluster,avg)、ccluster=(cluster,cluster)；pred.py 只认全名（`--tli_far_method minmax --tli_near_method avg`），JSON tag 用组合名。
+
+## 资产归档（2026-10-06 #144，E135 审计 P0）
+
+- **per-sample raw 证据已从 /tmp 落袋**：E98 主表臂/E100 tail/E98 e2e 网格/E103/E90/E87/E89/MoBA → `exp/results_longbench/Qwen3-8B/`（pred_E98BEST_*、pred_E100TAIL_*、e98_e2e_grid/、e103_perqhead/、e90_subspace/、e87_topsigma_e2e/、e89_moba/）；E101/E104 RULER → `exp/results_ruler/Qwen3-8B/{L4096,L8192,L16384,L32768}/`
+- **跑批脚本/日志/ledger/mass 分片** → `exp/trace_archives/`（e98/e100/e101/e103/e104/e87/e89/m6/tli_chain/e135 + MANIFEST.md + md5 清单）
+- **trace dump（68GB）** → 本机 `~/.archive/trace-dumps/{qwen3-8b,qwen3-30b,qwen3-32b}`（不入 git，md5 见 exp/trace_archives/trace_dumps_md5/）
+- 查 raw 数据时先读 `exp/trace_archives/MANIFEST.md`（资产→原 /tmp 路径→去向→支撑论文数字）

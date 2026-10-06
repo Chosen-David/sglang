@@ -1,0 +1,44 @@
+[shard0 lb_gov_report_0] done
+[shard0 lb_hotpotqa_0] done
+[shard0 lb_multifieldqa_en_0] done
+[shard0 lb_musique_0] done
+[shard0 lb_narrativeqa_0] done
+[shard0 lb_passage_retrieval_en_0] done
+[shard0 lb_qasper_0] done
+[shard0 natural32k] done
+{
+ "far": {
+  "p10": 12.12,
+  "p50": 423.43,
+  "p90": 570.5,
+  "mean": 354.01,
+  "std": 251.51,
+  "e2e_mean_scale_div_G": 88.5
+ },
+ "near": {
+  "p10": 18.45,
+  "p50": 514.2,
+  "p90": 685.14,
+  "mean": 426.16,
+  "std": 308.78,
+  "e2e_mean_scale_div_G": 106.54
+ }
+}
+noise: {
+ "sigma_n": {
+  "p10": 2.811,
+  "p50": 5.442,
+  "p90": 12.921,
+  "mean": 6.711,
+  "std": 4.08
+ },
+ "sink_gap": {
+  "p10": -14.65,
+  "p50": 1.949,
+  "p90": 20.444,
+  "mean": 0.468,
+  "std": 23.248
+ }
+}
+cov_direct(budget-matched topk): 0.9442
+saved -> /home/wangyuanshuo02/two-level-attention/exp/trace/results/e87b_sigma_calibration_s0.json

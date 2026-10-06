@@ -1,0 +1,69 @@
+========================================================================
+E99 预测器初探：13 e2e 臂（任务描述写 16，实际 13，以 JSON 为准）
+========================================================================
+
+[1] 特征 vs e2e_avg 相关（Spearman, BH 校正后 p）——按 |ρ| 排序
+  mass_std                 ρ= 0.502  p=0.0804   p_BH=0.521    (hq ρ=0.444, mu ρ=0.557)
+  mass_screen_minus_other  ρ= 0.463  p=0.1107   p_BH=0.521    (hq ρ=0.466, mu ρ=0.469)
+  mass_min                 ρ= -0.43  p=0.1421   p_BH=0.521    (hq ρ=-0.405, mu ρ=-0.452)
+  mass_natural32k          ρ=-0.314  p=0.2953   p_BH=0.6165   (hq ρ=-0.283, mu ρ=-0.298)
+  mass_screen              ρ=  0.29  p=0.3371   p_BH=0.6165   (hq ρ=0.175, mu ρ=0.295)
+  mass_mu                  ρ= 0.281  p=0.3517   p_BH=0.6165   (hq ρ=0.139, mu ρ=0.309)
+  mass_hq                  ρ= 0.259  p=0.3923   p_BH=0.6165   (hq ρ=0.128, mu ρ=0.27)
+  mass_total               ρ= 0.166  p=0.5889   p_BH=0.8097   (hq ρ=-0.011, mu ρ=0.188)
+  mass_other12             ρ= -0.05  p=0.872    p_BH=0.9857   (hq ρ=-0.194, mu ρ=0.0)
+  beta                     ρ=-0.023  p=0.9414   p_BH=0.9857   (hq ρ=0.342, mu ρ=-0.031)
+  mass_needle32k           ρ=-0.006  p=0.9857   p_BH=0.9857   (hq ρ=-0.006, mu ρ=-0.028)
+  mass_total bootstrap 95% CI: (-0.333, 0.553)
+  n=13 小样本警示：任何 |ρ|<0.5 均无法与噪声区分
+
+[2] 部署口径：各信号选中的臂与 regret（vs best 45.08，argmax/argmin 双报）
+  beta                     最优方向=argmin → mavg_a0.125_b0.25_g0.75      e2e= 44.86  regret=0.21  (另一方向 regret=1.18)
+  mass_min                 最优方向=argmin → aavg_a0.875_b0.875_g0.375    e2e=  43.9  regret=1.18  (另一方向 regret=2.26)
+  mass_mu                  最优方向=argmax → mminmax_a0.875_b0.875_g0.5   e2e=  43.9  regret=1.18  (另一方向 regret=1.27)
+  mass_natural32k          最优方向=argmax → mminmax_a0.875_b0.875_g0.5   e2e=  43.9  regret=1.18  (另一方向 regret=1.18)
+  mass_needle32k           最优方向=argmax → mminmax_a0.875_b0.875_g0.5   e2e=  43.9  regret=1.18  (另一方向 regret=1.27)
+  mass_other12             最优方向=argmax → mminmax_a0.875_b0.875_g0.5   e2e=  43.9  regret=1.18  (另一方向 regret=1.27)
+  mass_screen              最优方向=argmax → mminmax_a0.875_b0.875_g0.5   e2e=  43.9  regret=1.18  (另一方向 regret=1.27)
+  mass_screen_minus_other  最优方向=argmax → aavg_a0.875_b0.875_g0.375    e2e=  43.9  regret=1.18  (另一方向 regret=1.5)
+  mass_std                 最优方向=argmax → aavg_a0.875_b0.875_g0.375    e2e=  43.9  regret=1.18  (另一方向 regret=2.26)
+  mass_total               最优方向=argmax → mminmax_a0.875_b0.875_g0.5   e2e=  43.9  regret=1.18  (另一方向 regret=1.27)
+  mass_hq                  最优方向=argmin → aavg_a0.75_b0.75_g0.5        e2e= 43.81  regret=1.27  (另一方向 regret=1.62)
+  注：argmax/argmin 双报：方向事后取优 = 乐观偏差（真实部署须先验定方向）；所有 mass 派生信号的最优方向 regret 均 >= 1.18
+
+[3] oracle 上限
+  oracle_arm: mavg_a0.125_b0.375_g0.625
+  oracle_avg: 45.075
+  baseline_fixed_mavg_b025: 44.86
+  baseline_ref_arm: 44.595
+  oracle_gain_vs_b025: 0.21
+  oracle_gain_vs_ref: 0.48
+  mass_pick_arm: mminmax_a0.875_b0.875_g0.5
+  mass_pick_avg: 43.9
+  mass_pick_loss_vs_oracle: 1.18
+
+[4] mavg 家族内部（唯一分化战场）
+  n: 4
+  note: γ 截断坍缩后 mavg β.25 各臂同分；唯一分化 = β.375 vs β.25
+  mass_vs_e2e_spearman: 0.316
+  mass_vs_e2e_spearman_p: 0.6838
+  b375_arm_mass_rank: 3
+  b375_arm_mass_rank_note: mass 排名中 β.375（e2e 家族内最优）的位次；靠后=mass 在家族内主动误导
+    mavg_a0.125_b0.25_g0.75        mass=0.8822 e2e=44.86 β=0.25
+    mavg_a0.125_b0.25_g0.375       mass=0.8805 e2e=44.86 β=0.25
+    mavg_a0.125_b0.375_g0.625      mass=0.8801 e2e=45.08 β=0.375
+    mavg_a0.125_b0.375_g0.125      mass=0.8728 e2e=44.59 β=0.375
+
+[5] 有效配置去重敏感性
+  n 13→10, dedup Spearman=0.2 (p=0.5796)
+
+[6] 判决
+  NO-GO
+  - 主信号 mass_total vs e2e_avg Spearman=0.166 (p=0.5889, n=13, bootstrap 95% CI 含 0)
+  - mass 冠军选臂（mminmax_a0.875_b0.875_g0.5）e2e 43.9, 比 oracle 亏 1.18——mass 选臂不是中性而是主动有害
+  - oracle 上限仅 +0.21（vs 固定 β.25）/+0.48（vs 参照臂），与 E75 per-task oracle +0.08 同量级；n=13 下连上限本身都不稳定
+  - 任务匹配 mass / 离散度 / 合成侧 mass 等 12 个候选特征（含对照列 beta）无一 BH 校正后显著，且小样本+多特征本身即多重比较陷阱；所有 mass 派生信号即使方向事后取优，regret 也 >= 1.18
+  - 唯一系统性分化（mavg β.375 vs β.25, avg +0.21）是 hq/mu 任务形态交互（hq +1.28/mu −0.86），不是任何 mass 侧量能表达的方向——与 E75 判决「信号-臂不可分」同构
+  - E75(+0.08)/E79a(+0.0008)/E79b(0) 三重否定先验 + 本次 n=13 复证：平坦性是参数面结构性属性而非测量问题，预测器无杠杆可撬
+
+落袋: /home/wangyuanshuo02/two-level-attention/exp/trace/results/e99_predictor_probe.json

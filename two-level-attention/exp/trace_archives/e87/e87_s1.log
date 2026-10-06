@@ -1,0 +1,9 @@
+[shard1 lb_gov_report_1] done 19 arms
+[shard1 lb_hotpotqa_1] done 19 arms
+[shard1 lb_multifieldqa_en_1] done 19 arms
+[shard1 lb_musique_1] done 19 arms
+[shard1 lb_narrativeqa_1] done 19 arms
+[shard1 lb_passage_retrieval_en_1] done 19 arms
+[shard1 lb_qasper_1] done 19 arms
+[shard1 needle32k] done 19 arms
+saved -> /home/wangyuanshuo02/two-level-attention/exp/trace/results/e87_topsigma_s1.json

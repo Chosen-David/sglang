@@ -1,0 +1,36 @@
+{
+ "mavg+mavg": {
+  "alpha": 0.375,
+  "beta": 0.375,
+  "mass": 0.9116,
+  "key": "mavg+mavg_a0.375_b0.375"
+ },
+ "mavg+aavg": {
+  "alpha": 0.125,
+  "beta": 0.375,
+  "mass": 0.9012,
+  "key": "mavg+aavg_a0.125_b0.375"
+ },
+ "cavg+cavg": {
+  "alpha": 0.125,
+  "beta": 0.25,
+  "mass": 0.9096,
+  "key": "cavg+cavg_a0.125_b0.25"
+ },
+ "cavg+aavg": {
+  "alpha": 0.125,
+  "beta": 0.375,
+  "mass": 0.9033,
+  "key": "cavg+aavg_a0.125_b0.375"
+ },
+ "aavg+aavg": {
+  "alpha": 0.125,
+  "beta": 0.25,
+  "mass": 0.8036,
+  "key": "aavg+aavg_a0.125_b0.25"
+ },
+ "_meta": {
+  "mono_max": 0.9166,
+  "part_max": 0.9116
+ }
+}
