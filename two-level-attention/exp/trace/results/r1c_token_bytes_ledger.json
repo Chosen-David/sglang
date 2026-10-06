@@ -1,0 +1,242 @@
+{
+ "exp": "R1c-EXP1b",
+ "date": "2026-10-07",
+ "task": "#137 R1c：真实 token/bytes 账本（canonical 配置逐项推导，可复算）",
+ "config_source": "exp/trace/results/r1c_canonical_config.json（EXP1a 锁定，预算表已过原型代码对拍）",
+ "protocol_clarification": {
+  "本账本": "bytes 读写口径：算法必需的逻辑读 bytes（per request per layer，kv-head 级 8 heads）；L1 全扫、L2 只读 L1 选中块、选中 KV 全读",
+  "论文§4 kernel 口径": "1.46×@32K / 2.77×@64K / 5.09×@128K 是选择链相对 dense 全维打分的 **时间** 加速（trace 重放，生产 tail32-4bit L1 系统）——与 bytes 口径分属两套度量，不可互相换算",
+  "原型实现差异": "原型 eager 路径物化全宽 k_qat（zeros_like 全 128 维，256B/token-head）并对全序列算细筛分；账本按 indexed 系统必需口径计（E107a 已归因为 correctness-first 原型残留，kernel 化路径 M6/M8 即为本口径）"
+ },
+ "units": {
+  "per": "per request per layer（除非显式标注 ×36）",
+  "kv_heads": 8,
+  "head_dim": 128,
+  "kv_elem_bytes": 2,
+  "dense_KV_bytes_per_token_per_layer": 4096,
+  "dense_K_bytes_per_token_per_layer": 2048,
+  "n_layers": 36
+ },
+ "storage_layouts": {
+  "canonical_main_arm": {
+   "L1": "512 B/block/kv-head（min+max 全 128 维 bf16）→ 摊 8 B/token/kv-head",
+   "L2": "40 B/token/kv-head（tail32：uint8 grid 32B + fp32 sc/mn 8B，生产 M6 布局，sglang tli/indexer.py quant4_pack L120-134）",
+   "total_per_token_per_layer": "384 B/token（=64B L1 摊 + 320B L2，8 heads 汇总）",
+   "vs_dense_KV": "0.0938（384/4096 = 9.4%）"
+  },
+  "production_tail32_L1": {
+   "L1": "256 B/block/kv-head（tail32 kmin/kmax fp32）→ 摊 4 B/token/kv-head → 32 B/token",
+   "L2": "40 B/token/kv-head（同上）→ 320 B/token",
+   "total_per_token_per_layer": "352 B/token",
+   "note": "论文 §4「336B/token」= 320(kq) + 16(L1 bounds 按 fp16 假设)；生产代码 kmin/kmax 实为 fp32 → 352B。336 与 352 差在 L1 bounds 精度假设，round2 审稿 NM5 已flag 过 40B/token-head vs Quest 8B/token-head 的口径张力——本账本数字为精确复算值"
+  },
+  "ideal_packed_variants": {
+   "L2_true_nibble_packed": "24 B/token/kv-head（16B nibble + 8B fp32 scale）→ 192 B/token；若 scale 用 fp16 则 20B → 160 B/token",
+   "L1_paper_4bit_blueprint": "32 B/block/kv-head（tail32 4bit packed min/max）→ 0.5 B/token/kv-head → 4 B/token（论文 §2.2 蓝图，未在生产实现）"
+  },
+  "prototype_materialization_artifact": "原型 k_qat = zeros_like(k) 全 128 维 bf16 = 256 B/token-kv-head 字面占用（非逻辑索引 bytes，仅尾 32 维非零）——引用账本数字时须排除该口径"
+ },
+ "per_decode_step_read_protocol": {
+  "L1_full_scan": "读全部块的 min/max（含 sink/swa 共 4 块——严格逻辑可跳过，32K 时占比 4/512 < 1%，账本按全扫保守计）",
+  "L2_selected_blocks_only": "只读 L1 选中块（i_f+i_n 块）的 kq 4bit 条目；sink/swa 强制区不经 L2（直接置位）",
+  "selected_KV": "最终选中的 K2=1024 token 的 K+V 全维读取",
+  "excluded": "mask/topk 索引元数据 O(K1+K2) 整数读写、q 单 token 读——量级 <0.1%，不计"
+ },
+ "context_curve": [
+  {
+   "S": 4096,
+   "n_blocks": 64,
+   "L1_candidate_tokens": 3840,
+   "total_selected_tokens": 704,
+   "storage": {
+    "L1_index_B": 262144,
+    "L2_index_B": 1310720,
+    "index_total_B": 1572864,
+    "dense_KV_B": 16777216,
+    "index_vs_dense_KV": 0.0938,
+    "index_vs_dense_K_only": 0.1875,
+    "index_B_per_token_per_layer": 384.0,
+    "derivation": "L1 = 64块×8head×512B(min+max全128维bf16) = 262144B；L2 = 4096tok×8head×40B(tail32 uint8 grid+2×fp32 scale) = 1310720B；dense KV = 4096×(8head×(128K+128V)×2B) = 16777216B"
+   },
+   "per_decode_step_read": {
+    "L1_full_scan_B": 262144,
+    "L2_selected_blocks_only_B": 1228800,
+    "selected_KV_B": 2883584,
+    "PSI_total_read_B": 4374528,
+    "dense_full_KV_read_B": 16777216,
+    "index_overhead_vs_dense": 0.0889,
+    "total_read_vs_dense": 0.2607,
+    "KV_read_reduction_factor": 3.84,
+    "derivation": "L1全扫 = 64×8×512B；L2 = 3840cand×8×40B（i_f+i_n = 54+6 块）；选中KV = 704tok×4096B；dense = 4096×4096B"
+   }
+  },
+  {
+   "S": 8192,
+   "n_blocks": 128,
+   "L1_candidate_tokens": 6016,
+   "total_selected_tokens": 1024,
+   "storage": {
+    "L1_index_B": 524288,
+    "L2_index_B": 2621440,
+    "index_total_B": 3145728,
+    "dense_KV_B": 33554432,
+    "index_vs_dense_KV": 0.0938,
+    "index_vs_dense_K_only": 0.1875,
+    "index_B_per_token_per_layer": 384.0,
+    "derivation": "L1 = 128块×8head×512B(min+max全128维bf16) = 524288B；L2 = 8192tok×8head×40B(tail32 uint8 grid+2×fp32 scale) = 2621440B；dense KV = 8192×(8head×(128K+128V)×2B) = 33554432B"
+   },
+   "per_decode_step_read": {
+    "L1_full_scan_B": 524288,
+    "L2_selected_blocks_only_B": 1925120,
+    "selected_KV_B": 4194304,
+    "PSI_total_read_B": 6643712,
+    "dense_full_KV_read_B": 33554432,
+    "index_overhead_vs_dense": 0.073,
+    "total_read_vs_dense": 0.198,
+    "KV_read_reduction_factor": 5.05,
+    "derivation": "L1全扫 = 128×8×512B；L2 = 6016cand×8×40B（i_f+i_n = 80+14 块）；选中KV = 1024tok×4096B；dense = 8192×4096B"
+   }
+  },
+  {
+   "S": 16384,
+   "n_blocks": 256,
+   "L1_candidate_tokens": 7040,
+   "total_selected_tokens": 1024,
+   "storage": {
+    "L1_index_B": 1048576,
+    "L2_index_B": 5242880,
+    "index_total_B": 6291456,
+    "dense_KV_B": 67108864,
+    "index_vs_dense_KV": 0.0938,
+    "index_vs_dense_K_only": 0.1875,
+    "index_B_per_token_per_layer": 384.0,
+    "derivation": "L1 = 256块×8head×512B(min+max全128维bf16) = 1048576B；L2 = 16384tok×8head×40B(tail32 uint8 grid+2×fp32 scale) = 5242880B；dense KV = 16384×(8head×(128K+128V)×2B) = 67108864B"
+   },
+   "per_decode_step_read": {
+    "L1_full_scan_B": 1048576,
+    "L2_selected_blocks_only_B": 2252800,
+    "selected_KV_B": 4194304,
+    "PSI_total_read_B": 7495680,
+    "dense_full_KV_read_B": 67108864,
+    "index_overhead_vs_dense": 0.0492,
+    "total_read_vs_dense": 0.1117,
+    "KV_read_reduction_factor": 8.95,
+    "derivation": "L1全扫 = 256×8×512B；L2 = 7040cand×8×40B（i_f+i_n = 80+30 块）；选中KV = 1024tok×4096B；dense = 16384×4096B"
+   }
+  },
+  {
+   "S": 32768,
+   "n_blocks": 512,
+   "L1_candidate_tokens": 8192,
+   "total_selected_tokens": 1024,
+   "storage": {
+    "L1_index_B": 2097152,
+    "L2_index_B": 10485760,
+    "index_total_B": 12582912,
+    "dense_KV_B": 134217728,
+    "index_vs_dense_KV": 0.0938,
+    "index_vs_dense_K_only": 0.1875,
+    "index_B_per_token_per_layer": 384.0,
+    "derivation": "L1 = 512块×8head×512B(min+max全128维bf16) = 2097152B；L2 = 32768tok×8head×40B(tail32 uint8 grid+2×fp32 scale) = 10485760B；dense KV = 32768×(8head×(128K+128V)×2B) = 134217728B"
+   },
+   "per_decode_step_read": {
+    "L1_full_scan_B": 2097152,
+    "L2_selected_blocks_only_B": 2621440,
+    "selected_KV_B": 4194304,
+    "PSI_total_read_B": 8912896,
+    "dense_full_KV_read_B": 134217728,
+    "index_overhead_vs_dense": 0.0352,
+    "total_read_vs_dense": 0.0664,
+    "KV_read_reduction_factor": 15.06,
+    "derivation": "L1全扫 = 512×8×512B；L2 = 8192cand×8×40B（i_f+i_n = 80+48 块）；选中KV = 1024tok×4096B；dense = 32768×4096B"
+   }
+  },
+  {
+   "S": 65536,
+   "n_blocks": 1024,
+   "L1_candidate_tokens": 8192,
+   "total_selected_tokens": 1024,
+   "storage": {
+    "L1_index_B": 4194304,
+    "L2_index_B": 20971520,
+    "index_total_B": 25165824,
+    "dense_KV_B": 268435456,
+    "index_vs_dense_KV": 0.0938,
+    "index_vs_dense_K_only": 0.1875,
+    "index_B_per_token_per_layer": 384.0,
+    "derivation": "L1 = 1024块×8head×512B(min+max全128维bf16) = 4194304B；L2 = 65536tok×8head×40B(tail32 uint8 grid+2×fp32 scale) = 20971520B；dense KV = 65536×(8head×(128K+128V)×2B) = 268435456B"
+   },
+   "per_decode_step_read": {
+    "L1_full_scan_B": 4194304,
+    "L2_selected_blocks_only_B": 2621440,
+    "selected_KV_B": 4194304,
+    "PSI_total_read_B": 11010048,
+    "dense_full_KV_read_B": 268435456,
+    "index_overhead_vs_dense": 0.0254,
+    "total_read_vs_dense": 0.041,
+    "KV_read_reduction_factor": 24.38,
+    "derivation": "L1全扫 = 1024×8×512B；L2 = 8192cand×8×40B（i_f+i_n = 80+48 块）；选中KV = 1024tok×4096B；dense = 65536×4096B"
+   }
+  },
+  {
+   "S": 131072,
+   "n_blocks": 2048,
+   "L1_candidate_tokens": 8192,
+   "total_selected_tokens": 1024,
+   "storage": {
+    "L1_index_B": 8388608,
+    "L2_index_B": 41943040,
+    "index_total_B": 50331648,
+    "dense_KV_B": 536870912,
+    "index_vs_dense_KV": 0.0938,
+    "index_vs_dense_K_only": 0.1875,
+    "index_B_per_token_per_layer": 384.0,
+    "derivation": "L1 = 2048块×8head×512B(min+max全128维bf16) = 8388608B；L2 = 131072tok×8head×40B(tail32 uint8 grid+2×fp32 scale) = 41943040B；dense KV = 131072×(8head×(128K+128V)×2B) = 536870912B"
+   },
+   "per_decode_step_read": {
+    "L1_full_scan_B": 8388608,
+    "L2_selected_blocks_only_B": 2621440,
+    "selected_KV_B": 4194304,
+    "PSI_total_read_B": 15204352,
+    "dense_full_KV_read_B": 536870912,
+    "index_overhead_vs_dense": 0.0205,
+    "total_read_vs_dense": 0.0283,
+    "KV_read_reduction_factor": 35.31,
+    "derivation": "L1全扫 = 2048×8×512B；L2 = 8192cand×8×40B（i_f+i_n = 80+48 块）；选中KV = 1024tok×4096B；dense = 131072×4096B"
+   }
+  }
+ ],
+ "summary": {
+  "index_overhead_vs_dense": {
+   "4096": 0.0889,
+   "8192": 0.073,
+   "16384": 0.0492,
+   "32768": 0.0352,
+   "65536": 0.0254,
+   "131072": 0.0205
+  },
+  "at_32K": {
+   "index_read_B": 4718592,
+   "dense_read_B": 134217728,
+   "PSI_total_read_B": 8912896,
+   "total_read_vs_dense": 0.0664,
+   "KV_read_reduction_factor": 15.06
+  },
+  "at_128K": {
+   "index_read_B": 11010048,
+   "dense_read_B": 536870912,
+   "PSI_total_read_B": 15204352,
+   "total_read_vs_dense": 0.0283,
+   "KV_read_reduction_factor": 35.31
+  },
+  "per_request_36_layers_at_128K": {
+   "index_storage_B": 1811939328,
+   "index_storage_GB": 1.688,
+   "dense_KV_storage_B": 19327352832,
+   "dense_KV_storage_GB": 18.0,
+   "index_vs_dense_KV": 0.0938
+  },
+  "asymptote": "L1 线性于 S（64B/token）、L2 常数（8192 cand × 40B × 8 = 2.62MB/步）、dense 线性（4096B/token）→ overhead 比例随 S 收敛到 64/4096 = 1.56%（L2 项趋于 0），总量读比例收敛到 (64+0+4096·1024/S)/4096"
+ },
+ "budget_table_source": "r1c_canonical_config.json budget_derivation.per_context_table（S=4K 时 near 区只有 6 块 → 实选 704 < K2=1024，如实入表）"
+}
