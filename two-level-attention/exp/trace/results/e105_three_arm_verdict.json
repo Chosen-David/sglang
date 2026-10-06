@@ -1,0 +1,83 @@
+{
+ "exp": "E105",
+ "n_tasks": 13,
+ "arms": {
+  "E105_aavg": {
+   "AVG": 50.29,
+   "scores": {
+    "hotpotqa": 54.4,
+    "2wikimqa": 38.82,
+    "musique": 33.4,
+    "passage_retrieval_en": 99.5,
+    "qasper": 43.19,
+    "multifieldqa_en": 53.2,
+    "gov_report": 33.62,
+    "qmsum": 23.85,
+    "multi_news": 24.94,
+    "narrativeqa": 24.22,
+    "triviaqa": 89.82,
+    "lcc": 69.14,
+    "repobench": 65.7
+   }
+  },
+  "E105_mminmax": {
+   "AVG": 50.29,
+   "scores": {
+    "hotpotqa": 54.4,
+    "2wikimqa": 38.82,
+    "musique": 33.4,
+    "passage_retrieval_en": 99.5,
+    "qasper": 43.19,
+    "multifieldqa_en": 53.2,
+    "gov_report": 33.62,
+    "qmsum": 23.85,
+    "multi_news": 24.94,
+    "narrativeqa": 24.22,
+    "triviaqa": 89.82,
+    "lcc": 69.14,
+    "repobench": 65.7
+   }
+  },
+  "E105_cavg": {
+   "AVG": 50.35,
+   "scores": {
+    "hotpotqa": 54.1,
+    "2wikimqa": 37.4,
+    "musique": 32.51,
+    "passage_retrieval_en": 100.0,
+    "qasper": 43.61,
+    "multifieldqa_en": 53.49,
+    "gov_report": 33.22,
+    "qmsum": 23.93,
+    "multi_news": 24.63,
+    "narrativeqa": 24.4,
+    "triviaqa": 89.66,
+    "lcc": 70.36,
+    "repobench": 67.19
+   }
+  }
+ },
+ "ref": {
+  "mavg_E98_best_13tasks": {
+   "hotpotqa": 55.44,
+   "2wikimqa": 39.32,
+   "musique": 34.71,
+   "passage_retrieval_en": 99.0,
+   "qasper": 43.95,
+   "multifieldqa_en": 53.05,
+   "gov_report": 33.52,
+   "qmsum": 23.58,
+   "multi_news": 24.44,
+   "narrativeqa": 26.31,
+   "triviaqa": 90.57,
+   "lcc": 69.28,
+   "repobench": 66.97,
+   "AVG": 50.78
+  },
+  "AVG": 50.78,
+  "FullKV": 50.36
+ },
+ "verdict": "mavg \u5168\u5c40\u6700\u4f18\u6210\u7acb",
+ "election": "E98 mavg \u03b10.125/\u03b20.375/\u03b30.625 \u5168\u5c40\u6700\u4f18",
+ "note": "\u56db\u7ec4\u5408\u6700\u4f18\u81c2 13 \u4efb\u52a1\u5168\u91cf\u5bf9\u7167\uff1bmass\u2192e2e \u03c1=0.166 \u524d\u63d0\u4e0b\u7684 e2e \u5b9e\u6d4b\u7ec8\u5224"
+}
