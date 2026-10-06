@@ -168,6 +168,16 @@ def create_quest_backend(runner):
     return QuestSparseAttnBackend(runner)
 
 
+@register_attention_backend("moba")
+def create_moba_backend(runner):
+    # E89 复现臂：MoBA training-free chunk-mean gate（chunk 64 × top-16 块
+    # = 1024 token 预算 + sink/swa 保送，与 PSI@1024 同预算同 harness；
+    # 原版 Moonshot MoBA 是训练 gate，本臂 training-free 口径见模块 docstring）
+    from sglang.srt.layers.attention.moba.backend import MoBASparseAttnBackend
+
+    return MoBASparseAttnBackend(runner)
+
+
 @register_attention_backend("nsa")
 def _create_nsa_compat(runner):
     warnings.warn(
