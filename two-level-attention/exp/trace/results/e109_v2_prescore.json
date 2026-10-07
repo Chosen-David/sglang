@@ -59,6 +59,11 @@
   "musique": 29.3,
   "avg2": 43.04
  },
+ "E109_cclusterkm_a0.125_b0.25_g0.75": {
+  "hotpotqa": 37.94,
+  "musique": 16.73,
+  "avg2": 27.34
+ },
  "E109_mavg_a0.125_b0.125_g0.625": {
   "hotpotqa": 54.37,
   "musique": 34.3,
