@@ -55,11 +55,30 @@ class TLIIndexer(TIAIndexer):
         # ---- E64j method 组合参数化（用户命名: mminmax/cavg/aavg 等）----
         self.far_method = getattr(args, "tli_far_method", "minmax")
         self.near_method = getattr(args, "tli_near_method", "avg")
+        # ---- E110：ccluster / sim_greedy（用户 2026-10-07 定义，TASK.md「关于cluster的方法」节）----
+        #   far_select/near_select 独立选择 L2 侧「簇代表打分」选择方式：
+        #     ccluster     = (far=cluster,    near=cluster)
+        #     cavg_sim     = (far=sim_greedy, near=4bit)  —— 与 cavg 只差聚类方式
+        #     ccluster_sim = (far=sim_greedy, near=sim_greedy)
+        #   默认双双 '4bit'（现状，回归保护：不开新 flag 行为逐位不变）。
+        #   注意：cluster/sim_greedy 臂须 --tli_enable_kmeans true（沿用 cavg 惯例）。
+        self.near_select = getattr(args, "tli_near_select", "4bit")
+        assert self.near_select in ("4bit", "cluster", "sim_greedy"), \
+            f"tli_near_select 非法取值: {self.near_select}"
+        self.sim = getattr(args, "tli_sim", 0.9)
+        self.sim_dims = getattr(args, "tli_sim_dims", "subspace")
+        assert self.sim_dims in ("subspace", "nope", "tail", "full"), \
+            f"tli_sim_dims 非法取值: {self.sim_dims}"
         # ---- E87：top-σ 选择（far/near/mid 侧不做两级，细筛分 ≥ sink max − σ 即选中）----
         self.sigma_select = getattr(args, "tli_sigma_select", "none")
         self.moba_gate = getattr(args, "tli_moba", False)
         self.sigma = getattr(args, "tli_sigma", 8.0)
         self.sink_blocks = 2                                      # sink = 前 2 块（128 tok）
+        if self.near_select != "4bit":
+            # E110：near 侧簇分路径与 σ/MoBA 均绕过/改写两级选择语义，显式互斥
+            assert self.sigma_select == "none", \
+                "--tli_near_select 与 --tli_sigma_select 互斥（σ 路径绕过两级选择）"
+            assert not self.moba_gate, "--tli_near_select 与 --tli_moba 互斥"
         # ---- E103：kv-head 共享消融（审稿 MAJOR）----
         #   论文 §2.2 口径：L1/L2 分数先在 GQA 组内 mean 聚合到 kv-head 级再 topk
         #   （32 q-head → 8 kv-head，索引量省 4 倍）。本开关打开时旁路全部聚合点，
@@ -70,8 +89,10 @@ class TLIIndexer(TIAIndexer):
         self.per_q_head = getattr(args, "tli_per_q_head", False)
         if self.per_q_head:
             assert not self.moba_gate, "--tli_per_q_head 与 --tli_moba 互斥（gate 是 kv-head 级语义）"
-            assert self.far_select != "cluster", \
-                "--tli_per_q_head 与 --tli_far_select cluster 互斥（簇分数是 kv-head 级语义）"
+            assert self.far_select == "4bit", \
+                "--tli_per_q_head 与 --tli_far_select cluster/sim_greedy 互斥（簇分数是 kv-head 级语义）"
+            assert self.near_select == "4bit", \
+                "--tli_per_q_head 与 --tli_near_select cluster/sim_greedy 互斥（簇分数是 kv-head 级语义）"
             assert self.sigma_select == "none", \
                 "--tli_per_q_head 与 --tli_sigma_select 互斥（E103 臂不经过 σ 路径）"
         # ---- D'：静态层掩码 ----
@@ -92,6 +113,19 @@ class TLIIndexer(TIAIndexer):
         self._km_far_lo = None       # far 区起点（token idx）
         self._km_far_blk_lo = None   # far 区块起点
         self._km_blk_ids = None      # [Hkv, Tfar] 每个 far token 的块 id
+        self._km_dims = None         # E110：far 侧建簇时实际用的维度索引（打分端对齐用）
+        # E110：near 侧聚类缓存（ccluster；near 区左右缘 decode 期都会动 → 按 key 全量重建）
+        self._km_near_centroids = None   # [Hkv, K_c, d']
+        self._km_near_assign = None      # [Hkv, Tn]（相对 _km_near_lo 的 token 偏移）
+        self._km_near_lo = -1            # near 簇覆盖区起点（token idx，块对齐）
+        self._km_near_hi = -1            # near 簇覆盖区终点（token idx，块对齐）
+        self._km_near_key = None         # (far_hi, near_hi) 重建 key
+        self._km_near_dims = None        # near 侧建簇维度索引
+        # E110：far 侧 sim_greedy 增量状态（贪心是时序过程，可对新增段精确续跑）
+        self._km_greedy_sums = None      # [Hkv, Kcap, d']  簇成员和（簇心 = sums/cnt）
+        self._km_greedy_cnt = None       # [Hkv, Kcap]
+        self._km_greedy_sq = None        # [Hkv, Kcap]  ||sums||^2 增量维护（免每步全量 norm）
+        self._km_greedy_klive = None     # [Hkv] 活簇数
         # ---- E64 框架参数化：α/β/γ 分区 + sup_wsvd 投影基（B 配置帕累托点）----
         self.alpha = getattr(args, "tli_alpha", 0.0)
         self.beta = getattr(args, "tli_beta", 0.0)
@@ -206,8 +240,9 @@ class TLIIndexer(TIAIndexer):
             if self.alpha > 0:
                 # near 粗筛 avg 分数（E64f：near=avg / far=minmax）
                 index_dict["k_avg"] = k_coarse.mean(dim=2)
-            # ---- B：远端聚类（仅 cluster 消融模式构建；默认 4bit 分区无需聚类）----
-            if self.enable_kmeans and self.far_select == "cluster" and not self.skip_far:
+            # ---- B：远端/近端聚类（cluster/sim_greedy 消融模式构建；默认 4bit 分区无需聚类）----
+            if (self.enable_kmeans and not self.skip_far
+                    and (self.far_select != "4bit" or self.near_select != "4bit")):
                 self._maybe_build_kmeans(k, index_dict)
             return index_dict
         k_coarse = rearrange(
@@ -247,8 +282,9 @@ class TLIIndexer(TIAIndexer):
             "cu_seqlens_k_coarse": cu_seqlens_k_coarse,
             "cu_seqlens_k_fine": cu_seqlens_k,
         }
-        # ---- B：远端聚类（仅 cluster 消融模式构建；默认 4bit 分区无需聚类）----
-        if self.enable_kmeans and self.far_select == "cluster" and not self.skip_far:
+        # ---- B：远端/近端聚类（cluster/sim_greedy 消融模式构建；默认 4bit 分区无需聚类）----
+        if (self.enable_kmeans and not self.skip_far
+                and (self.far_select != "4bit" or self.near_select != "4bit")):
             self._maybe_build_kmeans(k, index_dict)
         return index_dict
 
@@ -273,9 +309,20 @@ class TLIIndexer(TIAIndexer):
             near_len_dyn = self.near_len
         far_hi_blk = max(self.sink_blocks + 1, (S - near_len_dyn) // bs)
         far_hi = far_hi_blk * bs
-        # 已缓存且 far 块区间未增长（decode 新 token 全在近端）→ 复用
-        if self._km_centroids is not None and self._km_far_hi_cached == far_hi:
-            return
+        # ---- E110：far/near 两侧各自独立构建 ----
+        #   far=cluster（cavg 原路径，原样保留）/ far=sim_greedy（增量贪心，见下）
+        #   near=cluster/sim_greedy（ccluster，复用 far 侧逻辑，见 _update_near_cluster）
+        if self.far_select == "sim_greedy":
+            self._update_far_greedy(k, far_lo, far_hi)
+        elif self.far_select == "cluster":
+            # 已缓存且 far 块区间未增长（decode 新 token 全在近端）→ 复用
+            if not (self._km_centroids is not None and self._km_far_hi_cached == far_hi):
+                self._build_far_kmeans(k, far_lo, far_hi)
+        if self.near_select in ("cluster", "sim_greedy"):
+            self._update_near_cluster(k, far_hi)
+
+    def _build_far_kmeans(self, k, far_lo, far_hi):
+        """far 侧 kmeans 建簇（cavg 原逻辑抽出，行为逐位不变；E110 加 _km_dims 记录）。"""
         self._km_far_hi_cached = far_hi
         k_f = k[0, far_lo:far_hi].float()  # [Tfar, Hkv, D]
         idx_sub = self._subspace_indices(k.device)
@@ -294,9 +341,175 @@ class TLIIndexer(TIAIndexer):
         self._km_token_assign = torch.stack(assign)      # [Hkv, Tfar]
         self._km_far_lo = far_lo
         self._km_far_blk_lo = far_lo // self.args.tia_block_size
+        self._km_dims = idx_sub                            # E110：打分端 q 取同维（对齐建簇口径）
         # 每个 far token 的块 id（用于簇分数 → 块分数的 scatter-max）
         tok_blk = torch.arange(Tfar, device=k.device) // self.args.tia_block_size
         self._km_blk_ids = tok_blk.unsqueeze(0).expand(Hkv, Tfar)
+
+    def _update_far_greedy(self, k, far_lo, far_hi):
+        """E110：far 侧 sim_greedy（增量贪心聚类，E108 probe greedy_cluster_assign
+        的 e2e 移植，语义逐位一致）。
+
+        贪心是时序过程：token i 与「i 时刻的簇心」（running mean）比较。decode 期
+        far_hi 块对齐前移时只对新增段 [old_far_hi, far_hi) 续跑增量指派——新 token
+        与当前簇心比较恰为严格时序语义，故续跑 ≡ 全量重放（逐位一致）。
+        这使 decode 期贪心代价 = 新增段长度（~1 块），而非全 far 区重放。
+        """
+        if self._km_greedy_sums is not None and self._km_far_hi_cached == far_hi:
+            return  # 缓存命中（decode 每步 far_hi 不动时零成本）
+        idx = self._sim_dims_indices(k.device)
+        if (self._km_greedy_sums is None or far_hi <= self._km_far_hi_cached
+                or far_hi - far_lo < 128):
+            # 冷启动 / far 收缩（clear 后跨请求）/ far 区过小 → 全量重建
+            self._km_greedy_sums = self._km_greedy_cnt = self._km_greedy_sq = None
+            self._km_greedy_klive = None
+            self._km_token_assign = None
+            if far_hi - far_lo < 128:
+                self._km_centroids = None
+                self._km_far_hi_cached = far_hi
+                return
+            x = k[0, far_lo:far_hi].float()[..., idx]      # [Tfar, Hkv, dd]
+            H, Tfar, dd = x.shape[1], x.shape[0], x.shape[2]
+            sums = x.new_zeros(H, Tfar, dd)                # Kcap = Tfar（最坏每 token 一簇）
+            cnt = x.new_zeros(H, Tfar)
+            sq = x.new_zeros(H, Tfar)
+            k_live = torch.zeros(H, dtype=torch.long, device=x.device)
+            sums, cnt, sq, k_live, assign = self._greedy_cluster_pass(
+                x, self.sim, sums, cnt, sq, k_live)
+            self._km_token_assign = assign
+        else:
+            # 增量续跑：只处理新增段（严格时序语义的精确延续）
+            x = k[0, self._km_far_hi_cached:far_hi].float()[..., idx]
+            sums, cnt, sq, k_live, assign_new = self._greedy_cluster_pass(
+                x, self.sim, self._km_greedy_sums, self._km_greedy_cnt,
+                self._km_greedy_sq, self._km_greedy_klive)
+            self._km_token_assign = torch.cat(
+                [self._km_token_assign, assign_new], dim=1)
+        self._km_greedy_sums, self._km_greedy_cnt = sums, cnt
+        self._km_greedy_sq, self._km_greedy_klive = sq, k_live
+        self._km_far_hi_cached = far_hi
+        self._km_far_lo = far_lo
+        self._km_dims = idx
+        # 簇代表 = 成员算术均值（零簇行无害：assign 永不指向空槽）
+        self._km_centroids = sums / cnt.clamp(min=1).unsqueeze(-1)
+
+    def _update_near_cluster(self, k, far_hi):
+        """E110：near 侧聚类（ccluster，复用 far 侧逻辑：kmeans 或 sim_greedy）。
+
+        near 区 = [far_hi, near_hi)，near_hi 取块对齐 swa 起点（(S-swa)//bs·bs）。
+        与 far 侧不同：near 区 decode 期右缘每 token 前移、左缘随 far_hi 前移，
+        均值簇心无法精确撤销成员 → near 侧不做增量，按 key=(far_hi, near_hi)
+        变化全量重建（near 区 ~α·mid 较小，重建代价可控；重建间隙的右缘新 token
+        由消费端用细筛原始分回退覆盖——细筛分质量高于簇代表分，语义无损偏保守）。
+        """
+        S = k.shape[1]
+        bs = self.args.tia_block_size
+        near_hi = max(far_hi, (S - self.sliding_window_size) // bs * bs)
+        if self._km_near_key == (far_hi, near_hi) and self._km_near_centroids is not None:
+            return
+        self._km_near_key = (far_hi, near_hi)
+        self._km_near_centroids = None
+        self._km_near_assign = None
+        Tn = near_hi - far_hi
+        if Tn < 256:   # near 区过小（< 4 块）不值得聚类，消费端回退细筛分
+            return
+        idx = (self._sim_dims_indices if self.near_select == "sim_greedy"
+               else self._subspace_indices)(k.device)
+        x = k[0, far_hi:near_hi].float()[..., idx]   # [Tn, Hkv, dd]
+        Hkv = x.shape[1]
+        if self.near_select == "sim_greedy":
+            T, dd = x.shape[0], x.shape[2]
+            sums = x.new_zeros(Hkv, T, dd)
+            cnt = x.new_zeros(Hkv, T)
+            sq = x.new_zeros(Hkv, T)
+            k_live = torch.zeros(Hkv, dtype=torch.long, device=x.device)
+            sums, cnt, sq, k_live, assign = self._greedy_cluster_pass(
+                x, self.sim, sums, cnt, sq, k_live)
+            centroids = sums / cnt.clamp(min=1).unsqueeze(-1)
+        else:
+            centroids, assign = [], []
+            for h in range(Hkv):
+                c, a = self._gpu_kmeans(x[:, h, :], self.far_clusters, self.far_niter)
+                centroids.append(c)
+                assign.append(a)
+            centroids = torch.stack(centroids)   # [Hkv, K_c, dd]
+            assign = torch.stack(assign)         # [Hkv, Tn]
+        self._km_near_centroids = centroids
+        self._km_near_assign = assign            # 相对 near_lo 的 token 偏移
+        self._km_near_lo = far_hi
+        self._km_near_hi = near_hi
+        self._km_near_dims = idx
+
+    @staticmethod
+    def _greedy_cluster_pass(x, sim, sums, cnt, sq, k_live):
+        """增量贪心聚类一趟（语义 = e64a / E108 probe 的 greedy_cluster_assign：
+        token 按序到达，与现有簇心（成员 running mean）余弦相似度最大的活簇
+        cos >= sim 则归并，否则新建簇；簇心由 sums/cnt 增量维护（算术均值）。
+
+        x: [T, H, dd]（按序）。sums [H,K,dd] / cnt [H,K] / sq [H,K]（||sums||^2
+        增量维护，免每步全量 norm）/ k_live [H]：既有簇状态（全零 = 冷启动；
+        非零 = 续跑，与全量重放逐位一致——贪心决策只依赖先验状态）。
+        返回 (sums, cnt, sq, k_live, assign[H,T])；容量不足时返回扩容新张量。
+        实现注（E108 probe 实测坑原样规避）：归并步的 dot_a 从 dot 直接 gather
+        （恒有限）——若用 m·norm·x_n 推导，无活簇首 token 时 m=-inf 经 0 权重
+        乘出 NaN 污染 sq；非归并头 index_add 加 0 权重无害（目标槽均为活簇或
+        全新零槽）。
+        """
+        T, H, dd = x.shape
+        K = sums.shape[1]
+        need = int(k_live.max().item()) + T
+        if need > K:   # 扩容（新簇上界 = T）
+            pad = need - K
+            sums = F.pad(sums, (0, 0, 0, pad))
+            cnt = F.pad(cnt, (0, pad))
+            sq = F.pad(sq, (0, pad))
+            K = sums.shape[1]
+        dev = x.device
+        EPS = 1e-9
+        assign = torch.zeros(H, T, dtype=torch.long, device=dev)
+        x_n = x.norm(dim=-1)                                  # [T,H]
+        ar_h = torch.arange(H, device=dev)
+        live_row = torch.arange(K, device=dev).unsqueeze(0)   # [1,K]
+        for i in range(T):
+            xi = x[i]                                          # [H,dd]
+            xi_n = x_n[i]                                      # [H]
+            norm = sq.clamp(min=0).sqrt()                      # [H,K]
+            dot = torch.bmm(sums, xi.unsqueeze(-1)).squeeze(-1)  # [H,K]
+            cos = dot / (norm * xi_n.unsqueeze(-1) + EPS)
+            cos = cos.masked_fill(live_row >= k_live.unsqueeze(-1), float("-inf"))
+            a = cos.argmax(-1)                                 # [H]
+            m = cos.gather(1, a.unsqueeze(-1)).squeeze(-1)
+            upd = m >= sim                                     # [H]
+            w = upd.float()
+            dot_a = dot.gather(1, a.unsqueeze(-1)).squeeze(-1)  # sums_a·xi（恒有限）
+            flat_upd = ar_h * K + a
+            sums.view(-1, dd).index_add_(0, flat_upd, xi * w.unsqueeze(-1))
+            cnt.view(-1).index_add_(0, flat_upd, w)
+            sq.view(-1).index_add_(0, flat_upd, (2 * dot_a + xi_n * xi_n) * w)
+            nw = (~upd).float()                                # 新建簇头
+            flat_new = ar_h * K + k_live
+            sums.view(-1, dd).index_add_(0, flat_new, xi * nw.unsqueeze(-1))
+            cnt.view(-1).index_add_(0, flat_new, nw)
+            sq.view(-1).index_add_(0, flat_new, xi_n * xi_n * nw)
+            assign[:, i] = torch.where(upd, a, k_live)
+            k_live = k_live + (~upd).long()
+        return sums, cnt, sq, k_live, assign
+
+    def _sim_dims_indices(self, device):
+        """E110：sim_greedy 聚类维度（用户设定：nope 维或压缩维）。
+        subspace = 与 cluster/kmeans 路径同维（_subspace_indices 全分支；
+        注意 'full' 落到 tail 分支——与 far kmeans 构建口径一致）；nope/tail/full
+        为显式覆盖（tail 宽度由 cmp_ratio 控制）。"""
+        if self.sim_dims == "subspace":
+            return self._subspace_indices(device)
+        if self.sim_dims == "nope":
+            return torch.arange(64, 128, device=device)
+        if self.sim_dims == "full":
+            return torch.arange(128, device=device)
+        delta = 64 // self.cmp_ratio
+        return torch.tensor(
+            list(range(64 - delta, 64)) + list(range(128 - delta, 128)), device=device
+        )
 
     _km_far_hi_cached = -1
 
@@ -398,10 +611,14 @@ class TLIIndexer(TIAIndexer):
         """B：远端 token 的簇分数（E4/E7 语义：按中心分数 token 级展开）。
 
         q: [H(全部 head), D]。返回 [Hkv, Tfar]（相对 far_lo 的 token 偏移）或 None。
+        E110：q 取维改用建簇时记录的 _km_dims（sim_greedy 的 sim_dims 可异于
+        _subspace_indices——打分/建簇维度必须同源；kmeans 路径 _km_dims 即
+        _subspace_indices 的返回值，行为不变）。
         """
         if self._km_centroids is None:
             return None
-        idx_sub = self._subspace_indices(q.device)
+        idx_sub = self._km_dims if self._km_dims is not None \
+            else self._subspace_indices(q.device)
         q_sub = q[:, idx_sub].float()                       # [H, d']
         H = q.shape[0]
         Hkv = self._km_centroids.shape[0]
@@ -410,6 +627,24 @@ class TLIIndexer(TIAIndexer):
         cscore = torch.einsum("hd,hkd->hk", q_g, self._km_centroids)  # [Hkv, K_c]
         tok_score = cscore.gather(1, self._km_token_assign)  # [Hkv, Tfar]
         return tok_score
+
+    def _near_token_score(self, q):
+        """E110：near 区 token 的簇分数（与 _far_token_score 同构）。
+
+        q: [H, D]。返回 [Hkv, Tn]（相对 _km_near_lo 的 token 偏移）或 None。
+        与 far 侧的唯一差别：group 聚合用 mean——far 侧单独 topk 用 sum 无所谓
+        量纲，near 侧簇分数要与「未覆盖段的细筛回退分 sf_g（group-mean 原始
+        点积分）」在同一 topk 内竞争，sum 会放大 G 倍导致簇段霸榜，必须 mean。
+        """
+        if self._km_near_centroids is None:
+            return None
+        q_sub = q[:, self._km_near_dims].float()            # [H, dd]
+        H = q.shape[0]
+        Hkv = self._km_near_centroids.shape[0]
+        G = H // Hkv
+        q_g = q_sub.reshape(Hkv, G, -1).mean(1)             # [Hkv, dd]（group 均值，对齐 sf_g 量纲）
+        cscore = torch.einsum("hd,hkd->hk", q_g, self._km_near_centroids)  # [Hkv, K_c]
+        return cscore.gather(1, self._km_near_assign)       # [Hkv, Tn]
 
     def _moba_mask(self, score_dict, kt, bs):
         """E89 MoBA 复现臂：chunk gate top-K 块全展开（training-free，统一 harness）。
@@ -492,10 +727,17 @@ class TLIIndexer(TIAIndexer):
         # （B5/B6 输出 200/200 逐字一致的根因——use_partition 仅挂在 enable_kmeans 下）
         use_partition = (self.enable_kmeans or e64_partition) and not self.skip_far
         far_tok_score = None
-        if use_partition and self.far_select == "cluster":
+        if use_partition and self.far_select in ("cluster", "sim_greedy"):
             q_last = getattr(self, "_last_q", None)
             if q_last is not None and self._km_centroids is not None:
                 far_tok_score = self._far_token_score(q_last)  # [Hkv, Tfar]
+        # E110：near 侧簇分数（ccluster / ccluster_sim 臂）
+        near_tok_score = None
+        near_cluster_on = self.near_select in ("cluster", "sim_greedy")
+        if use_partition and near_cluster_on:
+            q_last = getattr(self, "_last_q", None)
+            if q_last is not None:
+                near_tok_score = self._near_token_score(q_last)  # [Hkv, Tn]
 
         score_coarse[..., -1] = float("inf")  # TIA 语义：当前块强制
         k1 = self.args.tia_level1_topk
@@ -656,7 +898,16 @@ class TLIIndexer(TIAIndexer):
                 if far_tok_score is not None:
                     # 消融：远端按簇分数 token 级 topk
                     Tfar = far_tok_score.shape[-1]
-                    k2_far = min(self.far_tokens, Tfar, K2_mid)
+                    if near_cluster_on and e64_partition and near_tok_score is not None:
+                        # E110 ccluster：两侧都走簇分 → γ 活化（TASK.md 预算语义：
+                        # γ 切 near_token/far_token）。near=4bit 的 cavg 保持现状
+                        # far_tokens 语义（γ 死参数）不变——E105/E109 在跑口径，
+                        # 回归保护，只对新 ccluster 臂生效
+                        nt_near = min(int(nb_near * bs * self.gamma), K2_mid)
+                        far_budget = max(64, K2_mid - nt_near)
+                    else:
+                        far_budget = self.far_tokens
+                    k2_far = min(far_budget, Tfar, K2_mid)
                     i_f = (torch.topk(far_tok_score, k2_far, dim=-1).indices
                            + self._km_far_lo).unsqueeze(0).unsqueeze(0)
                 else:
@@ -684,6 +935,27 @@ class TLIIndexer(TIAIndexer):
                 k2_near = max(0, K2_mid - k2_far)
                 if swa_lo_tok > far_tok_hi:
                     near_p = p[..., far_tok_hi:swa_lo_tok]
+                    if near_tok_score is not None:
+                        # E110 ccluster：near 池换「簇分数（簇覆盖段）+ 细筛原始分
+                        # （未覆盖段）」。两源均为 group-mean 原始点积分（量纲一致，
+                        # _near_token_score 用 mean 聚合即为此）；且都不过 L1 块池
+                        # 门控——簇代表分本身就是粗筛（TASK.md cluster 语义），
+                        # 与 far 簇分路径口径一致。未覆盖段 = 块对齐右缘尾巴 +
+                        # 建簇/消费边界漂移，用细筛分回退（细筛分质量 ≥ 簇代表分，
+                        # 语义无损偏保守）
+                        sf_raw = score_dict["score_fine"][..., : p.shape[-1]].to(torch.float32)
+                        sf_g = rearrange(
+                            sf_raw, "b qt (h g) kt -> b qt h g kt", g=self.group_size
+                        ).mean(dim=-2)
+                        near_sc = sf_g[..., far_tok_hi:swa_lo_tok].clone()
+                        cs_lo = max(self._km_near_lo, far_tok_hi)
+                        cs_hi = min(self._km_near_hi, swa_lo_tok)
+                        if cs_hi > cs_lo:
+                            seg = near_tok_score[..., cs_lo - self._km_near_lo:
+                                                  cs_hi - self._km_near_lo]
+                            near_sc[..., cs_lo - far_tok_hi:cs_hi - far_tok_hi] = \
+                                seg.unsqueeze(0).unsqueeze(0)
+                        near_p = near_sc
                     i_n = torch.topk(near_p, min(k2_near, near_p.shape[-1]), dim=-1).indices + far_tok_hi
                 else:
                     i_n = i_f[..., :0]
@@ -707,6 +979,19 @@ class TLIIndexer(TIAIndexer):
         self._km_token_assign = None
         self._km_blk_ids = None
         self._km_far_hi_cached = -1
+        self._km_dims = None
+        # E110：near 侧簇缓存 + far 侧 greedy 增量状态跨请求必须重置
+        # （clear() 在每次 prefill 前调用；far greedy 增量状态残留会把上一请求
+        # 的簇心带入新请求的增量指派——贪心时序语义跨请求不成立）
+        self._km_near_centroids = None
+        self._km_near_assign = None
+        self._km_near_lo = self._km_near_hi = -1
+        self._km_near_key = None
+        self._km_near_dims = None
+        self._km_greedy_sums = None
+        self._km_greedy_cnt = None
+        self._km_greedy_sq = None
+        self._km_greedy_klive = None
         # E85f：跨请求必须重置——clear() 在每次 prefill 前调用，随后
         # observe_prefill_q 用本请求的 q 统计重选 pair（否则残留上一请求）
         self._pair_idx = None

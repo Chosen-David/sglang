@@ -26,7 +26,25 @@ def _add_tli_args(parser: argparse.ArgumentParser):
     group = parser.add_argument_group(title='TLI (Two-Level Indexer)')
     group.add_argument('--tli_enable_subspace', type=lambda x: str(x).lower() != 'false', default=True)
     group.add_argument('--tli_enable_kmeans', type=lambda x: str(x).lower() != 'false', default=True)
-    group.add_argument('--tli_far_select', type=str, default='4bit', choices=['4bit', 'cluster'])
+    # ---- E110：ccluster / sim_greedy（用户 2026-10-07 定义，TASK.md「关于cluster的方法」节）----
+    #   far_select/near_select 各自独立可选 L2 选择方式：
+    #   4bit       = 细筛分数 topk（现状默认，回归保护）
+    #   cluster    = kmeans 簇代表打分 topk（ccluster = (cluster, cluster)；cavg = far 侧已有）
+    #   sim_greedy = 增量贪心聚类（余弦相似度 >= --tli_sim 归并，簇心=算术均值增量维护）
+    group.add_argument('--tli_far_select', type=str, default='4bit',
+                       choices=['4bit', 'cluster', 'sim_greedy'],
+                       help='far 侧 L2 选择: 4bit=细筛分数(默认) / cluster=kmeans 簇代表 / '
+                            'sim_greedy=增量贪心聚类簇代表')
+    group.add_argument('--tli_near_select', type=str, default='4bit',
+                       choices=['4bit', 'cluster', 'sim_greedy'],
+                       help='near 侧 L2 选择: 4bit=细筛分数(默认,现状) / cluster=kmeans 簇代表 / '
+                            'sim_greedy=增量贪心聚类簇代表（ccluster 组合 = near 侧开 cluster）')
+    group.add_argument('--tli_sim', type=float, default=0.9,
+                       help='sim_greedy 余弦相似度归并阈值（簇心-running-mean 与新 token 的 cos >= sim 则归并）')
+    group.add_argument('--tli_sim_dims', type=str, default='subspace',
+                       choices=['subspace', 'nope', 'tail', 'full'],
+                       help='sim_greedy 聚类维度: subspace=与 cluster/kmeans 路径同一子空间(默认,含压缩维) / '
+                            'nope=后 64 非旋转维 / tail=低频尾维(cmp_ratio 控宽) / full=全 128 维')
     group.add_argument('--tli_enable_layer_skip', type=lambda x: str(x).lower() != 'false', default=True)
     group.add_argument('--tli_far_clusters', type=int, default=256)
     group.add_argument('--tli_far_niter', type=int, default=10)
