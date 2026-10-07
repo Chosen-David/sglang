@@ -193,6 +193,16 @@ class TLISparseAttnBackend(AttentionBackend):
                 "kq_mn": torch.zeros(r_cap, s_cap, Hkv, device=dev),
                 "kmin": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
                 "kmax": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
+                # E112（#149）：kavg 块均值（method=avg 分数源，TASK.md
+                # L36-45）。仅 has_abg 且 need_avg_score 时分配——B' 回退
+                # 模式 pool 张量集合与改动前完全一致（显存零增量）。
+                # 与 kmin/kmax 同形同生命周期（_ensure_pool_s/_grow_pool_r/
+                # 三处写行点同步维护）。
+                **(
+                    {"kavg": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev)}
+                    if getattr(p, "has_abg", False) and p.need_avg_score()
+                    else {}
+                ),
                 "S_cap": s_cap,
                 "R_cap": r_cap,
                 "free": list(range(1, r_cap)),  # 行 0 = 哨兵，不进 free
@@ -235,7 +245,11 @@ class TLISparseAttnBackend(AttentionBackend):
         for key, width in (
             ("kq_q", old), ("kq_sc", old), ("kq_mn", old),
             ("kmin", old_nblk), ("kmax", old_nblk),
+            # E112：kavg 与 kmin/kmax 同为块维张量（B' 回退模式未分配则跳过）
+            ("kavg", old_nblk),
         ):
+            if key not in pool_l:
+                continue
             t = pool_l[key]
             s_dim = new_cap if key.startswith("kq") else new_nblk
             new = t.new_zeros((t.shape[0], s_dim, *t.shape[2:]))
@@ -253,7 +267,10 @@ class TLISparseAttnBackend(AttentionBackend):
             )
         r0 = pool_l["R_cap"]
         r1 = r0 + add
-        for key in ("kq_q", "kq_sc", "kq_mn", "kmin", "kmax"):
+        # E112：kavg 若已分配则随行维扩容同步扩（B' 回退模式不存在则跳过）
+        for key in ("kq_q", "kq_sc", "kq_mn", "kmin", "kmax", "kavg"):
+            if key not in pool_l:
+                continue
             t = pool_l[key]
             new = t.new_zeros((r1, *t.shape[1:]))
             new[:r0] = t
@@ -292,6 +309,9 @@ class TLISparseAttnBackend(AttentionBackend):
         return {
             "kmin": pool_l["kmin"][row],
             "kmax": pool_l["kmax"][row],
+            # E112：kavg view（method=avg 分数源；B' 回退模式 pool 未分配
+            # 则不出键，select 侧 getattr(index, "kavg") 取 None）
+            **({"kavg": pool_l["kavg"][row]} if "kavg" in pool_l else {}),
             "kq_q": pool_l["kq_q"][row],
             "kq_sc": pool_l["kq_sc"][row],
             "kq_mn": pool_l["kq_mn"][row],
@@ -446,6 +466,8 @@ class TLISparseAttnBackend(AttentionBackend):
                     pool_l["kq_mn"][row, : L - 1] = idx_new["kq_mn"]
                     pool_l["kmin"][row, : idx_new["nblk"]] = idx_new["kmin"]
                     pool_l["kmax"][row, : idx_new["nblk"]] = idx_new["kmax"]
+                    if "kavg" in pool_l and idx_new.get("kavg") is not None:
+                        pool_l["kavg"][row, : idx_new["nblk"]] = idx_new["kavg"]
                 # 预记图内追加当前 token 后的有效长度（== eager 路径每步
                 # 结束时的 bookkeeping 语义，混跑无缝切换）
                 pool_l["S"][row] = L
@@ -524,6 +546,8 @@ class TLISparseAttnBackend(AttentionBackend):
                 pool_l["kq_mn"][row, :seq_len] = idx_new["kq_mn"]
                 pool_l["kmin"][row, :nblk] = idx_new["kmin"]
                 pool_l["kmax"][row, :nblk] = idx_new["kmax"]
+                if "kavg" in pool_l and idx_new.get("kavg") is not None:
+                    pool_l["kavg"][row, :nblk] = idx_new["kavg"]
                 pool_l["S"][row] = seq_len
                 self.timer.add("build", time.time() - t0)
             elif seq_len > S_st:
@@ -835,6 +859,8 @@ class TLISparseAttnBackend(AttentionBackend):
             pool_l["kq_mn"][row, :S] = index["kq_mn"]
             pool_l["kmin"][row, : index["nblk"]] = index["kmin"]
             pool_l["kmax"][row, : index["nblk"]] = index["kmax"]
+            if "kavg" in pool_l and index.get("kavg") is not None:
+                pool_l["kavg"][row, : index["nblk"]] = index["kavg"]
             pool_l["S"][row] = S
 
     # ---------------- 内部工具 ---------------- #

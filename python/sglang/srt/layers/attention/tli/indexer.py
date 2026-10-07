@@ -243,6 +243,21 @@ class TLIIndexer:
             valid_tail = S - (nblk - 1) * p.block_size
             kmin[-1] = kc[-1, :valid_tail].amin(0)
             kmax[-1] = kc[-1, :valid_tail].amax(0)
+        # E112（#149 第一阶段）：kavg 块均值（method=avg 分数源，TASK.md
+        # L36-45 注册表）。仅 has_abg 且 need_avg_score() 时构建——B' 回退
+        # 模式零额外显存/计算（index dict 多一个 None 键，行为零变化）。
+        # 形式对齐权威 prepare_index 的 k_coarse.mean(dim=2)（数值 probe
+        # Q5 逐位验证）；尾块取有效 token 精确均值（与上方 kmin/kmax 尾块
+        # 精确界同口径——权威的零 pad 会把 0 混进尾块均值，非块对齐 S 的
+        # 已知口径差异，见 test_taskmd_align.py 差距清单）。
+        kavg = None
+        if getattr(p, "has_abg", False) and p.need_avg_score():
+            if pad:
+                kavg = torch.empty_like(kmin)
+                kavg[:-1] = kc[:-1].mean(1)
+                kavg[-1] = kc[-1, :valid_tail].mean(0)
+            else:
+                kavg = kc.mean(1)
         # 4bit 部分维（L2 精筛用；M6 真 4bit 存储：uint8 格点 + fp32 scale，
         # 128→40B/token-head——S=131K pool 显存硬前提）
         # M9：basis 存在时存 PCA 投影 K@basis 的 4bit（r 维，16+8 B/token-head）
@@ -250,6 +265,7 @@ class TLIIndexer:
         index = {
             "kmin": kmin,
             "kmax": kmax,
+            "kavg": kavg,
             "kq_q": kq_q,
             "kq_sc": kq_sc,
             "kq_mn": kq_mn,
@@ -317,6 +333,9 @@ class TLIIndexer:
                 return
             index["kmin"] = _ensure(index["kmin"], nblk_old + n_add)
             index["kmax"] = _ensure(index["kmax"], nblk_old + n_add)
+            has_avg = index.get("kavg") is not None
+            if has_avg:
+                index["kavg"] = _ensure(index["kavg"], nblk_old + n_add)
             w = nblk_old
             if nb_full:
                 kc = ks_seg[: nb_full * p.block_size].reshape(
@@ -324,6 +343,9 @@ class TLIIndexer:
                 )
                 index["kmin"][w : w + nb_full] = kc.amin(1)
                 index["kmax"][w : w + nb_full] = kc.amax(1)
+                # E112：整块均值与 build 的 kc.mean(1) 同形式（逐位）
+                if has_avg:
+                    index["kavg"][w : w + nb_full] = kc.mean(1)
                 w += nb_full
             rem = n - nb_full * p.block_size
             if rem:
@@ -332,6 +354,8 @@ class TLIIndexer:
                 r = ks_seg[nb_full * p.block_size :]
                 index["kmin"][w] = r.amin(0)
                 index["kmax"][w] = r.amax(0)
+                if has_avg:
+                    index["kavg"][w] = r.mean(0)
 
         if S_old % p.block_size == 0:
             # 对齐边界：新 token 直接开新块（decode n=1 时恰好一块）
@@ -347,6 +371,15 @@ class TLIIndexer:
             index["kmax"][nblk_old - 1] = torch.maximum(
                 index["kmax"][nblk_old - 1], ks[:take].amax(0)
             )
+            # E112：尾块均值的增量合并 (old_mean*tail + sum_new)/(tail+take)。
+            # 【口径差距如实标注】该结合式与全量重建 kc.mean(1) 的归约顺序
+            # 不同 → 存在 ~1e-7 级浮点漂移（min/max 的结合律无此问题）。
+            # 逐位对拍口径走 build 全量路径；第二阶段可改存块和/计数消除。
+            if index.get("kavg") is not None:
+                old_av = index["kavg"][nblk_old - 1]
+                index["kavg"][nblk_old - 1] = (
+                    old_av * tail + ks[:take].sum(0)
+                ) / (tail + take)
             rest = n_new - take
             if rest > 0:
                 _append_blocks(ks[take:])
@@ -1075,6 +1108,17 @@ class TLIIndexer:
         mx_val = torch.where(aligned.view(n, 1, 1), ks, torch.maximum(old_mx, ks))
         pool_l["kmin"].reshape(-1)[off_mf] = mn_val.reshape(-1)
         pool_l["kmax"].reshape(-1)[off_mf] = mx_val.reshape(-1)
+        # ---- E112：kavg 增量维护（与 update_block_index 非对齐分支同式）----
+        # 对齐行新块均值 = 新 token 本身；非对齐行 = (old·tail + 新)/(tail+1)。
+        # 与逐行 update 逐位一致；与全量重建存在 ~1e-7 级归约顺序差（见
+        # update_block_index 内的口径差距标注）。
+        if "kavg" in pool_l:
+            old_av = pool_l["kavg"].reshape(-1)[off_mf].view(n, Hkv, d1)
+            tail_t = (S_old_t % bs).view(n, 1, 1)
+            av_val = torch.where(
+                aligned.view(n, 1, 1), ks, (old_av * tail_t + ks) / (tail_t + 1)
+            )
+            pool_l["kavg"].reshape(-1)[off_mf] = av_val.reshape(-1)
 
     @torch.no_grad()
     def select_decode_batched(

@@ -43,6 +43,9 @@ class TLIProfile:
         self.sliding_window: int = _env_int("SGLANG_TLI_SLIDING_WINDOW", 128)
         self.sliding_blocks: int = _env_int("SGLANG_TLI_SLIDING_BLOCKS", 3)
         # ---- 创新点 B'：far/near 分区 L2 预算（E4c 修正后的语义）----
+        # 【E112/#149 第一阶段：以下 far_tokens/near_len 两个参数降级为
+        # 「B' 回退模式」专用——仅当未配置 α/β/γ/method（has_abg=False）
+        # 时生效；has_abg=True 时分区一律按 TASK.md α/β/γ 派生（见下）】
         # E4c 严格预算实测：聚类代表（km_blk 0.09–0.39 / km_tok 0.45–0.79）
         # 无一致优势，far 区保留 4bit token 级精筛（≈ oracle）；B' 的贡献是
         # far 池独立预算防挤出（far-heavy 层 TLI 反超 TIA）
@@ -124,6 +127,50 @@ class TLIProfile:
         # 30B 崩坏根因，终局诊断（#58）证实真根因是 select_batched 早期
         # 行因果越界，与本聚合无关；留作打分质量消融口径。----
         self.q_agg: str = os.environ.get("SGLANG_TLI_Q_AGG", "sum")
+        # ---- E112（#149 第一阶段）：TASK.md α/β/γ 权威语义 ----
+        # 语义锚点（/home/wangyuanshuo02/sglang/TASK.md，只读权威）：
+        #   L151-172：near_L = α·mid_L（mid = 除去 sink/swa 正交强制区的
+        #             部分）；near_budget_page_topk = β·budget_page_topk；
+        #             far_budget_page_topk = budget_page_topk −
+        #             near_budget_page_topk（**无任何保底**，E109a 严格化）；
+        #             near_token = near_budget_page_topk·page_size·γ，
+        #             far_token = budget_token − near_token。
+        #   L231：ab(0,0) = 全部走 far_method（单池点）；
+        #         ab(1,1) = 全部 near_method；ab(1,0)/ab(0,1) 无意义
+        #         （实现上等价单池，与权威 tli_indexer 的 e64_partition
+        #         判定 α>0 且 β>0 一致）。
+        # 默认值 (0,0,1.0) 与权威 two-level tli_indexer.__init__ 的
+        # getattr(args, "tli_alpha", 0.0) 系列一致。
+        self.alpha: float = _env_float("SGLANG_TLI_ALPHA", 0.0)
+        self.beta: float = _env_float("SGLANG_TLI_BETA", 0.0)
+        self.gamma: float = _env_float("SGLANG_TLI_GAMMA", 1.0)
+        # ---- E112：far/near method 组合（TASK.md L36-45 注册表）----
+        #   mavg=(minmax,avg) / cavg=(cluster,avg) / aavg=(avg,avg) /
+        #   ccluster=(cluster,cluster) / mminmax=(minmax,minmax)
+        # 默认 (minmax, avg) = mavg（权威实现同默认）。第一阶段只实现
+        # avg/minmax 两种分数源；cluster/sim_greedy（E110）留第二阶段。
+        self.far_method: str = os.environ.get("SGLANG_TLI_FAR_METHOD", "minmax")
+        self.near_method: str = os.environ.get("SGLANG_TLI_NEAR_METHOD", "avg")
+        assert self.far_method in ("minmax", "avg"), (
+            f"SGLANG_TLI_FAR_METHOD={self.far_method} 第一阶段仅支持 "
+            "minmax|avg（cluster/sim_greedy 是 E110 第二阶段）"
+        )
+        assert self.near_method in ("minmax", "avg"), (
+            f"SGLANG_TLI_NEAR_METHOD={self.near_method} 第一阶段仅支持 "
+            "minmax|avg（cluster/sim_greedy 是 E110 第二阶段）"
+        )
+        # 配置存在性检测：任一 α/β/γ/method env 显式设置即进入 TASK.md
+        # 语义分支（_select_taskmd）；否则保持旧 B' 固定分区行为逐位不变
+        # （回归保护口径）。far_tokens/near_len env 单独设置不触发（它们
+        # 本来就是旧模式的参数）。
+        self.has_abg: bool = bool(
+            os.environ.get("SGLANG_TLI_ALPHA")
+            or os.environ.get("SGLANG_TLI_BETA")
+            or os.environ.get("SGLANG_TLI_GAMMA")
+            or os.environ.get("SGLANG_TLI_FAR_METHOD")
+            or os.environ.get("SGLANG_TLI_NEAR_METHOD")
+        )
+
         # ---- #60 D' 升级：prefill 动态测层 → decode 动态跳 far。
         # 离线验证（e60_prefill_dynamic_gate.json，32B 7 任务）：prefill
         # 末段行 per-layer far mass 与 decode far mass corr 0.86-0.99，
@@ -157,6 +204,17 @@ class TLIProfile:
     def refine_nd(self) -> int:
         """L2 精筛表示维度：投影基存在时 = r（PCA），否则 = 2*delta（选择）。"""
         return self.proj_rank if self.proj_basis_path else 2 * self.delta
+
+    def need_avg_score(self) -> bool:
+        """E112：method=avg 分数源是否需要构建 kavg（块均值）。
+
+        与权威 two-level tli_indexer._need_avg_score() 逐条对齐：
+          far avg：单池（α=0）与分区（α>0）的 far 池都要用 → 永远需要；
+          near avg：near 池仅在分区（α>0 且 β>0）存在 → 仅分区需要。
+        """
+        return self.far_method == "avg" or (
+            self.near_method == "avg" and self.alpha > 0 and self.beta > 0
+        )
 
     def load_layer_skip(self, n_layers: int) -> list[bool] | None:
         """D' 静态层掩码：JSON 文件 {"skip": [layer_idx,...]}。"""
