@@ -124,6 +124,37 @@ class TLIProfile:
         # 30B 崩坏根因，终局诊断（#58）证实真根因是 select_batched 早期
         # 行因果越界，与本聚合无关；留作打分质量消融口径。----
         self.q_agg: str = os.environ.get("SGLANG_TLI_Q_AGG", "sum")
+        # ---- E112（#149）：α/β/γ 分区参数化 + far/near method 组合 ----
+        # 口径对齐 TASK.md（/home/wangyuanshuo02/sglang/TASK.md L155-239）与
+        # two-level-attention 权威实现（sparse_attn/indexer/tli_indexer.py，
+        # two-level-indexer 分支）。五个环境变量**任一显式出现**即进入
+        # taskmd 模式（α/β/γ 分区 + method 分池打分 + sink/swa 正交语义，
+        # M8/M10 kernel 路径旁路）；全部缺省时保持旧 B' 语义逐位不变
+        # （回归保护：已落袋的 e2e 主表数据零扰动）。
+        # 语义（与 TASK.md 一致）：
+        #   mid_L = T - sink_tok - swa_tok；near_L = max(bs, α·mid_L)
+        #   nb_near = max(1, round(k1·β))；nb_far = k1 - nb_near
+        #   K2_mid = K2 - sink_tok - swa_tok（sink/swa 正交，不占预算）
+        #   nt_near = min(int(nb_near·bs·γ), K2_mid)；far_budget = K2_mid - nt_near
+        #   e64_partition = α>0 且 β>0（(α,β)=(0,0) 为单池退化点，
+        #   far_method 独占全管线；γ 严格语义无保底）
+        _taskmd_envs = (
+            "SGLANG_TLI_ALPHA", "SGLANG_TLI_BETA", "SGLANG_TLI_GAMMA",
+            "SGLANG_TLI_FAR_METHOD", "SGLANG_TLI_NEAR_METHOD",
+        )
+        self.taskmd: bool = any(k in os.environ for k in _taskmd_envs)
+        self.alpha: float = _env_float("SGLANG_TLI_ALPHA", 0.0)
+        self.beta: float = _env_float("SGLANG_TLI_BETA", 0.0)
+        self.gamma: float = _env_float("SGLANG_TLI_GAMMA", 1.0)
+        # method 默认值 = mavg 冠军口径（far=minmax 粗筛 + near=avg 粗筛）
+        self.far_method: str = os.environ.get("SGLANG_TLI_FAR_METHOD", "minmax")
+        self.near_method: str = os.environ.get("SGLANG_TLI_NEAR_METHOD", "avg")
+        assert self.far_method in ("avg", "minmax"), (
+            f"SGLANG_TLI_FAR_METHOD 须为 avg|minmax，当前 {self.far_method!r}"
+        )
+        assert self.near_method in ("avg", "minmax"), (
+            f"SGLANG_TLI_NEAR_METHOD 须为 avg|minmax，当前 {self.near_method!r}"
+        )
         # ---- #60 D' 升级：prefill 动态测层 → decode 动态跳 far。
         # 离线验证（e60_prefill_dynamic_gate.json，32B 7 任务）：prefill
         # 末段行 per-layer far mass 与 decode far mass corr 0.86-0.99，

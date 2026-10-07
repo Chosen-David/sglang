@@ -193,6 +193,78 @@ class TLIIndexer:
             self.basis = self.basis.to(device)
         return self
 
+    # ------------------------------------------------------------------ #
+    # E112（#149）：TASK.md 口径分区选择（α/β/γ + far/near method 组合）
+    # ------------------------------------------------------------------ #
+
+    def _need_avg_score(self) -> bool:
+        """avg 分数源条件（对齐 two-level tli_indexer._need_avg_score，E109a 修复版）。
+
+        far avg：单池（α=0）与分区（α>0）的 far 池都要用 → 永远需要；
+        near avg：near 池仅在分区（α>0 且 β>0）存在 → 仅分区需要。
+        taskmd 关闭时恒 False（旧 B' 路径零 kavg 维护开销，回归保护）。
+        """
+        p = self.profile
+        if not getattr(p, "taskmd", False):
+            return False
+        return p.far_method == "avg" or (
+            p.near_method == "avg" and p.alpha > 0 and p.beta > 0
+        )
+
+    def _taskmd_regions(self, S: int) -> dict:
+        """TASK.md 区域边界（host 标量版；decode per-request / 对拍用）。
+
+        与 two-level tli_indexer.compute_mask 的边界公式逐项对齐
+        （L779-799 区域 / L836-839 L1 块配额 / L984-1019 L2 mid 预算）：
+        - e64_partition = α>0 且 β>0：mid = S − sink − swa；
+          near_len = max(bs, α·mid)；nb_near = max(1, round(k1·β))；
+          nb_far = k1 − nb_near（严格无保底，topk k=0 安全）
+        - K2_mid = K2 − sink_tok − swa_tok（sink/swa 正交，不占预算）；
+          nt_near = min(int(nb_near·bs·γ), K2_mid)；
+          far_budget = max(0, K2_mid − nt_near)（γ 严格语义，无 64 保底）
+        - 单池（α=0 或 β=0）：far_method 独占全管线，near 区边界量
+          不进单池语义（仅 region 报告用，消费方不读）
+        """
+        p = self.profile
+        bs = p.block_size
+        nblk = (S + bs - 1) // bs
+        sink_tok = p.sink_blocks * bs
+        swa_tok = p.sliding_window
+        e64 = p.alpha > 0 and p.beta > 0
+        if e64:
+            mid_len = max(0, S - sink_tok - swa_tok)
+            near_len_dyn = max(bs, int(p.alpha * mid_len))
+        else:
+            near_len_dyn = swa_tok
+        near_blks = max(p.sink_blocks, (S - near_len_dyn) // bs)
+        far_lo_blk, far_hi_blk = p.sink_blocks, near_blks
+        # near 池上界 = swa 起点（块级）：swa 块完全排除出双池，纯靠输出强制
+        swa_lo_blk = max(near_blks, nblk - max(1, swa_tok // bs))
+        swa_lo_tok = max(0, S - swa_tok)
+        nb_near = nb_far = nt_near = far_budget = K2_mid = 0
+        if e64:
+            nb_near = max(1, int(round(p.k1_blocks * p.beta)))
+            nb_far = max(0, p.k1_blocks - nb_near)
+            K2_mid = max(0, p.token_budget - sink_tok - (S - swa_lo_tok))
+            nt_near = min(int(nb_near * bs * p.gamma), K2_mid)
+            far_budget = max(0, K2_mid - nt_near)
+        return {
+            "e64": e64,
+            "nblk": nblk,
+            "sink_tok": sink_tok,
+            "swa_tok": swa_tok,
+            "near_blks": near_blks,
+            "far_lo_blk": far_lo_blk,
+            "far_hi_blk": far_hi_blk,
+            "swa_lo_blk": swa_lo_blk,
+            "swa_lo_tok": swa_lo_tok,
+            "nb_near": nb_near,
+            "nb_far": nb_far,
+            "nt_near": nt_near,
+            "far_budget": far_budget,
+            "K2_mid": K2_mid,
+        }
+
     # ---- M9：L2 精筛表示（选择 idx2 / PCA 投影，统一出口）----
 
     def _k_refine(self, k: torch.Tensor) -> torch.Tensor:
@@ -215,6 +287,25 @@ class TLIIndexer:
             "...hgd,hdr->...hgr", q.reshape(*q.shape[:-2], Hkv, G, D), self.basis
         )
         return qp.reshape(*q.shape[:-1], r)
+
+    def _pad_refine_full(self, x: torch.Tensor, D: int) -> torch.Tensor:
+        """E112 对拍口径：[..., nd2] → [..., D]（refine 维零填充回全维）。
+
+        two-level 权威实现的 k_qat/b_q_full 是全 D 维张量（refine 外全 0），
+        其 L2 精筛 einsum 沿 128 维归约；直接用 nd2=32 维操作数做 einsum
+        的归约树与之不同（实测 ulp 级 max|Δ|≈2.4e-7，会在 topk 边界翻转
+        近并列 token → 选择集合不一致）。零填充回全维后逐位一致
+        （D4 对拍 0/65536 不等）。eager 路径正确性优先；M8/M10 fused
+        kernel 侧的逐位对齐另行处理（kernel 本身不做维数选择展开）。
+        投影基（basis）路径 nd2=r 为 PCA 投影维而非 D 的子集，本方法
+        仅在 basis is None 时被调用。
+        """
+        assert self.basis is None, "投影路径无全维零填充口径"
+        shape = list(x.shape)
+        shape[-1] = D
+        out = torch.zeros(shape, dtype=x.dtype, device=x.device)
+        out[..., self.idx2] = x
+        return out
 
     # ------------------------------------------------------------------ #
     # 索引维护（prefill 全量 / decode 增量），由 backend 调用
@@ -247,12 +338,17 @@ class TLIIndexer:
         # 128→40B/token-head——S=131K pool 显存硬前提）
         # M9：basis 存在时存 PCA 投影 K@basis 的 4bit（r 维，16+8 B/token-head）
         kq_q, kq_sc, kq_mn = quant4_pack(self._k_refine(k[:S]))  # [S, Hkv, nd2] uint8 + [S, Hkv] ×2
+        # E112：avg method 分数源（块 token 和；pad 零不贡献和）。
+        # 消费端 /bs 即 two-level 的 padded-mean 口径（k_coarse.mean(dim=2)
+        # 分母恒 bs）——存和而非均值是为了增量维护的精确性（尾块累加）。
+        kavg_sum = kc.sum(1) if self._need_avg_score() else None  # [nblk, Hkv, d']
         index = {
             "kmin": kmin,
             "kmax": kmax,
             "kq_q": kq_q,
             "kq_sc": kq_sc,
             "kq_mn": kq_mn,
+            "kavg_sum": kavg_sum,
             "nblk": nblk,
             "S": S,
         }
@@ -307,6 +403,9 @@ class TLIIndexer:
         ks = k_new[..., self.idx1]  # [n, Hkv, d']
         Hkv = ks.shape[1]
         nblk_old = index["nblk"]
+        # E112：kavg_sum 增量维护（taskmd + avg method 时存在；
+        # 全量 build 的尾块和含零 pad 贡献 = 真实 token 和，故增量累加口径一致）
+        _kavg_on = index.get("kavg_sum") is not None
 
         def _append_blocks(ks_seg: torch.Tensor) -> None:
             """把 ks_seg（从全局位置 s0 起）的块界精确 append（无零 pad 污染）。"""
@@ -317,6 +416,8 @@ class TLIIndexer:
                 return
             index["kmin"] = _ensure(index["kmin"], nblk_old + n_add)
             index["kmax"] = _ensure(index["kmax"], nblk_old + n_add)
+            if _kavg_on:
+                index["kavg_sum"] = _ensure(index["kavg_sum"], nblk_old + n_add)
             w = nblk_old
             if nb_full:
                 kc = ks_seg[: nb_full * p.block_size].reshape(
@@ -324,6 +425,8 @@ class TLIIndexer:
                 )
                 index["kmin"][w : w + nb_full] = kc.amin(1)
                 index["kmax"][w : w + nb_full] = kc.amax(1)
+                if _kavg_on:
+                    index["kavg_sum"][w : w + nb_full] = kc.sum(1)
                 w += nb_full
             rem = n - nb_full * p.block_size
             if rem:
@@ -332,6 +435,8 @@ class TLIIndexer:
                 r = ks_seg[nb_full * p.block_size :]
                 index["kmin"][w] = r.amin(0)
                 index["kmax"][w] = r.amax(0)
+                if _kavg_on:
+                    index["kavg_sum"][w] = r.sum(0)
 
         if S_old % p.block_size == 0:
             # 对齐边界：新 token 直接开新块（decode n=1 时恰好一块）
@@ -347,6 +452,10 @@ class TLIIndexer:
             index["kmax"][nblk_old - 1] = torch.maximum(
                 index["kmax"][nblk_old - 1], ks[:take].amax(0)
             )
+            if _kavg_on:
+                index["kavg_sum"][nblk_old - 1] = (
+                    index["kavg_sum"][nblk_old - 1] + ks[:take].sum(0)
+                )
             rest = n_new - take
             if rest > 0:
                 _append_blocks(ks[take:])
@@ -378,6 +487,12 @@ class TLIIndexer:
         use_l2_kernel: True 且 far 区非空时 L2 分区精筛也走 fused kernel
         （单 launch/head，E8-2 原型 1.63×）
         """
+        # E112（#149）：TASK.md 模式（α/β/γ + method 组合）→ 专用路径。
+        # 该模式旁路 L1/L2 fused kernel（avg 分数源 + sink 正交语义超出
+        # kernel 出口径）与旧 B' 分区预算；D' skip_far 未集成（E111 层
+        # gate 合并主树后再接，此处不消费）。
+        if getattr(self.profile, "taskmd", False):
+            return self._select_taskmd(index, q, t)
         p = self.profile
         # #60 D' 动态 gate：decode 侧按 prefill 统计的 per-layer far mass
         # 置 skip_far（e60：prefill→decode corr 0.86-0.99，无静态掩码
@@ -538,6 +653,186 @@ class TLIIndexer:
         return torch.topk(fine, p.token_budget, dim=-1).indices  # [Hkv, K2]
 
     @torch.no_grad()
+    def _select_taskmd(self, index: dict, q: torch.Tensor, t: int) -> torch.Tensor:
+        """E112（#149）：TASK.md α/β/γ 分区 + far/near method 组合（per-request）。
+
+        口径与 two-level tli_indexer.compute_mask（two-level-indexer 分支
+        54d93a4c6，avg/minmax method 组合子集）逐项对齐：
+        - e64_partition = α>0 且 β>0：L1 far/near 双池（far 池分数源 =
+          far_method，near 池分数源 = near_method；near 池上界 swa_lo_blk，
+          swa 块纯靠输出强制）+ L2 mid 预算按 γ 切分（nt_near =
+          nb_near·bs·γ，far_budget = K2_mid − nt_near，严格无保底）
+        - 单池（α=0 或 β=0）：far_method 独占全管线（L1 单池 topk +
+          当前块强制 inf + L2 整行 topk + swa 强制）；sink 走管线竞争
+          （two-level 单池语义，sink 无正交置位）
+        - sink/swa 正交强制区（e64 路径）：不进任何池、不占预算，
+          输出显式拼接（two-level topk_mask[..., :sink]=True; [..., swa:]=True）
+        - 池不足槽位 → 哨兵 S（下游 _sparse_attn_batched 的
+          valid = sel < seq_len 统一屏蔽）
+        - 输出恒宽 token_budget（e64：far_budget+nt_near+sink+swa = K2，
+          decode t = S-1 > dense_threshold 保证 swa 满宽；单池：K2）
+          ——M5 CUDA graph 静态宽前提
+        - M8/M10 fused kernel 旁路：avg 分数源 + sink 正交语义超出
+          kernel 出口径，eager 保正确性（性能优化属后续工作）
+        - GQA 聚合差异（固有，非对齐项）：本实现 L1 avg 分数 = group-sum(q)
+          ·kavg（≡ two-level group-mean 的 G 倍，topk 等价）；L2 精筛 =
+          group-sum(q2)·kq（two-level 为 softmax 后 group-mean——G=1 时
+          softmax 单调变换使 topk 逐位等价，G>1 存在固有聚合口径差异）
+        """
+        p = self.profile
+        S = index["S"]
+        Hkv = index["kmin"].shape[1]
+        H = q.shape[1]
+        G = H // Hkv
+        device = q.device
+        nblk = index["nblk"]
+        bs = p.block_size
+        kmin, kmax = index["kmin"][:nblk], index["kmax"][:nblk]
+        r = self._taskmd_regions(S)
+        e64 = r["e64"]
+        sink_tok, swa_tok = r["sink_tok"], r["swa_tok"]
+        near_blks, far_lo_blk, far_hi_blk = (
+            r["near_blks"], r["far_lo_blk"], r["far_hi_blk"]
+        )
+        swa_lo_blk, swa_lo_tok = r["swa_lo_blk"], r["swa_lo_tok"]
+
+        # ---- L1 分数：minmax 块上界 + 可选 avg 块均值 ----
+        qs = q[..., self.idx1]  # [1, H, d']
+        qg = qs.clamp(min=0).reshape(1, Hkv, G, p.coarse_dim)
+        qn = qs.clamp(max=0).reshape(1, Hkv, G, p.coarse_dim)
+        sc1 = (
+            torch.einsum("bhgd,nhd->bhgn", qg, kmax)
+            + torch.einsum("bhgd,nhd->bhgn", qn, kmin)
+        ).sum(-2)  # [1, Hkv, nblk]
+        blk_end = (torch.arange(nblk, device=device) + 1) * bs - 1
+        causal_blk = blk_end <= t  # [nblk]
+        sc1 = sc1.masked_fill(~causal_blk.view(1, 1, -1), float("-inf"))
+        sc_avg = None
+        if self._need_avg_score():
+            kavg = index["kavg_sum"][:nblk] / bs  # [nblk, Hkv, d']（padded-mean 口径）
+            qa = qs.reshape(1, Hkv, G, p.coarse_dim).sum(2)  # [1, Hkv, d']
+            sc_avg = torch.einsum("ahd,nhd->ahn", qa, kavg)
+            sc_avg = sc_avg.masked_fill(~causal_blk.view(1, 1, -1), float("-inf"))
+
+        if e64:
+            # ---- E64 L1 双池：far/near 独立块配额（严格无保底）----
+            nb_near, nb_far = r["nb_near"], r["nb_far"]
+            # far 池分数源：far_method（avg=块均值 / minmax=块上界）
+            src_far = sc_avg if (p.far_method == "avg" and sc_avg is not None) else sc1
+            sc_far = src_far[..., far_lo_blk:far_hi_blk]
+            i_f = (
+                torch.topk(sc_far, min(nb_far, sc_far.shape[-1]), dim=-1).indices
+                + far_lo_blk
+            )  # [1, Hkv, nb_far']
+            # near 池分数源：near_method；上界 swa_lo_blk（swa 块排除出双池）
+            src_near = (
+                sc1 if (p.near_method == "minmax" or sc_avg is None) else sc_avg
+            )
+            sc_near = src_near[..., near_blks:swa_lo_blk]
+            if sc_near.shape[-1] > 0:
+                i_n = (
+                    torch.topk(
+                        sc_near, min(nb_near, sc_near.shape[-1]), dim=-1
+                    ).indices
+                    + near_blks
+                )  # [1, Hkv, nb_near']
+            else:
+                i_n = i_f[..., :0]  # near 池空（mid 不足一块）→ 不选
+            blk_onehot = torch.zeros(Hkv, nblk, dtype=torch.bool, device=device)
+            blk_onehot.scatter_(
+                1, torch.cat([i_f[0], i_n[0]], dim=-1), True
+            )
+        else:
+            # ---- 单池：far_method 独占全管线（E109a 修复口径）----
+            sc_pool = (
+                sc1 if (p.far_method != "avg" or sc_avg is None) else sc_avg
+            )
+            sc_pool = sc_pool.clone()
+            # TIA 语义：当前块强制（two-level sc_pool[..., -1]=inf 的 t 精确版；
+            # 因果 mask 已打 -inf 的非对齐尾块由此恢复强制）
+            sc_pool[..., t // bs] = float("inf")
+            k1e = min(p.k1_blocks, nblk)
+            i_pool = torch.topk(sc_pool, k1e, dim=-1).indices[0]  # [Hkv, k1e]
+            blk_onehot = torch.zeros(Hkv, nblk, dtype=torch.bool, device=device)
+            blk_onehot.scatter_(1, i_pool, True)
+
+        # ---- L2：4bit 部分维精筛（与旧 eager 路径同 einsum 口径）----
+        nd2 = self.nd2
+        kq = index["kq_q"]
+        q2 = self._q_refine(q).reshape(1, Hkv, G, nd2).sum(2)  # [1, Hkv, nd2]
+        sel_mask = blk_onehot.any(0).repeat_interleave(bs)[:S]
+        cand_pos = torch.nonzero(sel_mask).squeeze(1)
+        kq_h = kq_unpack(
+            kq[cand_pos], index["kq_sc"][cand_pos], index["kq_mn"][cand_pos]
+        )  # [Tc, Hkv, nd2]
+        if self.basis is None:
+            # E112 对拍口径：L2 einsum 零填充回全 D 维（归约树与
+            # two-level 的全维 k_qat 一致 → 分数逐位同；32 维直接归约
+            # 有 ulp 差异会在 topk 边界翻转近并列 token，见 _pad_refine_full）
+            q2f = self._pad_refine_full(q2, q.shape[-1])  # [1, Hkv, D]
+            kq_full = self._pad_refine_full(kq_h, q.shape[-1])  # [Tc, Hkv, D]
+            s2 = torch.einsum("hd,thd->ht", q2f[0], kq_full)  # [Hkv, Tc]
+        else:
+            s2 = torch.einsum("hd,thd->ht", q2[0], kq_h)  # [Hkv, Tc]
+        fine = torch.full((Hkv, S), float("-inf"), device=device)
+        fine[:, cand_pos] = s2
+        fine = fine.masked_fill(
+            torch.arange(S, device=device).view(1, S) > t, float("-inf")
+        )
+        # E112 per-head L1 掩码：two-level 的 score_fine 被本 head 自己的
+        # L1 topk_mask 掩码后才进 softmax/L2 池；blk_onehot.any(0) 的跨
+        # head 并集只是 gather 效率优化——不掩回 per-head 语义时，其它
+        # head 选中的块会带有效分进入本 head 的 L2 池竞争（far 池非空
+        # 且 L1 有绑定的配置集合发散）。单池路径的 swa +inf 强制在其后
+        # 覆盖此掩码（two-level p[..., -swa:]=1.0 同样不受 L1 限制）
+        fine = fine.masked_fill(
+            ~blk_onehot.repeat_interleave(bs, dim=-1)[:, :S], float("-inf")
+        )
+        if e64:
+            # ---- E64 L2：mid 预算按 γ 切分（sink/swa 正交不占预算）----
+            K2_mid, nt_near, far_budget = r["K2_mid"], r["nt_near"], r["far_budget"]
+            far_tok_lo = sink_tok
+            far_tok_hi = min(near_blks * bs, S)
+            k2_far = min(far_budget, far_tok_hi - far_tok_lo, K2_mid)
+            i_f2 = (
+                torch.topk(fine[:, far_tok_lo:far_tok_hi], k2_far, dim=-1).indices
+                + far_tok_lo
+            )  # [Hkv, k2_far]（k2_far=0 时 topk 空，已验证安全）
+            k2_near = max(0, K2_mid - k2_far)
+            near_f = fine[:, far_tok_hi:swa_lo_tok]
+            i_n2 = (
+                torch.topk(near_f, min(k2_near, near_f.shape[-1]), dim=-1).indices
+                + far_tok_hi
+            )  # [Hkv, ≤k2_near]（near 池不足时宽 < k2_near）
+            # 哨兵 pad：i_n2 欠宽槽位 → S（下游 valid 掩码屏蔽；
+            # two-level 同位是 softmax 后 p=0 的垃圾 True 位，注意力权重 0
+            # ≈ 不选，集合语义一致）
+            w_pad = k2_near - i_n2.shape[-1]
+            if w_pad > 0:
+                i_n2 = torch.cat(
+                    [
+                        i_n2,
+                        torch.full(
+                            (Hkv, w_pad), S, dtype=i_n2.dtype, device=device
+                        ),
+                    ],
+                    dim=-1,
+                )
+            # 正交强制区显式拼接（必选不占预算）：sink 头部 + swa 尾部
+            # （decode t = S-1 > dense_threshold 保证 swa 段满宽）
+            sink_pos = torch.arange(sink_tok, device=device).unsqueeze(0).expand(Hkv, -1)
+            swa_pos = (
+                torch.arange(max(0, t - swa_tok + 1), t + 1, device=device)
+                .unsqueeze(0)
+                .expand(Hkv, -1)
+            )
+            return torch.cat([i_f2, i_n2, sink_pos, swa_pos], dim=-1)  # [Hkv, K2]
+        # 单池 L2：swa 强制 + 整行 topk（sink 走管线竞争）
+        forced = torch.arange(max(0, t - swa_tok + 1), t + 1, device=device)
+        fine[:, forced] = float("inf")
+        return torch.topk(fine, min(p.token_budget, S), dim=-1).indices  # [Hkv, K2]
+
+    @torch.no_grad()
     def select_batched(
         self,
         index: dict,
@@ -570,6 +865,13 @@ class TLIIndexer:
         （M7 微基准）：S=10K 时 select 865→~160 ms/层，瓶颈占比从 ~95%
         降到次要项。
         """
+        # E112（#149）：TASK.md 模式（α/β/γ + method 组合）→ 专用路径
+        # （eager，M7 快路径/M10 kernel 旁路——avg 分数源 + sink 正交 +
+        # 双池 L1 语义超出现有出口径）
+        if getattr(self.profile, "taskmd", False):
+            return self._select_batched_taskmd(
+                index, q, t_arr, row_chunk=row_chunk, t_min_hint=t_min_hint
+            )
         p = self.profile
         # #60 修复跨请求锁死 bug（2026-09-27）：动态 gate 语义 = prefill 测层
         # / decode 跳 far。此前 skip_far 由 decode 的 select() 置位后跨请求
@@ -999,6 +1301,309 @@ class TLIIndexer:
         return res_all
 
     @torch.no_grad()
+    def _select_batched_taskmd(
+        self,
+        index: dict,
+        q: torch.Tensor,
+        t_arr: torch.Tensor,
+        row_chunk: int = 64,
+        t_min_hint: int | None = None,
+    ) -> torch.Tensor:
+        """E112（#149）：prefill 批量 TASK.md 分区选择（eager，per-row device 边界）。
+
+        与 _select_taskmd 逐行集合一致（对拍锚：per-row 区域边界 /
+        双池分数源 / γ 预算切分全部按 t_r 独立计算）。M7 快路径与
+        M10 kernel 旁路（avg 分数源 + sink 正交 + 双池 L1 语义超出
+        出口径）。输出 [Nq, Hkv, K2]，池不足槽位 = 0（下游
+        _sparse_extend_one 无哨兵 valid 约定 → 沿 M10 口径转 sink 位 0，
+        softmax 权重近似）；早期行（t < K2）由尾部 #58 uniform grid
+        修复覆盖（与旧路径同兜底）。
+
+        per-row 区域边界（two-level compute_mask 公式的 t_r 化）：
+        - near_len_dyn_r = max(bs, α·mid_len_r)，mid_len_r 按因果长度
+          S_r = t_r+1 计算（two-level 是 t=末端的单 query 版）
+        - near_blks_r = max(sink_blks, (S_r − near_len_dyn_r)//bs)
+        - far 池（L1 块级）：[sink_blks, near_blks_r)；near 池：
+          [near_blks_r, swa_lo_blk_r)（swa_lo_blk_r = 当前块 − 1，
+          swa 块排除出双池）
+        - L2 far 池（token 级）：[sink_tok, min(near_blks_r·bs, S_r))；
+          near 池：[far_hi, swa_lo_tok_r)；swa 强制 [t_r−swa+1, t_r]
+        """
+        p = self.profile
+        S = index["S"]
+        Hkv = index["kmin"].shape[1]
+        Nq, H, D = q.shape
+        G = H // Hkv
+        device = q.device
+        nblk = index["nblk"]
+        bs = p.block_size
+        kmin, kmax = index["kmin"][:nblk], index["kmax"][:nblk]
+        kavg = (
+            index["kavg_sum"][:nblk] / bs if self._need_avg_score() else None
+        )
+        kq = index["kq_q"]
+        nd2 = self.nd2
+        t_arr = t_arr.to(device)
+        pos = torch.arange(S, device=device)
+        blk_id = torch.arange(nblk, device=device)
+        sink_tok = p.sink_blocks * bs
+        swa_tok = p.sliding_window
+        swa_blks = max(1, swa_tok // bs)
+        e64 = p.alpha > 0 and p.beta > 0
+        # 静态配额（host 常量；S 满额口径——sparse 行 S > dense_threshold
+        # 保证 swa/sink 段满额，输出恒宽 token_budget）
+        nb_near = nb_far = 0
+        K2_mid_cap = nt_near_cap = far_budget_cap = 0
+        if e64:
+            nb_near = max(1, int(round(p.k1_blocks * p.beta)))
+            nb_far = max(0, p.k1_blocks - nb_near)
+            K2_mid_cap = max(0, p.token_budget - sink_tok - swa_tok)
+            nt_near_cap = min(int(nb_near * bs * p.gamma), K2_mid_cap)
+            far_budget_cap = max(0, K2_mid_cap - nt_near_cap)
+        # 共享反量化表（全宽 einsum fine 矩阵；与 M7 fast path 同口径）
+        kq_f = kq_unpack(kq[:S], index["kq_sc"][:S], index["kq_mn"][:S])
+        out = []
+        for r0 in range(0, Nq, row_chunk):
+            r1 = min(r0 + row_chunk, Nq)
+            q_c = q[r0:r1]
+            t_c = t_arr[r0:r1]
+            n = r1 - r0
+            S_r = t_c + 1  # [n] per-row 因果长度
+            # ---- L1 分数：minmax + 可选 avg ----
+            qs = q_c[..., self.idx1]  # [n, H, d']
+            qg = qs.clamp(min=0).reshape(n, Hkv, G, p.coarse_dim)
+            qn = qs.clamp(max=0).reshape(n, Hkv, G, p.coarse_dim)
+            sc1 = torch.einsum("ahgd,mhd->ahm", qg, kmax) + torch.einsum(
+                "ahgd,mhd->ahm", qn, kmin
+            )  # [n, Hkv, nblk]
+            blk_end = (torch.arange(nblk, device=device) + 1) * bs - 1
+            causal_blk = blk_end.view(1, -1) <= t_c.view(-1, 1)  # [n, nblk]
+            sc1 = sc1.masked_fill(~causal_blk.unsqueeze(1), float("-inf"))
+            sc_avg = None
+            if kavg is not None:
+                qa = qs.reshape(n, Hkv, G, p.coarse_dim).sum(2)  # [n, Hkv, d']
+                sc_avg = torch.einsum("ahd,mhd->ahm", qa, kavg)
+                sc_avg = sc_avg.masked_fill(
+                    ~causal_blk.unsqueeze(1), float("-inf")
+                )
+
+            if e64:
+                # ---- per-row 区域边界（device）----
+                mid_len_r = (S_r - sink_tok - swa_tok).clamp(min=0)
+                near_len_dyn_r = torch.maximum(
+                    torch.full_like(S_r, bs),
+                    (p.alpha * mid_len_r.float()).long(),
+                )
+                near_blks_r = torch.maximum(
+                    torch.full_like(S_r, p.sink_blocks),
+                    (S_r - near_len_dyn_r) // bs,
+                )
+                swa_lo_blk_r = torch.maximum(
+                    near_blks_r, t_c // bs - swa_blks + 1
+                )
+                in_far_blk = (blk_id.view(1, -1) >= p.sink_blocks) & (
+                    blk_id.view(1, -1) < near_blks_r.view(-1, 1)
+                ) & causal_blk  # [n, nblk]
+                in_near_blk = (blk_id.view(1, -1) >= near_blks_r.view(-1, 1)) & (
+                    blk_id.view(1, -1) < swa_lo_blk_r.view(-1, 1)
+                ) & causal_blk
+                # far 池 topk（静态宽 nb_far；池不足/非 far 位 -inf → keep 剔除）
+                src_far = (
+                    sc_avg if (p.far_method == "avg" and sc_avg is not None) else sc1
+                )
+                sc_far = src_far.masked_fill(
+                    ~in_far_blk.unsqueeze(1), float("-inf")
+                )
+                i_f = torch.topk(sc_far, min(nb_far, nblk), dim=-1).indices
+                keep_f = (
+                    torch.gather(sc_far, 2, i_f) > float("-inf")
+                )  # [n, Hkv, nb_far]
+                # near 池 topk
+                src_near = (
+                    sc1
+                    if (p.near_method == "minmax" or sc_avg is None)
+                    else sc_avg
+                )
+                sc_near = src_near.masked_fill(
+                    ~in_near_blk.unsqueeze(1), float("-inf")
+                )
+                i_n = torch.topk(sc_near, min(nb_near, nblk), dim=-1).indices
+                keep_n = torch.gather(sc_near, 2, i_n) > float("-inf")
+                # E112 per-head L1 池（two-level topk_mask 的 per-head 语义；
+                # 并集 onehot 仅作全宽 einsum 的效率口径，fine 掩码用 per-head）。
+                # far/near 须分别 scatter 到独立零张量再 OR：topk 池不足时的
+                # 欠宽槽位指向 -inf 并列位（tie-break 无保证、索引任意），
+                # 第二个 scatter 的 False 会把第一个 scatter 已置 True 的
+                # 块覆写回 False（mavg_faract 实测每 head 丢 ~16 个 far 块
+                # → fine 有限位少 8192 → far 池 topk 集合发散）。
+                # 分池写再 OR 恒安全：False 落在零张量是无操作。
+                oh_f = torch.zeros(n, Hkv, nblk, dtype=torch.bool, device=device)
+                oh_f.scatter_(2, i_f, keep_f)
+                oh_n = torch.zeros(n, Hkv, nblk, dtype=torch.bool, device=device)
+                oh_n.scatter_(2, i_n, keep_n)
+                onehot_h = oh_f | oh_n
+                onehot = onehot_h.any(1)  # [n, nblk] 候选并集
+            else:
+                # ---- 单池：far_method 独占 + 当前块 per-row 强制 inf ----
+                sc_pool = (
+                    sc1 if (p.far_method != "avg" or sc_avg is None) else sc_avg
+                )
+                sc_pool = sc_pool.clone()
+                cur_blk_r = (t_c // bs).view(n, 1, 1)
+                sc_pool.scatter_(
+                    -1,
+                    cur_blk_r.expand(n, Hkv, 1),
+                    torch.full(
+                        (n, Hkv, 1),
+                        float("inf"),
+                        dtype=sc_pool.dtype,
+                        device=device,
+                    ),
+                )
+                k1e = min(p.k1_blocks, nblk)
+                i_pool = torch.topk(sc_pool, k1e, dim=-1).indices
+                keep_p = torch.gather(sc_pool, 2, i_pool) > float("-inf")
+                # E112 per-head L1 池（同 e64 分支；swa 块由 L2 +inf 强制
+                # 覆盖 per-head 掩码，无须入池）
+                onehot_h = torch.zeros(
+                    n, Hkv, nblk, dtype=torch.bool, device=device
+                )
+                onehot_h.scatter_(2, i_pool, keep_p)
+                onehot = onehot_h.any(1)  # [n, nblk] 候选并集
+
+            # ---- L2：全宽 einsum fine 矩阵（候选并集语义 → per-head 掩码）----
+            q2 = self._q_refine(q_c).reshape(n, Hkv, G, nd2).sum(2)
+            if self.basis is None:
+                # E112 对拍口径：零填充回全 D 维 + 逐行 "hd,thd->ht" 形式
+                # （与 two-level / per-request 归约树逐位一致——批量形式
+                # "ahd,shd->ahs" 的 einsum 降维顺序有 ulp 差异，会在 topk
+                # 边界翻转近并列 token；见 _pad_refine_full）
+                q2f = self._pad_refine_full(q2, D)  # [n, Hkv, D]
+                kq_ff = self._pad_refine_full(kq_f, D)  # [S, Hkv, D]
+                fine = torch.stack(
+                    [
+                        torch.einsum("hd,thd->ht", q2f[a], kq_ff)
+                        for a in range(n)
+                    ]
+                )  # [n, Hkv, S]
+            else:
+                fine = torch.einsum("ahd,shd->ahs", q2, kq_f)  # [n, Hkv, S]
+            causal_full = pos.view(1, S) <= t_c.view(-1, 1)
+            # E112 per-head L1 掩码（two-level per-head topk_mask 语义；
+            # 全宽 einsum + 并集只是效率口径）。单池路径的 swa +inf
+            # scatter 在其后覆盖此掩码（two-level p[..., -swa:]=1.0 同款）
+            blk_mask_h = onehot_h.repeat_interleave(bs, dim=-1)[
+                :, :, :S
+            ]  # [n, Hkv, S]
+            fine = fine.masked_fill(
+                ~(blk_mask_h & causal_full.unsqueeze(1)), float("-inf")
+            )
+
+            if e64:
+                # ---- L2 双池：γ 预算切分（静态宽 + rank 掩码，M5 模式）----
+                far_hi_t = torch.minimum(near_blks_r * bs, S_r)  # [n]
+                swa_lo_t = (t_c + 1 - swa_tok).clamp(min=0)  # [n]
+                swa_w_r = torch.minimum(
+                    torch.full_like(S_r, swa_tok), S_r
+                )  # swa 段宽（早行 < swa_tok；#58 修复覆盖）
+                K2_mid_r = (
+                    p.token_budget - sink_tok - swa_w_r
+                ).clamp(min=0)
+                nt_near_r = torch.minimum(
+                    torch.full_like(K2_mid_r, nt_near_cap), K2_mid_r
+                )
+                far_budget_r = (K2_mid_r - nt_near_r).clamp(min=0)
+                span_r = (far_hi_t - sink_tok).clamp(min=0)
+                k2_far_r = torch.minimum(
+                    torch.minimum(far_budget_r, span_r), K2_mid_r
+                )
+                # far 池 topk（静态宽 far_budget_cap；fine 全宽矩阵 → 索引即位置）
+                in_far_tok = (pos.view(1, S) >= sink_tok) & (
+                    pos.view(1, S) < far_hi_t.view(-1, 1)
+                )  # [n, S]
+                far_f = fine.masked_fill(
+                    ~in_far_tok.unsqueeze(1), float("-inf")
+                )
+                i_f2 = torch.topk(far_f, far_budget_cap, dim=-1).indices
+                sc_f2 = torch.gather(far_f, 2, i_f2)
+                rank_f2 = (
+                    torch.arange(far_budget_cap, device=device)
+                    .view(1, 1, -1)
+                    < k2_far_r.view(-1, 1, 1)
+                )
+                keep_f2 = (sc_f2 > float("-inf")) & rank_f2
+                sel_f2 = torch.where(~keep_f2, torch.zeros_like(i_f2), i_f2)
+                # near 池 topk（静态宽 nt_near_cap）
+                in_near_tok = (pos.view(1, S) >= far_hi_t.view(-1, 1)) & (
+                    pos.view(1, S) < swa_lo_t.view(-1, 1)
+                )
+                near_f = fine.masked_fill(
+                    ~in_near_tok.unsqueeze(1), float("-inf")
+                )
+                i_n2 = torch.topk(near_f, nt_near_cap, dim=-1).indices
+                sc_n2 = torch.gather(near_f, 2, i_n2)
+                k2_near_r = (K2_mid_r - k2_far_r).clamp(min=0)
+                rank_n2 = (
+                    torch.arange(nt_near_cap, device=device)
+                    .view(1, 1, -1)
+                    < k2_near_r.view(-1, 1, 1)
+                )
+                keep_n2 = (sc_n2 > float("-inf")) & rank_n2
+                sel_n2 = torch.where(~keep_n2, torch.zeros_like(i_n2), i_n2)
+                # 正交强制区：sink 头部（宽 sink_tok）+ swa 尾部（宽 swa_tok，
+                # 早行 t_r < swa-1 的越界槽位沿 M10 口径转 0）
+                sink_pos = torch.arange(sink_tok, device=device).view(1, -1)
+                sink_pad = (
+                    torch.arange(sink_tok, device=device).view(1, -1)
+                    >= S_r.view(-1, 1)
+                )
+                sink_out = torch.where(
+                    sink_pad, torch.zeros_like(sink_pos), sink_pos
+                ).unsqueeze(1).expand(n, Hkv, -1)
+                f_pos = swa_lo_t.view(-1, 1) + torch.arange(
+                    swa_tok, device=device
+                ).view(1, -1)
+                F_t = (t_c + 1 - swa_lo_t).clamp(min=0)  # [n] 实际 swa 段宽
+                f_pad = (
+                    torch.arange(swa_tok, device=device).view(1, -1)
+                    >= F_t.view(-1, 1)
+                )
+                forced_out = torch.where(
+                    f_pad, torch.zeros_like(f_pos), f_pos
+                ).unsqueeze(1).expand(n, Hkv, -1)
+                res = torch.cat(
+                    [sel_f2, sel_n2, sink_out, forced_out], dim=-1
+                )  # [n, Hkv, K2] 静态宽
+            else:
+                # ---- 单池 L2：swa 强制 + 整行 topk ----
+                sw_off = torch.arange(swa_tok, device=device)
+                f_sw = (t_c.view(-1, 1) - sw_off).clamp(min=0)  # [n, swa]
+                fine.scatter_(
+                    2, f_sw.unsqueeze(1).expand(n, Hkv, -1), float("inf")
+                )
+                res = torch.topk(
+                    fine, min(p.token_budget, S), dim=-1
+                ).indices  # [n, Hkv, K2]
+            out.append(res)
+        res_all = torch.cat(out, dim=0)  # [Nq, Hkv, K2]
+        # #58 行级因果修复（早期行 t < K2 → uniform grid，dense 等价）：
+        # 沿用 select_batched 尾部既有兜底（口径一致）
+        early = t_arr < res_all.shape[-1]
+        if bool(early.any()):
+            K2 = res_all.shape[-1]
+            Hkv2 = res_all.shape[1]
+            e_idx = early.nonzero().squeeze(-1)
+            L = t_arr[e_idx] + 1
+            reps = (K2 // L).clamp(min=1)
+            cut = (reps * L).view(-1, 1)
+            j = torch.arange(K2, device=res_all.device).view(1, -1)
+            grid = torch.where(
+                j < cut, j // reps.view(-1, 1), j - cut
+            )
+            res_all[e_idx] = grid.unsqueeze(1).expand(-1, Hkv2, K2)
+        return res_all
+
+    @torch.no_grad()
     def update_pool_rows_decode(
         self,
         pool_l: dict,
@@ -1075,6 +1680,17 @@ class TLIIndexer:
         mx_val = torch.where(aligned.view(n, 1, 1), ks, torch.maximum(old_mx, ks))
         pool_l["kmin"].reshape(-1)[off_mf] = mn_val.reshape(-1)
         pool_l["kmax"].reshape(-1)[off_mf] = mx_val.reshape(-1)
+        # E112：kavg_sum 批量增量（taskmd + avg method 时 pool 带 kavg_sum，
+        # 形状 [R, NBLK_CAP, Hkv, d1] 与 kmin 同构 → 复用 off_mf flat 索引；
+        # 对齐行开新块（和 = 新 token），非对齐行尾块累加）
+        if "kavg_sum" in pool_l:
+            old_sum = (
+                pool_l["kavg_sum"].reshape(-1)[off_mf].view(n, Hkv, d1)
+            )
+            sum_val = torch.where(
+                aligned.view(n, 1, 1), ks, old_sum + ks
+            )
+            pool_l["kavg_sum"].reshape(-1)[off_mf] = sum_val.reshape(-1)
 
     @torch.no_grad()
     def select_decode_batched(
@@ -1121,6 +1737,12 @@ class TLIIndexer:
         静态宽度比动态宽度多 ~25-40% 的 -inf/哨兵 lane（softmax 前屏蔽），
         换取形状与 S 值无关。
         """
+        # E112（#149）：TASK.md 模式（α/β/γ + method 组合）→ 专用路径
+        # （eager，M8 KernelD/KernelC/compact/topk kernel 全旁路——avg
+        # 分数源 + sink 正交 + 双池 L1 语义超出现有出口径；静态宽推导
+        # 沿用 M5 模式保证 CUDA graph 可录制）
+        if getattr(self.profile, "taskmd", False):
+            return self._select_decode_taskmd(pool_l, rows, S_list, q)
         p = self.profile
         device = q.device
         n = q.shape[0]
@@ -1424,6 +2046,353 @@ class TLIIndexer:
             forced = torch.where(f_pad, torch.full_like(f_pos, SENT), f_pos)
             parts.append(forced.unsqueeze(1).expand(n, Hkv, W_forced))
         return torch.cat(parts, dim=-1)  # [n, Hkv, W_far+W_near+W_forced] 静态宽度
+
+    @torch.no_grad()
+    def _select_decode_taskmd(
+        self,
+        pool_l: dict,
+        rows: torch.Tensor,
+        S_list,
+        q: torch.Tensor,
+        row_chunk_bytes: int = 256 << 20,
+    ) -> torch.Tensor:
+        """E112（#149）：decode 批量 TASK.md 分区选择（eager + M5 静态宽度）。
+
+        与 _select_taskmd 逐行集合一致（对拍锚）。结构沿用
+        select_decode_batched 的 M5 模式：
+        - per-row 区域边界（near_blks_t / swa_lo_blk_t / far_hi_t /
+          swa_lo_t / k2_far_t / k2n_t）全部 device 张量运算
+        - topk / 输出宽度 = 静态上界（W_far = far_budget_cap、
+          W_near = nt_near_cap、W_sink / W_forced 恒定），per-row 配额
+          裁剪由 rank 掩码完成——CUDA graph 可录制
+        - 输出 [n, Hkv, K2] 恒宽 = far_budget + nt_near + sink + swa
+          = token_budget（decode t = S-1 > dense_threshold 保证满额）；
+          池不足/越界槽位 = 哨兵 S_cap（下游 _sparse_attn_batched 的
+          valid = sel < seq_len 统一屏蔽）
+        - M8 全部 fused kernel 旁路（avg 分数源需 kavg_sum 读 pool +
+          双池 L1 分数源选择，超出现有 kernel 出口径）
+        """
+        p = self.profile
+        device = q.device
+        n = q.shape[0]
+        kq_pool, kq_sc_pool, kq_mn_pool = (
+            pool_l["kq_q"], pool_l["kq_sc"], pool_l["kq_mn"]
+        )
+        kmin_pool, kmax_pool = pool_l["kmin"], pool_l["kmax"]
+        kavg_pool = pool_l.get("kavg_sum")  # taskmd+avg 时存在（backend 建池）
+        Hkv = kmin_pool.shape[2]
+        H = q.shape[1]
+        G = H // Hkv
+        S_cap = kq_pool.shape[1]
+        NBLK_CAP = kmin_pool.shape[1]
+        bs = p.block_size
+        nd2 = self.nd2
+        d1 = p.coarse_dim
+        if torch.is_tensor(S_list):
+            S_t = S_list.to(torch.long)
+        else:
+            S_t = torch.tensor(S_list, device=device, dtype=torch.long)
+        t_t = S_t - 1
+        nblk_t = (S_t + bs - 1) // bs
+        K1 = min(p.k1_blocks, NBLK_CAP)
+        sink_tok = p.sink_blocks * bs
+        swa_tok = p.sliding_window
+        swa_blks = max(1, swa_tok // bs)
+        e64 = p.alpha > 0 and p.beta > 0
+
+        rows_l = rows.to(torch.long)
+        blk_id = torch.arange(NBLK_CAP, device=device)
+        blk_end = (blk_id + 1) * bs - 1
+        valid_blk = (blk_id.view(1, -1) < nblk_t.view(-1, 1)) & (
+            blk_end.view(1, -1) <= t_t.view(-1, 1)
+        )  # [n, NBLK_CAP]
+
+        # ---- L1 分数（eager einsum：minmax 上界 + 可选 avg 块均值）----
+        kmin_b = kmin_pool[rows]  # [n, NBLK_CAP, Hkv, d']（容量行垃圾靠掩码）
+        kmax_b = kmax_pool[rows]
+        qs = q[..., self.idx1]  # [n, H, d']
+        qg = qs.clamp(min=0).reshape(n, Hkv, G, d1)
+        qn = qs.clamp(max=0).reshape(n, Hkv, G, d1)
+        sc1 = torch.einsum("ahgd,amhd->ahm", qg, kmax_b) + torch.einsum(
+            "ahgd,amhd->ahm", qn, kmin_b
+        )  # [n, Hkv, NBLK_CAP]
+        sc1 = sc1.masked_fill(~valid_blk.unsqueeze(1), float("-inf"))
+        sc_avg = None
+        if kavg_pool is not None:
+            kavg_b = kavg_pool[rows] / bs  # [n, NBLK_CAP, Hkv, d']
+            qa = qs.reshape(n, Hkv, G, d1).sum(2)  # [n, Hkv, d']
+            sc_avg = torch.einsum("ahd,amhd->ahm", qa, kavg_b)
+            sc_avg = sc_avg.masked_fill(
+                ~valid_blk.unsqueeze(1), float("-inf")
+            )
+
+        if e64:
+            # ---- per-row 区域边界（device）----
+            mid_len_t = (S_t - sink_tok - swa_tok).clamp(min=0)
+            near_len_dyn_t = torch.maximum(
+                torch.full_like(S_t, bs),
+                (p.alpha * mid_len_t.float()).long(),
+            )
+            near_blks_t = torch.maximum(
+                torch.full_like(S_t, p.sink_blocks),
+                (S_t - near_len_dyn_t) // bs,
+            )
+            swa_lo_blk_t = torch.maximum(
+                near_blks_t, t_t // bs - swa_blks + 1
+            )
+            in_far_blk = (blk_id.view(1, -1) >= p.sink_blocks) & (
+                blk_id.view(1, -1) < near_blks_t.view(-1, 1)
+            ) & valid_blk
+            in_near_blk = (blk_id.view(1, -1) >= near_blks_t.view(-1, 1)) & (
+                blk_id.view(1, -1) < swa_lo_blk_t.view(-1, 1)
+            ) & valid_blk
+            nb_near = max(1, int(round(K1 * p.beta)))
+            nb_far = max(0, K1 - nb_near)
+            # far 池
+            src_far = (
+                sc_avg if (p.far_method == "avg" and sc_avg is not None) else sc1
+            )
+            sc_far = src_far.masked_fill(
+                ~in_far_blk.unsqueeze(1), float("-inf")
+            )
+            i_f = torch.topk(sc_far, min(nb_far, NBLK_CAP), dim=-1).indices
+            keep_f = torch.gather(sc_far, 2, i_f) > float("-inf")
+            # near 池
+            src_near = (
+                sc1
+                if (p.near_method == "minmax" or sc_avg is None)
+                else sc_avg
+            )
+            sc_near = src_near.masked_fill(
+                ~in_near_blk.unsqueeze(1), float("-inf")
+            )
+            i_n = torch.topk(sc_near, min(nb_near, NBLK_CAP), dim=-1).indices
+            keep_n = torch.gather(sc_near, 2, i_n) > float("-inf")
+            # E112 per-head L1 池（two-level topk_mask 的 per-head 语义；
+            # 并集 onehot 仅作候选压实的效率口径，s2 打分后掩回 per-head）。
+            # far/near 分池 scatter 再 OR（同 _select_batched_taskmd：第二个
+            # scatter 的 -inf 并列槽位 False 会覆写掉第一个 scatter 的 True）
+            oh_f = torch.zeros(n, Hkv, NBLK_CAP, dtype=torch.bool, device=device)
+            oh_f.scatter_(2, i_f, keep_f)
+            oh_n = torch.zeros(n, Hkv, NBLK_CAP, dtype=torch.bool, device=device)
+            oh_n.scatter_(2, i_n, keep_n)
+            onehot_h = oh_f | oh_n
+            onehot = onehot_h.any(1)  # [n, NBLK_CAP] 候选并集
+        else:
+            # ---- 单池：far_method 独占 + 当前块 per-row 强制 inf ----
+            sc_pool = (
+                sc1 if (p.far_method != "avg" or sc_avg is None) else sc_avg
+            )
+            sc_pool = sc_pool.clone()
+            cur_blk_t = (t_t // bs).view(n, 1, 1)
+            sc_pool.scatter_(
+                -1,
+                cur_blk_t.expand(n, Hkv, 1),
+                torch.full(
+                    (n, Hkv, 1),
+                    float("inf"),
+                    dtype=sc_pool.dtype,
+                    device=device,
+                ),
+            )
+            i_pool = torch.topk(sc_pool, K1, dim=-1).indices
+            keep_p = torch.gather(sc_pool, 2, i_pool) > float("-inf")
+            # E112 per-head L1 池（同 e64 分支；swa 块不入 per-head 池——
+            # L2 的 swa +inf 强制覆盖 per-head 掩码，two-level p[...,-swa:]
+            # =1.0 同样不受 L1 限制）
+            onehot_h = torch.zeros(
+                n, Hkv, NBLK_CAP, dtype=torch.bool, device=device
+            )
+            onehot_h.scatter_(2, i_pool, keep_p)
+            onehot = onehot_h.any(1)  # [n, NBLK_CAP] 候选并集
+            # swa 块并入候选并集（two-level 单池语义：swa token 由 L2
+            # +inf 强制必选，但其块须先入候选——S > K1·bs 时 swa 前块
+            # 可能不入 topk，swa token 会整个丢失。e64 路径 swa 由
+            # forced_out 按位置直接拼接，不受此约束；per-request 路径
+            # 同理由全宽 fine 矩阵 + forced=inf 兜住）
+            swa_lo_blk_row = ((t_t + 1 - swa_tok).clamp(min=0) // bs).view(
+                n, 1
+            )
+            in_swa_blk = (blk_id.view(1, -1) >= swa_lo_blk_row) & (
+                blk_id.view(1, -1) <= cur_blk_t.view(n, 1)
+            )
+            onehot |= in_swa_blk
+
+        # ---- 候选压实（topk-min，与既有 eager 慢路径同口径）----
+        Tc = min((K1 * Hkv + p.sliding_blocks) * bs, NBLK_CAP * bs, S_cap)
+        sel_mask = onehot.repeat_interleave(bs, dim=1)[:, :S_cap]  # [n, S_cap]
+        pos_cap = torch.arange(S_cap, device=device)
+        cand = sel_mask & (pos_cap.view(1, S_cap) < S_t.view(-1, 1))
+        seq_m = torch.where(
+            cand, pos_cap.view(1, S_cap), torch.full_like(pos_cap, S_cap)
+        )
+        tok = torch.topk(seq_m, Tc, dim=-1, largest=False).values  # [n, Tc]
+        tok_c = tok.clamp(max=S_cap - 1)
+
+        # ---- L2 精筛打分（eager flat gather：M8 fused kernel 旁路）----
+        q2 = self._q_refine(q).reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
+        # E112 对拍口径：零填充回全 D 维（归约树与 two-level / per-request
+        # / prefill 批量一致，见 _pad_refine_full；chunk 循环内按 chunk 物化）
+        q2_use = (
+            self._pad_refine_full(q2, q.shape[-1]) if self.basis is None else q2
+        )
+        D_eff = q2_use.shape[-1]
+        s2 = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=device)
+        d_off = torch.arange(nd2, device=device)
+        h_off = torch.arange(Hkv, device=device).view(1, Hkv, 1) * nd2
+        h_off_s = torch.arange(Hkv, device=device)
+        chunk = max(1, row_chunk_bytes // max(Tc * Hkv * nd2 * 4, 1))
+        for rr0 in range(0, n, chunk):
+            rr1 = min(rr0 + chunk, n)
+            m = rr1 - rr0
+            flat = (
+                rows_l[rr0:rr1].view(m, 1, 1, 1) * (S_cap * Hkv * nd2)
+                + tok_c[rr0:rr1].view(m, Tc, 1, 1) * (Hkv * nd2)
+                + h_off.view(1, Hkv, 1)
+                + d_off.view(1, 1, nd2)
+            )
+            flat_s = (
+                rows_l[rr0:rr1].view(m, 1, 1) * (S_cap * Hkv)
+                + tok_c[rr0:rr1].view(m, Tc, 1) * Hkv
+                + h_off_s.view(1, 1, Hkv)
+            )
+            grid_c = (
+                kq_pool.reshape(-1)[flat.view(-1)].view(m, Tc, Hkv, nd2)
+            )
+            sc_c = kq_sc_pool.reshape(-1)[flat_s.view(-1)].view(m, Tc, Hkv)
+            mn_c = kq_mn_pool.reshape(-1)[flat_s.view(-1)].view(m, Tc, Hkv)
+            kq_c = grid_c.float() * sc_c.unsqueeze(-1) + mn_c.unsqueeze(-1)
+            if self.basis is None:
+                # E112 对拍口径：零填充回全 D 维 + 逐行 "hd,thd->ht" 形式
+                # （与 two-level / per-request 归约树逐位一致——批量形式
+                # "ahd,athd->aht" 有 ulp 差异，见 _pad_refine_full）
+                kq_c = self._pad_refine_full(kq_c, D_eff)
+                for j in range(m):
+                    s2[rr0 + j] = torch.einsum(
+                        "hd,thd->ht", q2_use[rr0 + j], kq_c[j]
+                    )
+            else:
+                s2[rr0:rr1] = torch.einsum(
+                    "ahd,athd->aht", q2_use[rr0:rr1], kq_c
+                )
+        # E112 per-head L1 掩码：s2 恢复 per-head topk_mask 语义（并集
+        # 候选仅 gather 效率口径）；单池路径的 swa +inf 强制在其后覆盖
+        # 此掩码（two-level p[..., -swa:]=1.0 同样不受 L1 限制）
+        blk_c = tok_c // bs  # [n, Tc]（垃圾槽位 clamp 后指向尾块，由
+        # 后续 valid/pool 掩码统一屏蔽）
+        in_pool_h = onehot_h.gather(
+            2, blk_c.unsqueeze(1).expand(n, Hkv, Tc)
+        )  # [n, Hkv, Tc]
+        s2 = s2.masked_fill(~in_pool_h, float("-inf"))
+
+        SENT = S_cap
+        causal = tok <= t_t.view(-1, 1)
+        valid = tok < S_cap
+        # swa 起点（per-row）：e64 的 near 池上界与单池的 +inf 强制共用
+        swa_lo_t = (t_t + 1 - swa_tok).clamp(min=0)  # [n]
+
+        if e64:
+            # ---- L2 双池：γ 预算切分（静态宽 + rank 掩码 + 哨兵）----
+            far_hi_t = torch.minimum(near_blks_t * bs, S_t)  # [n]
+            swa_w_t = torch.minimum(
+                torch.full_like(S_t, swa_tok), S_t
+            )  # decode S > dense_threshold 恒满额（防御短行）
+            K2_mid_t = (p.token_budget - sink_tok - swa_w_t).clamp(min=0)
+            K2_mid_cap = max(0, p.token_budget - sink_tok - swa_tok)
+            nt_near_cap = min(int(nb_near * bs * p.gamma), K2_mid_cap)
+            far_budget_cap = max(0, K2_mid_cap - nt_near_cap)
+            nt_near_t = torch.minimum(
+                torch.full_like(K2_mid_t, nt_near_cap), K2_mid_t
+            )
+            far_budget_t = (K2_mid_t - nt_near_t).clamp(min=0)
+            span_t = (far_hi_t - sink_tok).clamp(min=0)
+            k2_far_t = torch.minimum(
+                torch.minimum(far_budget_t, span_t), K2_mid_t
+            )
+            in_far = (tok >= sink_tok) & (
+                tok < far_hi_t.view(-1, 1)
+            ) & valid & causal  # [n, Tc]
+            in_near = valid & causal & ~in_far & (
+                tok < swa_lo_t.view(-1, 1)
+            )
+            far_sc = s2.masked_fill(~in_far.unsqueeze(1), float("-inf"))
+            near_sc = s2.masked_fill(~in_near.unsqueeze(1), float("-inf"))
+            tok_e = tok_c.unsqueeze(1).expand(n, Hkv, Tc)
+            W_far = min(far_budget_cap, Tc)
+            W_near = min(nt_near_cap, Tc)
+            parts = []
+            if W_far > 0:
+                i_f2 = torch.topk(far_sc, W_far, dim=-1).indices
+                sc_f2 = torch.gather(far_sc, 2, i_f2)
+                rank_f2 = (
+                    torch.arange(W_far, device=device).view(1, 1, -1)
+                    < k2_far_t.view(-1, 1, 1)
+                )
+                keep_f2 = (sc_f2 > float("-inf")) & rank_f2
+                sel_f2 = torch.gather(tok_e, 2, i_f2)
+                parts.append(
+                    torch.where(
+                        ~keep_f2, torch.full_like(sel_f2, SENT), sel_f2
+                    )
+                )
+            if W_near > 0:
+                i_n2 = torch.topk(near_sc, W_near, dim=-1).indices
+                sc_n2 = torch.gather(near_sc, 2, i_n2)
+                k2_near_t = (K2_mid_t - k2_far_t).clamp(min=0)
+                rank_n2 = (
+                    torch.arange(W_near, device=device).view(1, 1, -1)
+                    < k2_near_t.view(-1, 1, 1)
+                )
+                keep_n2 = (sc_n2 > float("-inf")) & rank_n2
+                sel_n2 = torch.gather(tok_e, 2, i_n2)
+                parts.append(
+                    torch.where(
+                        ~keep_n2, torch.full_like(sel_n2, SENT), sel_n2
+                    )
+                )
+            # 正交强制区：sink 头部（静态宽 sink_tok；pad 行/短行越界槽位
+            # → 哨兵，softmax 前屏蔽——pad 行 forced 恒含位置 0 保无 NaN）
+            sink_pos = torch.arange(sink_tok, device=device).view(1, -1)
+            sink_pad = (
+                torch.arange(sink_tok, device=device).view(1, -1)
+                >= S_t.view(-1, 1)
+            )
+            sink_out = (
+                torch.where(sink_pad, torch.full_like(sink_pos, SENT), sink_pos)
+                .unsqueeze(1)
+                .expand(n, Hkv, -1)
+            )
+            parts.append(sink_out)
+            # swa 尾部（静态宽 swa_tok，M10 forced 段同款）
+            W_forced = min(swa_tok, Tc)
+            f_pos = swa_lo_t.view(-1, 1) + torch.arange(
+                W_forced, device=device
+            )
+            F_t = (t_t + 1 - swa_lo_t).clamp(min=0)
+            f_pad = (
+                torch.arange(W_forced, device=device).view(1, -1)
+                >= F_t.view(-1, 1)
+            )
+            forced_out = (
+                torch.where(f_pad, torch.full_like(f_pos, SENT), f_pos)
+                .unsqueeze(1)
+                .expand(n, Hkv, -1)
+            )
+            parts.append(forced_out)
+            return torch.cat(parts, dim=-1)  # [n, Hkv, K2] 静态宽
+
+        # ---- 单池：整行 topk + swa +inf（two-level 单池语义）----
+        sc = s2.masked_fill(~(valid & causal).unsqueeze(1), float("-inf"))
+        sc = sc.masked_fill(
+            (tok >= swa_lo_t.view(-1, 1)).unsqueeze(1), float("inf")
+        )
+        k = min(p.token_budget, Tc)
+        i_g = torch.topk(sc, k, dim=-1).indices
+        sc_g = torch.gather(sc, 2, i_g)
+        sel_g = torch.gather(tok_c.unsqueeze(1).expand(n, Hkv, Tc), 2, i_g)
+        return torch.where(
+            sc_g == float("-inf"), torch.full_like(sel_g, SENT), sel_g
+        )  # [n, Hkv, budget]
 
     @torch.no_grad()
     def select_far_kmeans(self, index: dict, q: torch.Tensor, t: int, budget: int):

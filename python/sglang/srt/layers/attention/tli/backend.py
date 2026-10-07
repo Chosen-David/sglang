@@ -193,6 +193,15 @@ class TLISparseAttnBackend(AttentionBackend):
                 "kq_mn": torch.zeros(r_cap, s_cap, Hkv, device=dev),
                 "kmin": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
                 "kmax": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
+                # E112（#149）：TASK.md 模式（α/β/γ + method 组合）下 avg
+                # method 分数源的块 token 和（与 kmin 同构 [R, NBLK_CAP,
+                # Hkv, d']，消费端 /bs）。非 taskmd 模式不建（零显存开销，
+                # 回归保护——131K 满容量 fp32 ≈ 2GB/层，仅实验臂显式开启）
+                **(
+                    {"kavg_sum": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev)}
+                    if getattr(p, "taskmd", False)
+                    else {}
+                ),
                 "S_cap": s_cap,
                 "R_cap": r_cap,
                 "free": list(range(1, r_cap)),  # 行 0 = 哨兵，不进 free
@@ -232,10 +241,14 @@ class TLISparseAttnBackend(AttentionBackend):
         bs = self.profile.block_size
         old_nblk = (old + bs - 1) // bs
         new_nblk = (new_cap + bs - 1) // bs
-        for key, width in (
+        # E112：kavg_sum（taskmd 时存在）随池扩容（与 kmin 同构，块维扩容）
+        keys = [
             ("kq_q", old), ("kq_sc", old), ("kq_mn", old),
             ("kmin", old_nblk), ("kmax", old_nblk),
-        ):
+        ]
+        if "kavg_sum" in pool_l:
+            keys.append(("kavg_sum", old_nblk))
+        for key, width in keys:
             t = pool_l[key]
             s_dim = new_cap if key.startswith("kq") else new_nblk
             new = t.new_zeros((t.shape[0], s_dim, *t.shape[2:]))
@@ -253,7 +266,11 @@ class TLISparseAttnBackend(AttentionBackend):
             )
         r0 = pool_l["R_cap"]
         r1 = r0 + add
-        for key in ("kq_q", "kq_sc", "kq_mn", "kmin", "kmax"):
+        # E112：kavg_sum（taskmd 时存在）随行扩容
+        keys = ("kq_q", "kq_sc", "kq_mn", "kmin", "kmax")
+        if "kavg_sum" in pool_l:
+            keys = keys + ("kavg_sum",)
+        for key in keys:
             t = pool_l[key]
             new = t.new_zeros((r1, *t.shape[1:]))
             new[:r0] = t
@@ -289,15 +306,17 @@ class TLISparseAttnBackend(AttentionBackend):
         pool 容量足够（update 内的 _ensure 不触发，否则会静默脱离 pool）。
         """
         nblk = (S + self.profile.block_size - 1) // self.profile.block_size
-        return {
+        views = {
             "kmin": pool_l["kmin"][row],
             "kmax": pool_l["kmax"][row],
             "kq_q": pool_l["kq_q"][row],
             "kq_sc": pool_l["kq_sc"][row],
             "kq_mn": pool_l["kq_mn"][row],
+            "kavg_sum": pool_l["kavg_sum"][row] if "kavg_sum" in pool_l else None,
             "nblk": nblk,
             "S": S,
         }
+        return views
 
     # ---------------- AttentionBackend 必须实现 ---------------- #
 
@@ -446,6 +465,10 @@ class TLISparseAttnBackend(AttentionBackend):
                     pool_l["kq_mn"][row, : L - 1] = idx_new["kq_mn"]
                     pool_l["kmin"][row, : idx_new["nblk"]] = idx_new["kmin"]
                     pool_l["kmax"][row, : idx_new["nblk"]] = idx_new["kmax"]
+                    if "kavg_sum" in pool_l and idx_new.get("kavg_sum") is not None:
+                        pool_l["kavg_sum"][row, : idx_new["nblk"]] = idx_new[
+                            "kavg_sum"
+                        ]
                 # 预记图内追加当前 token 后的有效长度（== eager 路径每步
                 # 结束时的 bookkeeping 语义，混跑无缝切换）
                 pool_l["S"][row] = L
@@ -524,6 +547,8 @@ class TLISparseAttnBackend(AttentionBackend):
                 pool_l["kq_mn"][row, :seq_len] = idx_new["kq_mn"]
                 pool_l["kmin"][row, :nblk] = idx_new["kmin"]
                 pool_l["kmax"][row, :nblk] = idx_new["kmax"]
+                if "kavg_sum" in pool_l and idx_new.get("kavg_sum") is not None:
+                    pool_l["kavg_sum"][row, :nblk] = idx_new["kavg_sum"]
                 pool_l["S"][row] = seq_len
                 self.timer.add("build", time.time() - t0)
             elif seq_len > S_st:
@@ -835,6 +860,8 @@ class TLISparseAttnBackend(AttentionBackend):
             pool_l["kq_mn"][row, :S] = index["kq_mn"]
             pool_l["kmin"][row, : index["nblk"]] = index["kmin"]
             pool_l["kmax"][row, : index["nblk"]] = index["kmax"]
+            if "kavg_sum" in pool_l and index.get("kavg_sum") is not None:
+                pool_l["kavg_sum"][row, : index["nblk"]] = index["kavg_sum"]
             pool_l["S"][row] = S
 
     # ---------------- 内部工具 ---------------- #
