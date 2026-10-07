@@ -527,7 +527,9 @@ class TLIIndexer(TIAIndexer):
         if e64_partition:
             # ---- E64 L1 双池：far 池=minmax 上界分（α 区外），near 池=avg 分（近区）----
             nb_near = max(1, int(round(k1 * self.beta)))
-            nb_far = max(1, k1 - nb_near)
+            # TASK.md L158 严格口径：far_budget_page_topk = budget_page_topk
+            # − near_budget_page_topk（无保底；topk k=0 已验证安全）
+            nb_far = max(0, k1 - nb_near)
             if self.skip_far:
                 # D' 兑现省算：far 块全 -inf 时收缩 far 池
                 n_valid_far = int(
@@ -688,9 +690,12 @@ class TLIIndexer(TIAIndexer):
                            + self._km_far_lo).unsqueeze(0).unsqueeze(0)
                 else:
                     # E64 γ：near 细筛折扣 nt_near = nb_near·bs·γ，far 拿剩余预算
+                    # TASK.md L172 严格口径：far_budget_token = budget_token −
+                    # near_budget_token（去掉旧 64 保底——γ 高值下 far=0 即
+                    # near 让渡满额，topk k=0 已验证安全）
                     if e64_partition:
                         nt_near = min(int(nb_near * bs * self.gamma), K2_mid)
-                        far_budget = max(64, K2_mid - nt_near)
+                        far_budget = max(0, K2_mid - nt_near)
                     else:
                         far_budget = self.far_tokens
                     # 默认：远端与近端同用 4bit 精筛分数，仅在独立池内 topk
