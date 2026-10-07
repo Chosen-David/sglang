@@ -74,18 +74,38 @@ class TLIIndexer(TIAIndexer):
                 "--tli_per_q_head 与 --tli_far_select cluster 互斥（簇分数是 kv-head 级语义）"
             assert self.sigma_select == "none", \
                 "--tli_per_q_head 与 --tli_sigma_select 互斥（E103 臂不经过 σ 路径）"
-        # ---- D'：静态层掩码 ----
+        # ---- D'：层感知 far 跳过（E111 三模式：none/static/dynamic）----
+        #   兼容关系（与 arguments.py 注释同源）：--tli_layer_gate 未显式给出
+        #   （None）时回落旧 flag——tli_enable_layer_skip True→static /
+        #   False→none；显式给出时覆盖旧 flag。主表口径（E98/E105/E109 全部
+        #   --tli_enable_layer_skip false）解析为 none，零行为变化（回归保护）。
         self.enable_layer_skip = getattr(args, "tli_enable_layer_skip", True)
+        gate = getattr(args, "tli_layer_gate", None)
+        if gate is None:
+            gate = "static" if self.enable_layer_skip else "none"
+        assert gate in ("none", "static", "dynamic"), \
+            f"tli_layer_gate 非法取值: {gate}"
+        if gate == "dynamic" and self.moba_gate:
+            raise ValueError(
+                "--tli_layer_gate dynamic 与 --tli_moba 互斥"
+                "（MoBA 臂无 far 分区语义，gate 决策无消费点）")
+        self.layer_gate = gate
+        # τ 语义：prefill far mass 信号 < τ → 该层 decode 跳 far
+        self.gate_tau = getattr(args, "tli_layer_gate_tau", 0.1)
         self.skip_far = False
         mask_path = getattr(args, "tli_layer_skip_path", None) or DEFAULT_MASK
         self._skip_ids: set[int] | None = None
-        if self.enable_layer_skip:
+        if gate == "static":
             try:
                 with open(mask_path) as f:
                     self._skip_ids = set(json.load(f)["skip"])
             except (OSError, KeyError, ValueError):
                 print(f"[TLI] 警告: 层掩码 {mask_path} 不可读, D' 关闭")
                 self._skip_ids = None
+        # E111 dynamic：per-request 状态（clear() 每请求重置；prefill 期
+        # observe_prefill_gate 写入，decode 期 _resolve_skip 消费）
+        self._dyn_skip_far = False
+        self._dyn_far_sig = None
         # B 的聚类缓存（prefill 后一次；decode 期 far 区不变）
         self._km_centroids = None    # [Hkv, K_c, d']
         self._km_token_assign = None  # [Hkv, Tfar]
@@ -140,11 +160,86 @@ class TLIIndexer(TIAIndexer):
             print(f"[E85f] L{self.layer_idx} static pairs (freq j): "
                   f"{sorted(top_pairs.tolist())}", flush=True)
 
+    # ---------------- E111：动态 per-request 层 gate（D' 终态版）---------------- #
+
+    def _partition_blks(self, kt):
+        """sink/far 块边界（部署口径单源）：与 compute_mask 的分区计算逐式同源
+        （α>0 且 β>0 时 near_len_dyn = α·mid，否则 near_len=2048），供
+        observe_prefill_gate 信号与 compute_score/prepare_index 省算共用。
+        返回 (far_lo_blk, far_hi_blk)；far_hi==far_lo 表示 far 区空（无跳过意义）。
+        单测有与 compute_mask 内联口径的一致性断言。"""
+        bs = self.args.tia_block_size
+        if self.alpha > 0 and self.beta > 0:
+            sink_tok = self.sink_blocks * bs
+            mid_len = max(0, kt * bs - sink_tok - self.sliding_window_size)
+            near_len_dyn = max(bs, int(self.alpha * mid_len))
+        else:
+            near_len_dyn = self.near_len
+        near_blks = max(self.sink_blocks, (kt * bs - near_len_dyn) // bs)
+        return self.sink_blocks, near_blks
+
+    def observe_prefill_gate(self, q, k):
+        """E111 dynamic gate 的 prefill 旁路采集（qwen3_attn_patch 调用）：
+        q = post-RoPE query [B,H,S,D]，k = cache update 后完整 key [B,Hkv,S,D]。
+
+        信号（E67 mass_profile 的 e2e 版，部署口径）：
+          取 prefill 末尾 16 个 q 行，逐行对全序列 softmax 后统计 far 区
+          mass 占比再对行平均（E67 last1/avg16 的折衷：末 16 行最贴 decode
+          分布且比单行稳）。far 区边界用 _partition_blks 部署口径（α>0 时
+          near=α·mid），与 E67 离线固定口径（NEAR_BAND=4096/SWA=1024）不同，
+          属有意对齐部署语义——信号量的就是「被跳过的那块区域的 mass」。
+
+        决策：far_frac < τ → 本请求该层 decode 跳 far（写入 _dyn_skip_far，
+        decode 期 prepare_index/compute_mask 经 _resolve_skip 消费）。
+
+        成本：每层每请求一次 16 行 × S × D 的 einsum（GQA 聚合到 kv-head 级），
+        ≈ 1/n_chunk 个 prefill chunk 的注意力量级（S=32K 时 <1ms/层），
+        decode 期零重复；GQA 量纲与 _far_token_score/L1 一致（组内求和）。"""
+        if self.layer_gate != "dynamic" or self.layer_idx is None:
+            return
+        S = k.shape[2]
+        bs = self.args.tia_block_size
+        far_lo_tok = self.sink_blocks * bs
+        far_lo_blk, far_hi_blk = self._partition_blks((S + bs - 1) // bs)
+        far_hi_tok = min(far_hi_blk * bs, S)
+        if far_hi_tok <= far_lo_tok or S < 4 * bs:
+            # 序列过短 / far 区空：无跳过意义（也不触发 skip 分支）
+            self._dyn_far_sig = None
+            self._dyn_skip_far = False
+            return
+        nrow = min(16, S)
+        qf = q.detach().float()
+        kf = k.detach().float()
+        Hkv = kf.shape[1]
+        G = qf.shape[1] // Hkv
+        # 末 nrow 行 q 组内求和到 kv-head 级 [Hkv,nrow,D]（与 L1 量纲一致）
+        qg = qf[0, :, -nrow:].reshape(Hkv, G, nrow, -1).sum(1)
+        s = torch.einsum("hrd,hsd->hrs", qg, kf[0]) * (q.shape[-1] ** -0.5)
+        # 因果：行 r 的 query 位置 = S-nrow+r（末行可见全序列）
+        t = (S - nrow) + torch.arange(nrow, device=s.device)
+        pos = torch.arange(S, device=s.device)
+        s = s.masked_fill(pos[None, :] > t[:, None], float("-inf"))
+        p = torch.softmax(s, dim=-1)                               # [Hkv,nrow,S]
+        tot = p.sum(dim=-1)
+        far = p[..., far_lo_tok:far_hi_tok].sum(dim=-1)
+        far_frac = float((far / tot.clamp(min=1e-12)).mean())
+        self._dyn_far_sig = far_frac
+        self._dyn_skip_far = bool(far_frac < self.gate_tau)
+        if os.environ.get("TLI_DEBUG"):
+            print(f"[E111] L{self.layer_idx} dyn-gate far_frac={far_frac:.4f} "
+                  f"tau={self.gate_tau} skip_far={self._dyn_skip_far}", flush=True)
+
     # ---------------- D' ---------------- #
 
     def _resolve_skip(self):
-        if self._skip_ids is not None and self.layer_idx is not None:
-            self.skip_far = self.layer_idx in self._skip_ids
+        if self.layer_idx is None:
+            return
+        if self.layer_gate == "static":
+            self.skip_far = self._skip_ids is not None and self.layer_idx in self._skip_ids
+        elif self.layer_gate == "dynamic":
+            # per-request 决策（prefill 期 observe_prefill_gate 写入）
+            self.skip_far = self._dyn_skip_far
+        # none：恒 False（不进任何 skip 分支 → 与现状逐位一致）
 
     # ---------------- A：子空间 L1 ---------------- #
 
@@ -237,7 +332,23 @@ class TLIIndexer(TIAIndexer):
             list(range(64 - delta, 64)) + list(range(128 - delta, 128))
         ).to(k.device)
         k_qat = torch.zeros_like(k)
-        k_qat[..., indices] = self.min_max_per_token_quant(k[..., indices])
+        # ---- E111：skip_far 省算——far token 不量化（far 细筛分数从不被消费：
+        #   compute_mask 对 far 块 -inf + topk_mask 排除 → where(-inf)；子空间路径
+        #   compute_score 已分段跳过 far einsum，full 路径 far 分数=0 也从不被读）。
+        #   far token 区 [lo_t,hi_t) 连续，量化只做 sink 头段 + near/swa 尾段。
+        quant_cut = None
+        if self.skip_far:
+            bs = self.args.tia_block_size
+            lo_blk, hi_blk = self._partition_blks((k.shape[1] + bs - 1) // bs)
+            hi_t = min(hi_blk * bs, k.shape[1])
+            if hi_t > self.sink_blocks * bs:
+                quant_cut = (self.sink_blocks * bs, hi_t)
+        if quant_cut is None:
+            k_qat[..., indices] = self.min_max_per_token_quant(k[..., indices])
+        else:
+            lo_t, hi_t = quant_cut
+            k_qat[:, :lo_t][..., indices] = self.min_max_per_token_quant(k[:, :lo_t][..., indices])
+            k_qat[:, hi_t:][..., indices] = self.min_max_per_token_quant(k[:, hi_t:][..., indices])
         index_dict = {
             "k_min": k_min,
             "k_max": k_max,
@@ -332,6 +443,16 @@ class TLIIndexer(TIAIndexer):
         q_sq = q.squeeze(0)  # [1, H, D]
         H = q_sq.shape[1]
         self.group_size = H // k_min.shape[1]
+        # ---- E111：skip_far 省算——L1/L2 einsum 分段跳过 far 块/token ----
+        #   far 分数从不被消费（compute_mask 对 far 块显式 -inf / topk_mask
+        #   排除），故直接不算、保持 -inf 初始与非省算路径（算完被 -inf 覆盖）
+        #   逐位一致；省下的是 far 区的 repeat 物化 + einsum（每 decode 步）。
+        #   far 块区间连续 [lo,hi)，keep = [0,lo)∪[hi,kt) 两段拼接计算后写回。
+        cut_blk = None
+        if self.skip_far:
+            lo_blk, hi_blk = self._partition_blks(k_min.shape[0])
+            if hi_blk > lo_blk:
+                cut_blk = (lo_blk, hi_blk)
         coarse_shape = (1, H, k_min.shape[0])
         score_coarse = q_sq.new_full(coarse_shape, float("-inf"))
         idx_sub = self._subspace_indices(q_sq.device)
@@ -345,14 +466,40 @@ class TLIIndexer(TIAIndexer):
             ).reshape(H, -1)  # [H, r]
         else:
             b_q = (q_sq[0] * softmax_scale).to(torch.float32)[..., idx_sub]  # [H, d']
-        b_k_min = repeat(k_min, "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
-        b_k_max = repeat(k_max, "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
-        b_score = (
-            einsum(b_q.clamp(max=0), b_k_min, "h d, kt h d -> h kt")
-            + einsum(b_q.clamp(min=0), b_k_max, "h d, kt h d -> h kt")
-        )
-        score_coarse[0] = b_score.to(q_sq.dtype)
+
+        def _write_block_score(out, sc, cut):
+            """块级分数写回：cut=None 全量写；否则跳 [lo,hi) 段（保持 -inf）。"""
+            if cut is None:
+                out[0] = sc.to(q_sq.dtype)
+            else:
+                lo, hi = cut
+                out[0, :, :lo] = sc[:, :lo].to(q_sq.dtype)
+                out[0, :, hi:] = sc[:, lo:].to(q_sq.dtype)
+
+        if cut_blk is None:
+            b_k_min = repeat(k_min, "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
+            b_k_max = repeat(k_max, "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
+            b_score = (
+                einsum(b_q.clamp(max=0), b_k_min, "h d, kt h d -> h kt")
+                + einsum(b_q.clamp(min=0), b_k_max, "h d, kt h d -> h kt")
+            )
+            _write_block_score(score_coarse, b_score, None)
+        else:
+            lo, hi = cut_blk
+            keep_blk = torch.cat([
+                torch.arange(0, lo, device=k_min.device),
+                torch.arange(hi, k_min.shape[0], device=k_min.device),
+            ])
+            b_k_min = repeat(k_min[keep_blk], "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
+            b_k_max = repeat(k_max[keep_blk], "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
+            b_score = (
+                einsum(b_q.clamp(max=0), b_k_min, "h d, kt h d -> h kt")
+                + einsum(b_q.clamp(min=0), b_k_max, "h d, kt h d -> h kt")
+            )
+            _write_block_score(score_coarse, b_score, cut_blk)
         # E89 MoBA 臂：全维 chunk-mean gate 分（gate 用完整 128 维，严格 MoBA 口径）
+        # （moba 与 dynamic gate 互斥已断言；static+moba 组合下 moba 路径忽略
+        #  skip_far，此处不省算保持 MoBA 臂口径纯净）
         score_moba = None
         if self.moba_gate:
             k_avg_full = index_dict.get("k_avg_full")
@@ -367,9 +514,13 @@ class TLIIndexer(TIAIndexer):
         # E64f：near 粗筛 avg 分数（块均值精确分，不 clamp）
         score_coarse_avg = None
         if k_avg is not None:
-            b_k_avg = repeat(k_avg, "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
             score_coarse_avg = q_sq.new_full(coarse_shape, float("-inf"))
-            score_coarse_avg[0] = einsum(b_q, b_k_avg, "h d, kt h d -> h kt").to(q_sq.dtype)
+            if cut_blk is None:
+                b_k_avg = repeat(k_avg, "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
+                _write_block_score(score_coarse_avg, einsum(b_q, b_k_avg, "h d, kt h d -> h kt"), None)
+            else:
+                b_k_avg = repeat(k_avg[keep_blk], "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
+                _write_block_score(score_coarse_avg, einsum(b_q, b_k_avg, "h d, kt h d -> h kt"), cut_blk)
         # L2 精筛分数：非投影=全维 k_qat；投影=投影特征 k_qat（E64f 协议）
         # 投影路径必须 fp32：8 维点积幅度 ~O(0.5)，bf16 绝对步长会折叠 top-K 边界
         # 的小 gap 分数成同值 → topk 退化为位置偏置（e2e mass 0.99→0.81 实测）
@@ -382,11 +533,32 @@ class TLIIndexer(TIAIndexer):
             b_q_full = b_q
         else:
             b_q_full = (q_sq[0] * softmax_scale).to(torch.float32)
-        b_k_qat = repeat(k_qat.squeeze(0), "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
-        if self._basis is not None:
-            score_fine[0] = einsum(b_q_full, b_k_qat, "h d, kt h d -> h kt")
+        cut_tok = None
+        if cut_blk is not None:
+            bs = self.args.tia_block_size
+            lo, hi = cut_blk
+            lo_t, hi_t = lo * bs, min(hi * bs, k_qat.shape[1])
+            if hi_t > lo_t:
+                cut_tok = (lo_t, hi_t)
+        if cut_tok is None:
+            b_k_qat = repeat(k_qat.squeeze(0), "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
+            if self._basis is not None:
+                score_fine[0] = einsum(b_q_full, b_k_qat, "h d, kt h d -> h kt")
+            else:
+                score_fine[0] = einsum(b_q_full, b_k_qat, "h d, kt h d -> h kt").to(q_sq.dtype)
         else:
-            score_fine[0] = einsum(b_q_full, b_k_qat, "h d, kt h d -> h kt").to(q_sq.dtype)
+            # far token 区 [lo_t,hi_t) 连续——fine einsum（选择链大头）跳过该段；
+            # far fine 分数保持 -inf 与非省算路径（topk_mask 排除→where -inf）逐位一致
+            keep_tok = torch.cat([
+                torch.arange(0, cut_tok[0], device=k_qat.device),
+                torch.arange(cut_tok[1], k_qat.shape[1], device=k_qat.device),
+            ])
+            b_k_qat = repeat(k_qat.squeeze(0)[keep_tok], "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
+            sf = einsum(b_q_full, b_k_qat, "h d, kt h d -> h kt")
+            if self._basis is None:
+                sf = sf.to(q_sq.dtype)
+            score_fine[0, :, :cut_tok[0]] = sf[:, :cut_tok[0]]
+            score_fine[0, :, cut_tok[1]:] = sf[:, cut_tok[0]:]
         return {
             "score_coarse": score_coarse.unsqueeze(0),
             "score_coarse_avg": None if score_coarse_avg is None else score_coarse_avg.unsqueeze(0),
@@ -710,6 +882,12 @@ class TLIIndexer(TIAIndexer):
         # E85f：跨请求必须重置——clear() 在每次 prefill 前调用，随后
         # observe_prefill_q 用本请求的 q 统计重选 pair（否则残留上一请求）
         self._pair_idx = None
+        # E111：动态 gate 跨请求必须重置——clear() 在每次 prefill 前调用，
+        # 随后 observe_prefill_gate 用本请求的 prefill 信号重新逐层决策
+        # （否则残留上一请求的 skip 决策；clear 与 observe 之间 decode 未发生，
+        # 时序由 qwen3_attn_patch prefill 分支保证）
+        self._dyn_skip_far = False
+        self._dyn_far_sig = None
 
     def get_block_size(self):
         return 1

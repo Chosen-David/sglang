@@ -69,6 +69,23 @@ def _add_tli_args(parser: argparse.ArgumentParser):
                        default=False,
                        help='E103 消融：旁路 GQA 组内 mean 聚合，per-q-head 独立选择'
                             '（mask [H,T]，索引量 ×G；关闭 = 论文 §2.2 kv-head 共享口径）')
+    # ---- E111：D' 层 gate 三模式（终态 = 动态 per-request，用户 2026-10-07 指令）----
+    #   兼容关系：未显式给出（None）时回落旧 flag——tli_enable_layer_skip
+    #   True→static / False→none；显式给出时覆盖旧 flag。因此：
+    #   gate=none ≡ --tli_enable_layer_skip false（E98/E105/E109 主表口径，回归保护）
+    #   gate=static ≡ 不传任何 flag 的默认旧行为（DEFAULT_MASK 静态层掩码）
+    #   gate=dynamic = E111 新增：per-request、per-layer，prefill 一次采集 far 区
+    #   mass 信号（E67 口径），decode 期该层跳过 far 选择
+    group.add_argument('--tli_layer_gate', type=str, default=None,
+                       choices=['none', 'static', 'dynamic'],
+                       help='层感知 far 跳过模式: none=关(≡--tli_enable_layer_skip false) / '
+                            'static=旧静态层掩码(≡默认旧行为) / dynamic=per-request '
+                            'prefill 信号决策（E111 终态版）；未显式给出时回落 '
+                            'tli_enable_layer_skip')
+    group.add_argument('--tli_layer_gate_tau', type=float, default=0.1,
+                       help='dynamic 模式 far mass 信号阈值 τ：prefill 信号低于 τ → '
+                            '该层 decode 跳 far（E67 离线口径 τ0.1 跳约 31% 层、'
+                            'mass 损失约 2.3%）')
     return parser
 
 def parse_args():

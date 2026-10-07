@@ -54,6 +54,11 @@ def qwen3_attn_forward(
         # pair 选取（decode 侧 _subspace_indices 消费；非静态 pair 模式为 no-op）
         if hasattr(indexer, "observe_prefill_q"):
             indexer.observe_prefill_q(query_states)
+        # E111：动态层 gate——prefill 一次采集 far 区 mass 信号得 per-layer、
+        # per-request skip 决策，decode 期 _resolve_skip 消费（非 dynamic 模式
+        # no-op；时序关键：必须在 clear() 之后、首个 decode 步之前）
+        if hasattr(indexer, "observe_prefill_gate"):
+            indexer.observe_prefill_gate(query_states, key_states)
         attn_output, attn_weights = attention_interface(
             self,
             query_states,
