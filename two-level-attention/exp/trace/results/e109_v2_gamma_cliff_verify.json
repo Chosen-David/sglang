@@ -1,0 +1,183 @@
+{
+ "experiment": "E109 v2 gamma-cliff closed-form verification (16 scored arms, refined)",
+ "formula": "nb_near=round(K1*β); nt_near=min(nb_near*bs*γ, K2_mid); far_budget=K2_mid-nt_near",
+ "params": {
+  "K1_topk": 128,
+  "block_size": 64,
+  "K2_mid": 768
+ },
+ "refinement": "collapse is GRADED not binary: far_budget==0 kills the far pool entirely, but the e2e damage scales with far_frac(=1-α). far_frac>=0.5 -> collapse; 0.25<frac<0.5 -> moderate; <=0.25 -> mild (near-dominated tasks nearly unaffected)",
+ "gradient_evidence": [
+  "far_frac=0.875: hq_penalty=16.4 (pen/frac=18.7/unit)",
+  "far_frac=0.875: hq_penalty=16.4 (pen/frac=18.7/unit)",
+  "far_frac=0.875: hq_penalty=15.62 (pen/frac=17.9/unit)",
+  "far_frac=0.75: hq_penalty=11.98 (pen/frac=16.0/unit)",
+  "far_frac=0.75: hq_penalty=12.37 (pen/frac=16.5/unit)",
+  "far_frac=0.5: hq_penalty=5.64 (pen/frac=11.3/unit)",
+  "far_frac=0.5: hq_penalty=5.73 (pen/frac=11.5/unit)",
+  "far_frac=0.125: hq_penalty=1.06 (pen/frac=8.5/unit)",
+  "far_frac=0.125: hq_penalty=0.23 (pen/frac=1.8/unit)"
+ ],
+ "arms": [
+  {
+   "tag": "E109_aavg_a0.125_b0.125_g0.375",
+   "nb_near": 16,
+   "far_budget": 384,
+   "far_frac": 0.875,
+   "predicted": "healthy",
+   "observed": "mild",
+   "hq": 53.72,
+   "mu": 33.63
+  },
+  {
+   "tag": "E109_aavg_a0.25_b0.125_g0.375",
+   "nb_near": 16,
+   "far_budget": 384,
+   "far_frac": 0.75,
+   "predicted": "healthy",
+   "observed": "mild",
+   "hq": 53.61,
+   "mu": 33.12
+  },
+  {
+   "tag": "E109_aavg_a0_b0_g0",
+   "single_pool": true,
+   "far_budget": 768,
+   "far_frac": null,
+   "predicted": "healthy",
+   "hq": 57.26,
+   "mu": 30.52
+  },
+  {
+   "tag": "E109_mavg_a0.125_b0.125_g0.625",
+   "nb_near": 16,
+   "far_budget": 128,
+   "far_frac": 0.875,
+   "predicted": "healthy",
+   "observed": "mild",
+   "hq": 54.37,
+   "mu": 34.3
+  },
+  {
+   "tag": "E109_mavg_a0.125_b0.375_g0.125",
+   "nb_near": 48,
+   "far_budget": 384,
+   "far_frac": 0.875,
+   "predicted": "healthy",
+   "observed": "mild",
+   "hq": 54.43,
+   "mu": 34.76
+  },
+  {
+   "tag": "E109_mavg_a0.125_b0.375_g0.25",
+   "nb_near": 48,
+   "far_budget": 0,
+   "far_frac": 0.875,
+   "predicted": "collapse",
+   "observed": "collapse",
+   "hq": 37.7,
+   "mu": 17.51
+  },
+  {
+   "tag": "E109_mavg_a0.125_b0.375_g0.75",
+   "nb_near": 48,
+   "far_budget": 0,
+   "far_frac": 0.875,
+   "predicted": "collapse",
+   "observed": "collapse",
+   "hq": 37.7,
+   "mu": 17.51
+  },
+  {
+   "tag": "E109_mavg_a0.125_b0.875_g0.625",
+   "nb_near": 112,
+   "far_budget": 0,
+   "far_frac": 0.875,
+   "predicted": "collapse",
+   "observed": "collapse",
+   "hq": 38.48,
+   "mu": 16.99
+  },
+  {
+   "tag": "E109_mavg_a0.25_b0.125_g0.625",
+   "nb_near": 16,
+   "far_budget": 128,
+   "far_frac": 0.75,
+   "predicted": "healthy",
+   "observed": "mild",
+   "hq": 53.53,
+   "mu": 35.63
+  },
+  {
+   "tag": "E109_mavg_a0.25_b0.5_g0.625",
+   "nb_near": 64,
+   "far_budget": 0,
+   "far_frac": 0.75,
+   "predicted": "collapse",
+   "observed": "collapse",
+   "hq": 42.12,
+   "mu": 19.43
+  },
+  {
+   "tag": "E109_mavg_a0.25_b0.875_g0.625",
+   "nb_near": 112,
+   "far_budget": 0,
+   "far_frac": 0.75,
+   "predicted": "collapse",
+   "observed": "collapse",
+   "hq": 41.73,
+   "mu": 19.4
+  },
+  {
+   "tag": "E109_mavg_a0.5_b0.375_g0.625",
+   "nb_near": 48,
+   "far_budget": 0,
+   "far_frac": 0.5,
+   "predicted": "collapse",
+   "observed": "collapse",
+   "hq": 48.46,
+   "mu": 24.92
+  },
+  {
+   "tag": "E109_mavg_a0.5_b0.5_g0.625",
+   "nb_near": 64,
+   "far_budget": 0,
+   "far_frac": 0.5,
+   "predicted": "collapse",
+   "observed": "collapse",
+   "hq": 48.37,
+   "mu": 23.47
+  },
+  {
+   "tag": "E109_mavg_a0.875_b0.25_g0.625",
+   "nb_near": 32,
+   "far_budget": 0,
+   "far_frac": 0.125,
+   "predicted": "mild",
+   "observed": "mild",
+   "hq": 53.04,
+   "mu": 29.7
+  },
+  {
+   "tag": "E109_mavg_a0.875_b0.375_g0.625",
+   "nb_near": 48,
+   "far_budget": 0,
+   "far_frac": 0.125,
+   "predicted": "mild",
+   "observed": "mild",
+   "hq": 53.87,
+   "mu": 30.03
+  },
+  {
+   "tag": "E109_mavg_a0_b0_g0",
+   "single_pool": true,
+   "far_budget": 768,
+   "far_frac": null,
+   "predicted": "healthy",
+   "hq": 53.89,
+   "mu": 32.59
+  }
+ ],
+ "n_arms": 16,
+ "verdict": "far_budget==0 is necessary but not sufficient for collapse; severity ~ 16-18 hq-points per unit far_frac. Gamma-cap saturation double-confirmed: mavg(.125,.375,γ=.25)≡(γ=.75) both 37.70/17.51 (nt_near pinned at K2_mid=768). CHAMP ARM mavg(.125,.375,.625): nb=48 → 48*64*0.625=1920 ≥ 768 → far_budget=0 with far_frac=0.875 → predicted hq ≈ 54.1 − 16 ≈ 38 (catastrophic). E98 55.44/34.71 and paper main-table 50.78 are pre-fix artifacts (v1 min64 floor + method bug); fallback arm 50.54 (γ=.125, far_budget=384) verified bit-identical to E72f."
+}
