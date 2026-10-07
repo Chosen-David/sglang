@@ -203,8 +203,8 @@ class TLIIndexer(TIAIndexer):
                 "cu_seqlens_k_coarse": cu_seqlens_k_coarse,
                 "cu_seqlens_k_fine": cu_seqlens_k,
             }
-            if self.alpha > 0:
-                # near 粗筛 avg 分数（E64f：near=avg / far=minmax）
+            if self._need_avg_score():
+                # near/far 粗筛 avg 分数（E64f：near=avg / far=minmax；far=avg 单池也需）
                 index_dict["k_avg"] = k_coarse.mean(dim=2)
             # ---- B：远端聚类（仅 cluster 消融模式构建；默认 4bit 分区无需聚类）----
             if self.enable_kmeans and self.far_select == "cluster" and not self.skip_far:
@@ -215,7 +215,7 @@ class TLIIndexer(TIAIndexer):
         )
         k_min = k_coarse.amin(dim=2)
         k_max = k_coarse.amax(dim=2)
-        if self.alpha > 0:
+        if self._need_avg_score():
             k_avg = k_coarse.mean(dim=2)
         else:
             k_avg = None
@@ -315,11 +315,25 @@ class TLIIndexer(TIAIndexer):
 
     # ---------------- L1 打分（A 的子空间 + B 的远端簇分数 + D' 剔除）---------------- #
 
+    def _need_avg_score(self) -> bool:
+        """E109a 修复：method=avg 的分数源条件（此前 subspace=full 下全部静默失效）。
+
+        far avg：单池（α=0）与分区（α>0）的 far 池都要用 → 永远需要；
+        near avg：near 池仅在分区（α>0 且 β>0）存在 → 仅分区需要。
+        """
+        return self.far_method == "avg" or (
+            self.near_method == "avg" and self.alpha > 0 and self.beta > 0
+        )
+
     def compute_score(self, q, q_ids, index_dict, softmax_scale):
         # 缓存 squeeze 后的 q 供远端簇分数使用
         if q.shape[0] == 1 and q.shape[1] == 1:
             self._last_q = q.squeeze(0).squeeze(0).to(torch.float32)  # [H, D]
-        if not self.enable_subspace:
+        # E109a 修复：full 子空间原来无条件走父类 compute_score（不产
+        # score_coarse_avg）→ far/near_method=avg 全部静默退化为 minmax。
+        # 现仅在「双池都不用 avg」时才走父类捷径；否则走本类路径
+        # （idx_sub=None 时 minmax 分数与父类逐位等价，且计算 k_avg 分数源）。
+        if not self.enable_subspace and not self._need_avg_score():
             return super().compute_score(q, q_ids, index_dict, softmax_scale)
         # A：L1 上界只在 d' 子空间维上算（q 同步取子空间，与 k_min/k_max 对齐）
         assert q.shape[0] == 1 and q.shape[1] == 1
@@ -334,7 +348,11 @@ class TLIIndexer(TIAIndexer):
         self.group_size = H // k_min.shape[1]
         coarse_shape = (1, H, k_min.shape[0])
         score_coarse = q_sq.new_full(coarse_shape, float("-inf"))
-        idx_sub = self._subspace_indices(q_sq.device)
+        # E109a 修复：full（enable_subspace=False）时 idx_sub=None（全维）
+        # ——原实现此处无守卫，full 落 _subspace_indices 默认 tail 分支（32 维），
+        # 但 k_min/k_max 是 prepare_index 产的全 128 维 → einsum 维度崩。
+        # （此前 full 走父类 compute_score 捷径，此路径从未被 full 触发故未暴露）
+        idx_sub = self._subspace_indices(q_sq.device) if self.enable_subspace else None
         if self._basis is not None:
             # 投影路径（E64f）：q 子空间投影到 d 维（GQA 组共享 kv 基）
             q_sub = (q_sq[0] * softmax_scale).to(torch.float32)[..., idx_sub]  # [H,32]
@@ -344,7 +362,8 @@ class TLIIndexer(TIAIndexer):
                 "hgd,hde->hge", q_sub.reshape(Hkv, G, -1), self._basis
             ).reshape(H, -1)  # [H, r]
         else:
-            b_q = (q_sq[0] * softmax_scale).to(torch.float32)[..., idx_sub]  # [H, d']
+            q_full = (q_sq[0] * softmax_scale).to(torch.float32)
+            b_q = q_full if idx_sub is None else q_full[..., idx_sub]  # [H, d']（full=全维）
         b_k_min = repeat(k_min, "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
         b_k_max = repeat(k_max, "t h d -> t (h g) d", g=self.group_size).to(torch.float32)
         b_score = (
@@ -499,14 +518,14 @@ class TLIIndexer(TIAIndexer):
 
         score_coarse[..., -1] = float("inf")  # TIA 语义：当前块强制
         k1 = self.args.tia_level1_topk
+        # E109a：avg 分数源提取提前到分支外（单池路径也要按 far_method 选分数源）
+        score_coarse_avg = score_dict.get("score_coarse_avg")
+        if score_coarse_avg is not None and not self.per_q_head:
+            score_coarse_avg = rearrange(
+                score_coarse_avg, "b qt (h g) kt -> b qt h g kt", g=self.group_size
+            ).mean(dim=-2)
         if e64_partition:
             # ---- E64 L1 双池：far 池=minmax 上界分（α 区外），near 池=avg 分（近区）----
-            score_coarse_avg = score_dict.get("score_coarse_avg")
-            if score_coarse_avg is not None and not self.per_q_head:
-                # E103：per_q_head 时同样旁路聚合（near 池 avg 分 per-q-head 独立）
-                score_coarse_avg = rearrange(
-                    score_coarse_avg, "b qt (h g) kt -> b qt h g kt", g=self.group_size
-                ).mean(dim=-2)
             nb_near = max(1, int(round(k1 * self.beta)))
             nb_far = max(1, k1 - nb_near)
             if self.skip_far:
@@ -550,13 +569,21 @@ class TLIIndexer(TIAIndexer):
                       f"i_f_blk_min={i_f.min().item()} i_f_blk_max={i_f.max().item()} "
                       f"i_n_blk_min={i_n_min} i_n_blk_max={i_n_max}", flush=True)
         else:
-            # D' 真正兑现省算：跳层时 far 块已 -inf，topk 只取有效块数
-            # （否则 topk 会用 -inf far 块填满 K1，far token 照样进 L2，白算）
+            # E109a 修复：单池（α=0 或 β=0）L1 分数源按 far_method 选择
+            # （原实现固定 score_coarse=minmax → aavg/mavg(0,0) 单池实际跑成纯 minmax）
+            sc_pool = score_coarse
+            if self.far_method == "avg" and score_coarse_avg is not None:
+                sc_pool = score_coarse_avg.clone()
+                sc_pool[..., -1] = float("inf")  # TIA 语义：当前块强制（avg 分无此置位）
+                if self.skip_far:  # D' skip 语义与 score_coarse 同步（far 区 -inf）
+                    sc_pool[..., torch.arange(far_lo_blk, far_hi_blk, device=sc_pool.device)] = float("-inf")
             if self.skip_far:
-                n_valid = int((score_coarse > float("-inf")).sum(dim=-1).max().item())
+                # D' 真正兑现省算：跳层时 far 块已 -inf，topk 只取有效块数
+                # （否则 topk 会用 -inf far 块填满 K1，far token 照样进 L2，白算）
+                n_valid = int((sc_pool > float("-inf")).sum(dim=-1).max().item())
                 k1 = min(k1, max(n_valid, 1))
             values, indices = torch.topk(
-                score_coarse, min(score_coarse.shape[-1], k1), dim=-1
+                sc_pool, min(sc_pool.shape[-1], k1), dim=-1
             )
             topk_mask = torch.zeros_like(score_coarse, dtype=torch.bool).scatter_(
                 -1, indices, torch.ones_like(values, dtype=torch.bool)
