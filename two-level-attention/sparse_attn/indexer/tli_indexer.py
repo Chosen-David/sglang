@@ -927,13 +927,14 @@ class TLIIndexer(TIAIndexer):
                 if far_tok_score is not None:
                     # 消融：远端按簇分数 token 级 topk
                     Tfar = far_tok_score.shape[-1]
-                    if near_cluster_on and e64_partition and near_tok_score is not None:
-                        # E110 ccluster：两侧都走簇分 → γ 活化（TASK.md 预算语义：
-                        # γ 切 near_token/far_token）。near=4bit 的 cavg 保持现状
-                        # far_tokens 语义（γ 死参数）不变——E105/E109 在跑口径，
-                        # 回归保护，只对新 ccluster 臂生效
+                    if e64_partition:
+                        # TASK.md L79/L172 严格口径：γ 对所有 method 组合生效
+                        # （cavg/ccluster 的 far 簇分路径同样按 γ 切
+                        # near_token/far_token 预算；原「cavg far_tokens=512
+                        # γ 死参数」回归口径随 E109a 污染重跑一并废弃）
                         nt_near = min(int(nb_near * bs * self.gamma), K2_mid)
-                        far_budget = max(64, K2_mid - nt_near)
+                        # TASK.md L172 严格口径（与 E109a-γ 同步）：无 64 保底
+                        far_budget = max(0, K2_mid - nt_near)
                     else:
                         far_budget = self.far_tokens
                     k2_far = min(far_budget, Tfar, K2_mid)

@@ -11,7 +11,8 @@
   T4  同接口跑通：ccluster(kmeans)/cavg_sim/ccluster_sim 三配置
       prepare_index→compute_score→compute_mask 全链路，mask 结构合法
   T5  预算语义：召回数 == mid_token 预算（K2−sink−swa），far/near 分区
-      各自预算约束（γ 活化口径：nt_near=nb_near·bs·γ，far=max(64, K2_mid−nt_near)）
+      各自预算约束（γ 活化口径：nt_near=nb_near·bs·γ，far=max(0, K2_mid−nt_near)，
+      TASK.md L172 严格式——E109a-γ 起 cavg/ccluster 全组 γ 生效且无保底）
   T6  near 簇覆盖 + 细筛回退混合：块对齐尾巴 token 经细筛分回退仍可被召回
   T7  回归保护：默认 flag（far=4bit, near=4bit）与 cavg/mavg 配置下，
       新代码 vs 主树旧代码（E109 在跑的工作树，只读 import）mask 逐位相同，
@@ -281,10 +282,10 @@ def t5_budget_semantics():
             tli_alpha=0.25, tli_beta=0.25, tli_gamma=0.5,
         )
         _, mask = run_mask(None, args, k, q)
-        # 手算预算（与 compute_mask 同式）：
+        # 手算预算（与 compute_mask 同式，TASK.md L172 严格口径无保底）：
         #   mid_len=3840, near_len_dyn=960 → far_blks=49 → far_tok_hi=3136, swa_lo_tok=3968
         #   K2_mid=768；nb_near=round(128*0.25)=32；nt_near=min(32*64*0.5,768)=768
-        #   far_budget=max(64,768-768)=64；near=768-64=704
+        #   far_budget=max(0,768-768)=0；near=768-0=768（γ 高值让渡满额 → far=0）
         mid_len = S - sink_tok - swa_tok
         near_len_dyn = max(bs, int(0.25 * mid_len))
         near_blks = max(2, (S - near_len_dyn) // bs)
@@ -292,7 +293,7 @@ def t5_budget_semantics():
         K2_mid = K2 - sink_tok - swa_tok
         nb_near = max(1, int(round(128 * 0.25)))
         nt_near = min(int(nb_near * bs * 0.5), K2_mid)
-        far_budget = max(64, K2_mid - nt_near)
+        far_budget = max(0, K2_mid - nt_near)
         exp_far = min(far_budget, far_tok_hi - sink_tok, K2_mid)
         exp_near = K2_mid - exp_far
         m = mask[0, 0]   # [Hkv, S]
@@ -305,7 +306,9 @@ def t5_budget_semantics():
         # 每个 kv-head 独立同预算
         assert bool((m[:, sink_tok:swa_lo_tok].sum(-1) == K2_mid).all()), "各 kv-head 预算不一致"
 
-        # 对照：cavg（near=4bit）far 预算仍为 far_tokens=512（γ 死参数，回归口径）
+        # 对照：cavg（near=4bit）far 预算同样按 γ 活化（TASK.md 严格口径，
+        # 与 ccluster 同式——原「far_tokens=512 γ 死参数」回归口径已随
+        # E109a 污染重跑废弃）
         args_cavg = make_args(
             tli_far_select="cluster", tli_near_select="4bit",
             tli_enable_kmeans=True, tli_enable_layer_skip=False,
@@ -314,11 +317,11 @@ def t5_budget_semantics():
         _, mask_c = run_mask(None, args_cavg, k, q)
         mc = mask_c[0, 0]
         n_far_c = int(mc[:, sink_tok:far_tok_hi].sum(dim=-1)[0])
-        assert n_far_c == min(512, far_tok_hi - sink_tok, K2_mid), \
-            f"cavg far 侧 {n_far_c} != far_tokens 预算（现状口径被改动！）"
+        assert n_far_c == exp_far, \
+            f"cavg far 侧 {n_far_c} != γ 活化预算 {exp_far}（TASK.md 严格口径被改动！）"
         assert int(mc[:, sink_tok:swa_lo_tok].sum(dim=-1)[0]) == K2_mid, "cavg mid 总预算破坏"
         report(name, True, f"ccluster_sim: far={n_far} near={n_near} mid={n_mid}=K2_mid; "
-                           f"cavg 对照 far={n_far_c}（far_tokens 口径未变）")
+                           f"cavg 对照 far={n_far_c}（γ 活化口径一致）")
     except AssertionError as e:
         report(name, False, str(e))
     except Exception as e:
