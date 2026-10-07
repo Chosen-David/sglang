@@ -183,6 +183,9 @@ class TLISparseAttnBackend(AttentionBackend):
             s_cap = max(4096, p.dense_threshold + 1, self._pool_s_cap_floor)
             nblk_cap = (s_cap + p.block_size - 1) // p.block_size
             r_cap = max(p.pool_rows, self._pool_r_cap_floor)
+            # E112：L1 维统一走 p.l1_dim（has_abg+full → head_dim 全维，
+            # 权威 e2e 默认口径；B' 回退 → coarse_dim=32，显存零增量）
+            d1 = p.l1_dim(self.head_dim)
             self.index_pools[layer_id] = {
                 # M6：kq 真 4bit 存储（128→40 B/token-head，S=131K 前提）：
                 # uint8 格点 [R,S,Hkv,nd2] + fp32 scale/mn [R,S,Hkv]
@@ -191,15 +194,15 @@ class TLISparseAttnBackend(AttentionBackend):
                 "kq_q": torch.zeros(r_cap, s_cap, Hkv, p.refine_nd(), dtype=torch.uint8, device=dev),
                 "kq_sc": torch.zeros(r_cap, s_cap, Hkv, device=dev),
                 "kq_mn": torch.zeros(r_cap, s_cap, Hkv, device=dev),
-                "kmin": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
-                "kmax": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev),
+                "kmin": torch.zeros(r_cap, nblk_cap, Hkv, d1, device=dev),
+                "kmax": torch.zeros(r_cap, nblk_cap, Hkv, d1, device=dev),
                 # E112（#149）：kavg 块均值（method=avg 分数源，TASK.md
                 # L36-45）。仅 has_abg 且 need_avg_score 时分配——B' 回退
                 # 模式 pool 张量集合与改动前完全一致（显存零增量）。
                 # 与 kmin/kmax 同形同生命周期（_ensure_pool_s/_grow_pool_r/
                 # 三处写行点同步维护）。
                 **(
-                    {"kavg": torch.zeros(r_cap, nblk_cap, Hkv, p.coarse_dim, device=dev)}
+                    {"kavg": torch.zeros(r_cap, nblk_cap, Hkv, d1, device=dev)}
                     if getattr(p, "has_abg", False) and p.need_avg_score()
                     else {}
                 ),
@@ -415,6 +418,12 @@ class TLISparseAttnBackend(AttentionBackend):
         且 dummy req 会污染 row_of）。
         """
         self._use_graph_path = True
+        # E112（#149 第一阶段）：has_abg 走逐行 eager（_select_taskmd 含
+        # torch.nonzero/int() host 同步，不可被 CUDA graph 捕获）——veto
+        # 图路径，整批回退 eager（诚实降级，待第二阶段 kernel 化后恢复）
+        if getattr(self.profile, "has_abg", False):
+            self._use_graph_path = False
+            return
         bs = int(getattr(forward_batch, "batch_size", 0) or 0)
         if not self._graph_rows_l or bs <= 0:
             return

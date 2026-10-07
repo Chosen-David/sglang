@@ -170,7 +170,19 @@ class TLIProfile:
             or os.environ.get("SGLANG_TLI_FAR_METHOD")
             or os.environ.get("SGLANG_TLI_NEAR_METHOD")
         )
-
+        # ---- E112：TASK.md 语义的 L1 打分子空间（对齐权威 tli_subspace）----
+        #   full = 全 head_dim（权威 e2e 默认口径——E98/E105/E109 各臂与
+        #          E109a 回归单测全部 subspace=full：L1 minmax/avg 分数在
+        #          全 128 维上算，kmin/kmax/kavg 需按全维构建）；
+        #   tail = 低频尾维 coarse_dim=32（B'/E71 旧口径，供 tail 臂复现）。
+        # 仅 has_abg 路径生效；B' 回退模式恒 tail（回归保护，逐位不变）。
+        # 注：SGLANG_TLI_SUBSPACE 单独设置不触发 has_abg（须与 α/β/γ/
+        # method 任一 env 同时显式设置才进入 TASK.md 语义分支）。
+        self.taskmd_subspace: str = os.environ.get("SGLANG_TLI_SUBSPACE", "full")
+        assert self.taskmd_subspace in ("full", "tail"), (
+            f"SGLANG_TLI_SUBSPACE={self.taskmd_subspace} 第一阶段仅支持 "
+            "full|tail（rope/nope/random/highfreq 留后续）"
+        )
         # ---- #60 D' 升级：prefill 动态测层 → decode 动态跳 far。
         # 离线验证（e60_prefill_dynamic_gate.json，32B 7 任务）：prefill
         # 末段行 per-layer far mass 与 decode far mass corr 0.86-0.99，
@@ -181,6 +193,14 @@ class TLIProfile:
         # 多跳 ~0.015-0.026）。----
         self.dyn_far_gate: bool = _env_bool("SGLANG_TLI_DYN_GATE", False)
         self.dyn_far_thresh: float = _env_float("SGLANG_TLI_DYN_GATE_THRESH", 0.01)
+
+    def l1_dim(self, head_dim: int) -> int:
+        """E112：L1 打分维度。has_abg+full → head_dim（权威默认）；否则
+        coarse_dim（B' 回退 + tail 臂）。kmin/kmax/kavg 的构建/分配统一
+        走此出口。"""
+        if self.has_abg and self.taskmd_subspace == "full":
+            return head_dim
+        return self.coarse_dim
 
     def subspace_idx(self, head_dim: int) -> list[int]:
         """position-stable 子空间维度索引（Qwen3 rotate_half 两半的尾维）。

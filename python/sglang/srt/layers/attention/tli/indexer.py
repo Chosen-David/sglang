@@ -175,6 +175,16 @@ class TLIIndexer:
         self.register_buffer_idx(torch.arange(head_dim))
         self.idx1 = torch.tensor(p.subspace_idx(head_dim), dtype=torch.long)
         self.idx2 = torch.tensor(p.refine_idx(head_dim), dtype=torch.long)
+        # E112（#149）：TASK.md 语义 L1 打分子空间——权威默认 subspace=full
+        # （L1 minmax/avg 分数在全 head_dim 上算）。has_abg+full 时 kmin/
+        # kmax/kavg 按全维构建（d1=head_dim）；否则与 B' 回退一致（tail32，
+        # d1=coarse_dim，回归保护）。B' 各 select 路径仍用 self.idx1——
+        # has_abg=False 下 idx_l1 ≡ idx1，行为逐位不变。
+        self.d1: int = p.l1_dim(head_dim)
+        if self.d1 == head_dim:
+            self.idx_l1 = torch.arange(head_dim)
+        else:
+            self.idx_l1 = self.idx1
         assert basis is None or not p.far_kmeans, "PCA 投影与 kmeans 消融路径互斥"
         self.basis = basis
         self.nd2 = int(basis.shape[-1]) if basis is not None else 2 * p.delta
@@ -189,6 +199,7 @@ class TLIIndexer:
     def to(self, device):
         self.idx1 = self.idx1.to(device)
         self.idx2 = self.idx2.to(device)
+        self.idx_l1 = self.idx_l1.to(device)
         if self.basis is not None:
             self.basis = self.basis.to(device)
         return self
@@ -233,7 +244,9 @@ class TLIIndexer:
         pad = nblk * p.block_size - S
         if pad:
             k = F.pad(k, (0, 0, 0, 0, 0, pad))
-        kc = k[..., self.idx1].reshape(nblk, p.block_size, Hkv, p.coarse_dim)
+        # E112：L1 维度统一走 idx_l1/d1（has_abg+full → 全维；B' 回退 →
+        # tail32，与旧代码 self.idx1/coarse_dim 逐位一致）
+        kc = k[..., self.idx_l1].reshape(nblk, p.block_size, Hkv, self.d1)
         kmin = kc.amin(1)  # [nblk, Hkv, d']
         kmax = kc.amax(1)
         # 尾块精确界：零 pad 会把 0 混进 min/max（增量路径的界永久变宽且
@@ -320,7 +333,7 @@ class TLIIndexer:
         index["kq_q"][S_old:S] = kq_q_new
         index["kq_sc"][S_old:S] = kq_sc_new
         index["kq_mn"][S_old:S] = kq_mn_new
-        ks = k_new[..., self.idx1]  # [n, Hkv, d']
+        ks = k_new[..., self.idx_l1]  # [n, Hkv, d1]（E112：与 build 同维口径）
         Hkv = ks.shape[1]
         nblk_old = index["nblk"]
 
@@ -339,7 +352,7 @@ class TLIIndexer:
             w = nblk_old
             if nb_full:
                 kc = ks_seg[: nb_full * p.block_size].reshape(
-                    nb_full, p.block_size, Hkv, p.coarse_dim
+                    nb_full, p.block_size, Hkv, self.d1
                 )
                 index["kmin"][w : w + nb_full] = kc.amin(1)
                 index["kmax"][w : w + nb_full] = kc.amax(1)
@@ -392,6 +405,295 @@ class TLIIndexer:
     # ------------------------------------------------------------------ #
 
     @torch.no_grad()
+    # ------------------------------------------------------------------ #
+    # E112（#149 第一阶段）：TASK.md α/β/γ + method 组合语义
+    # ------------------------------------------------------------------ #
+
+    def _select_taskmd(self, index: dict, q: torch.Tensor, t: int) -> torch.Tensor:
+        """TASK.md 语义的 per-request eager 选择（has_abg=True 的唯一路径）。
+
+        语义锚点（/home/wangyuanshuo02/sglang/TASK.md，只读权威）：
+          L36-45  method 注册表：mavg=(minmax,avg)/cavg/aavg/ccluster/mminmax
+                  （第一阶段实现 avg/minmax 两分数源，cluster 留 E110）；
+          L151-172 α/β/γ：near_L=α·mid_L、near 块预算=β·k1、far 块预算=
+                  k1−near（无保底）、near_token=near·bs·γ、far_token=
+                  K2_mid−near_token（无保底，E109a 严格化）；
+          L231    ab(0,0)=全部走 far_method（单池点）；分区判定
+                  partition = α>0 且 β>0（= 权威 e64_partition）。
+        实现逐条对齐权威 two-level-attention tli_indexer.compute_mask /
+        compute_score（E109a 修复后）；对拍口径见 test_taskmd_align.py
+        （块对齐 S + t=S−1 下 token 集合逐位一致）。
+
+        与权威的已知口径差距（诚实标注，详见单测差距清单）：
+          - 权威以 padded 宽（kt·bs）为工作宽（零 pad 混进尾块 kavg 与
+            细筛 softmax 分母），sglang 以 real-S + 因果掩码——块对齐 S
+            下两者一致；
+          - L1 组内聚合 sum vs 权威 mean：严格成比例 → topk 排名等价
+            （probe Q2c 实测 indices 一致）；
+          - L2 细筛 32 维紧凑收缩 vs 权威 128 维零 pad 物化 repeat：
+            ~1e-7 级浮点漂移（probe Q3，随机数据下排名安全）；
+          - M8 fused kernel（L1/L2）与 B' 固定分区绑定，本路径一律
+            eager（诚实降级，待第二阶段 kernel 化）；
+          - tail_k 参数为旧 B' D' 路径专用——本分支忽略；
+          - skip_far 双口径（权威两处判定不同，T8 对拍定位）：L1 分支
+            判 e64_partition（不受 skip_far 影响）——α/β>0 时仍双池、
+            far 池经 n_valid_far 收缩为空；α=0/β=0 单池时 far 区按
+            α/near_len 几何 -inf + k1 计数收缩。L2 分支判
+            use_partition = partition and not skip_far——跳 far 层 L2
+            退化为单池整体 topk + swa 置位（权威 L812）。
+        """
+        p = self.profile
+        S = index["S"]
+        Hkv = index["kmin"].shape[1]
+        H = q.shape[1]
+        G = H // Hkv
+        device = q.device
+        bs = p.block_size
+        # 行级块数（decode t=S-1 且块对齐时 = nblk；prefill 行 t<S-1 时
+        # 截到 t//bs+1——权威的 padded 工作宽按行因果位置的等价翻译）
+        nblk_row = min(index["nblk"], t // bs + 1)
+        kmin, kmax = index["kmin"][:nblk_row], index["kmax"][:nblk_row]
+        kavg = index.get("kavg")
+        if kavg is not None:
+            kavg = kavg[:nblk_row]
+
+        # ---- L1 分数源（TASK.md L36-45 method 注册表）----
+        # minmax 上界分（= 权威 score_coarse）：q+ 收缩 kmax、q− 收缩
+        # kmin；GQA 组内 sum 聚合（= 权威 mean 的 G 倍 → 排名等价）。
+        # E112：打分维 = idx_l1/d1（has_abg+full → 全 head_dim，权威 e2e
+        # 默认口径——E98/E105/E109 各臂与 E109a 单测同此；tail 臂 → tail32）
+        qs = q[..., self.idx_l1]  # [1, H, d1]
+        qg = qs.clamp(min=0).reshape(1, Hkv, G, self.d1)
+        qn = qs.clamp(max=0).reshape(1, Hkv, G, self.d1)
+        sc1 = (
+            torch.einsum("bhgd,nhd->bhgn", qg, kmax)
+            + torch.einsum("bhgd,nhd->bhgn", qn, kmin)
+        ).sum(-2)[0]  # [Hkv, nblk_row]
+        # avg 均值分（= 权威 score_coarse_avg，无 clamp）：仅 need_avg_score
+        # 且 kavg 已构建时存在（权威同门控——k_avg 为 None 时分数源回退
+        # minmax，见权威 L789/L797 的 is not None 条件）
+        sc_avg = None
+        if kavg is not None:
+            sc_avg = torch.einsum(
+                "bhgd,nhd->bhgn", qs.reshape(1, Hkv, G, self.d1), kavg
+            ).sum(-2)[0]
+        # 因果掩码：块末端 > t 不可见（权威 padded 全历史无此步；sglang
+        # real-S 语义下必须显式挡——对拍口径 t=S−1 块对齐时无未来块）
+        blk_end = (torch.arange(nblk_row, device=device) + 1) * bs - 1
+        fut = blk_end > t
+        if fut.any():
+            sc1 = sc1.masked_fill(fut.view(1, -1), float("-inf"))
+            if sc_avg is not None:
+                sc_avg = sc_avg.masked_fill(fut.view(1, -1), float("-inf"))
+
+        partition = p.alpha > 0 and p.beta > 0  # 权威 e64_partition 判定
+        last_blk = t // bs
+        # ---- 区域几何（权威 L776-798；skip_far 也需要 near_blks 定 far 区）----
+        # mid = 总长 − sink − swa（正交强制区不进管线不占配额）；
+        # near 长 = α·mid（分区）；α=0 单池用固定 near_len（权威 L794）
+        sink_blk, swa = p.sink_blocks, p.sliding_window
+        sink_tok = sink_blk * bs
+        mid_len = max(0, nblk_row * bs - sink_tok - swa)
+        if partition:
+            near_len_dyn = max(bs, int(p.alpha * mid_len))
+        else:
+            near_len_dyn = p.near_len
+        near_blks = max(sink_blk, (nblk_row * bs - near_len_dyn) // bs)
+        # near 池上界 = swa 起点（swa 块完全排除出双池，L2 直接强制）
+        swa_lo_blk = max(near_blks, nblk_row - max(1, swa // bs))
+        # 权威两处分支判定**不同**（T8 对拍 debug 定位的语义要点）：
+        #   L1 分支（权威 L834）：判 e64_partition = α>0 且 β>0——**不受
+        #     skip_far 影响**，skip_far 时仍走双池，far 池经 n_valid_far
+        #     计数收缩为空（far 区 -inf → n_valid=0 → nb_far=0），near 池
+        #     正常选，sink 块照旧不进 L1 池；
+        #   L2 分支（权威 L812/L970）：use_partition = (enable_kmeans or
+        #     e64_partition) and not skip_far——skip_far 时 L2 退化为单池
+        #     整体 topk + swa p=1 置位。
+        # （若把 L1 也随 skip_far 退成单池，sink 块会混进候选——集合偏离）
+        use_partition = partition and not self.skip_far
+        if partition:
+            # ---------- L1 双池（权威 L776-821；判定 = e64_partition）----------
+            # 块预算（TASK.md L157-160）：near = β·k1（≥1）、far = k1−near
+            #（无保底——E109a 严格化；torch.topk k=0 安全返回空）
+            k1 = p.k1_blocks
+            nb_near = max(1, int(round(k1 * p.beta)))
+            nb_far = max(0, k1 - nb_near)
+            # skip_far：权威 L836-839 n_valid_far 计数收缩（far 区已 -inf
+            # → n_valid_far=0 → nb_far=0，far 池空；两种分数源同口径——
+            # 计数源恒为 minmax 分的 score_coarse）
+            if self.skip_far:
+                nb_far = 0
+            # far 池 [sink_blk, near_blks)，分数源 far_method（权威 L789-793）
+            if p.far_method == "avg" and sc_avg is not None:
+                sc_far = sc_avg[:, sink_blk:near_blks]
+            else:
+                sc_far = sc1[:, sink_blk:near_blks]
+            i_f = (
+                torch.topk(sc_far, min(nb_far, sc_far.shape[-1]), dim=-1).indices
+                + sink_blk
+            )
+            # near 池 [near_blks, swa_lo_blk)，分数源 near_method（权威 L797-803）
+            if p.near_method == "minmax" or sc_avg is None:
+                sc_near = sc1[:, near_blks:swa_lo_blk]
+            else:
+                sc_near = sc_avg[:, near_blks:swa_lo_blk]
+            if sc_near.shape[-1] > 0:
+                i_n = (
+                    torch.topk(
+                        sc_near, min(nb_near, sc_near.shape[-1]), dim=-1
+                    ).indices
+                    + near_blks
+                )
+            else:
+                i_n = torch.empty(Hkv, 0, dtype=torch.long, device=device)
+            # sink 块不进 L1 池（TASK.md 严格口径：正交区不占 K1 配额，
+            # sink token 由 L2 直接强制——权威 L806-810）
+            blk_onehot = torch.zeros(Hkv, nblk_row, dtype=torch.bool, device=device)
+            blk_onehot.scatter_(1, torch.cat([i_f, i_n], dim=-1), True)
+        else:
+            # ---------- L1 单池（TASK.md L231；权威 L823-841）----------
+            # 分数源按 far_method 选（E109a 修复语义：aavg/mavg 的 (0,0)
+            # 单池点真正跑 far_method 分数源）；当前块强制 +inf（TIA 语义；
+            # avg 分无既有置位须手动——权威 L768/L826-828）
+            if p.far_method == "avg" and sc_avg is not None:
+                sc_pool = sc_avg.clone()
+            else:
+                sc_pool = sc1.clone()
+            if self.skip_far:
+                # 权威 L743-745/L829-830：far 区 [sink_blk, near_blks) -inf
+                # （α>0 时按 α 几何、α=0 时按 near_len 几何——上方统一
+                # near_blks 已覆盖两情形；minmax/avg 两种分数源都掩蔽）
+                if near_blks > sink_blk:
+                    sc_pool[:, sink_blk:near_blks] = float("-inf")
+            sc_pool[:, last_blk] = float("inf")
+            i_pool = torch.topk(sc_pool, min(nblk_row, p.k1_blocks), dim=-1).indices
+            blk_onehot = torch.zeros(Hkv, nblk_row, dtype=torch.bool, device=device)
+            if self.skip_far:
+                # 权威 L831-835 的 k1 收缩（n_valid 计数）由 -inf 源剔除
+                # 等价实现：topk(k) 选出的 -inf 块不进 onehot——选择集与
+                # topk(min(k, n_valid)) 一致（批量路径同口径）。等价性依据：
+                # skip far 区 -inf 对全部 head 一致 → 各 head 有效块数相同
+                # → 权威的跨 head max 收缩不会给任何 head 塞 -inf 垃圾块
+                vals = torch.gather(sc_pool, 1, i_pool)
+                blk_onehot.scatter_(1, i_pool, vals != float("-inf"))
+            else:
+                blk_onehot.scatter_(1, i_pool, True)
+
+        # ---- L2: 4bit 部分维 token 精筛（权威 compute_score fine 路径）----
+        # 权威口径：per-q-head 细筛分 → 全宽 softmax（-inf 非候选 → p=0）
+        # → GQA 组内 mean → topk。组 mean 混合是非线性（softmax），组内
+        # 求和的排名等价性在此**不成立**——必须逐 head 打分再 softmax，
+        # 这是与 B' eager 路径（组求和 + 原始分 topk）的关键语义差异。
+        # softmax_scale 必须与权威一致（scale 改变 softmax 温度 → 组均
+        # 值排名变化，见类注差距清单）。
+        # 候选池口径（权威 tli_indexer L900-908，对拍 T3 debug 定位）：
+        # topk_mask [.., Hkv, kt] 经 repeat("h kt -> (h g) (kt bs)") 扩
+        # 到 [.., H, S]——h 维不进归约，**每个 q-head 只看自己 kv-head
+        # 的候选块**（绝非跨 head 并集！并集会把其他 head 的候选混进
+        # softmax 分母 → p 值整体缩小 → topk 边界翻转，实测分母差 ~10%
+        # 即 T3-T8 FAIL 根因）。实现：并集候选位 + per-head 有效掩码
+        #（非本 head 候选 softmax 前填 -inf → p=0，与权威全宽 -inf
+        # softmax 数学等价）
+        nd2 = self.nd2
+        scale = q.shape[-1] ** -0.5
+        qs2 = (self._q_refine(q) * scale).reshape(Hkv, G, nd2)  # [Hkv, G, nd2]
+        sel_mask = blk_onehot.any(0).repeat_interleave(bs)[:S]
+        cand_pos = torch.nonzero(sel_mask).squeeze(1)
+        pm = qs2.new_zeros(Hkv, S)  # 全宽 p（非候选 = 0.0 = 权威 softmax(-inf)）
+        if cand_pos.numel() > 0:
+            kq_h = kq_unpack(
+                index["kq_q"][cand_pos],
+                index["kq_sc"][cand_pos],
+                index["kq_mn"][cand_pos],
+            )  # [Tc, Hkv, nd2]
+            # per-q-head 细筛分 [Hkv, G, Tc]（hgd 形式与权威 repeat 形式
+            # probe Q3b 逐位等价；32 维紧凑 vs 128 维零 pad ~1e-7 漂移）
+            s2h = torch.einsum("hgd,thd->hgt", qs2, kq_h)
+            fut_tok = cand_pos > t
+            if fut_tok.any():
+                s2h = s2h.masked_fill(fut_tok.view(1, 1, -1), float("-inf"))
+            # per-head 候选池：块归属其他 kv-head 的位置 → -inf（softmax
+            # 后 p=0 = 权威 repeat 语义）；全 -inf 行（该 head 无任何候选）
+            # softmax 产 NaN，nan_to_num(0) 清洗——权威 tia_indexer L125
+            # 同款处理
+            head_valid = blk_onehot[:, cand_pos // bs].unsqueeze(1)  # [Hkv,1,Tc]
+            s2h = s2h.masked_fill(~head_valid, float("-inf"))
+            p_h = torch.softmax(s2h, dim=-1).nan_to_num(0.0)
+            pm[:, cand_pos] = p_h.mean(1)  # GQA 组内 mean（权威口径）
+
+        T_eff = t + 1  # 可见 token 数（权威以 padded 宽为工作宽，t=末位）
+        K2 = p.token_budget
+        if use_partition:
+            # ---------- L2 分区预算（TASK.md L151-172；权威 L918-1011）----------
+            far_tok_lo = sink_tok
+            far_tok_hi = min(near_blks * bs, S)
+            swa_lo_tok = max(0, T_eff - swa)
+            # sink/swa 正交强制区不进 topk 竞争：mid 预算 K2_mid = K2 −
+            # sink − swa（TASK.md L158 严格口径 / 权威 L929-931）
+            K2_mid = max(0, K2 - sink_tok - (T_eff - swa_lo_tok))
+            # γ 严格口径（权威 L942/L960 = E109a）：near_token = nb_near·bs·γ
+            # 截 K2_mid，far_token = K2_mid − near_token（无 64 保底；γ 高
+            # 值下 far=0 合法，topk k=0 安全返回空）
+            nt_near = min(int(nb_near * bs * p.gamma), K2_mid)
+            far_budget = max(0, K2_mid - nt_near)
+            k2_far = min(far_budget, far_tok_hi - far_tok_lo, K2_mid)
+            i_f = (
+                torch.topk(pm[:, far_tok_lo:far_tok_hi], k2_far, dim=-1).indices
+                + far_tok_lo
+            )
+            # near 池只取 mid-near 区 [far_hi, swa_lo)（权威 L976-1003：
+            # sink/swa 不进池竞争；池不足时 topk 会取 p=0 非候选位——与
+            # 权威垃圾位口径一致，tie 按索引序）
+            k2_near = max(0, K2_mid - k2_far)
+            near_pool = pm[:, far_tok_hi:swa_lo_tok]
+            i_n = (
+                torch.topk(near_pool, min(k2_near, near_pool.shape[-1]), dim=-1).indices
+                + far_tok_hi
+            )
+            # 正交强制区直接置位（权威 L1009-1011）：sink 头部 + swa 尾部
+            #（sglang real-S 语义下短序列须钳到 ≤ t——权威 padded 全历史无
+            # 此问题；对拍口径 t=S−1 时无影响）
+            sink_pos = torch.arange(min(sink_tok, T_eff), device=device)
+            swa_pos = torch.arange(swa_lo_tok, t + 1, device=device)
+            sel = torch.cat(
+                [
+                    i_f,
+                    i_n,
+                    sink_pos.view(1, -1).expand(Hkv, -1),
+                    swa_pos.view(1, -1).expand(Hkv, -1),
+                ],
+                dim=-1,
+            )  # [Hkv, ≤K2]（near 池/强制区不足 K2 时宽度收缩）
+        else:
+            # ---------- L2 单池（权威 L1013-1018）：整体 topk + swa p=1 强制 ----------
+            pm[:, max(0, T_eff - swa) : T_eff] = 1.0  # 权威 L867 p[...,-swa:]=1.0
+            sel = torch.topk(pm, min(S, p.token_budget), dim=-1).indices  # [Hkv, ≤K2]
+        # 统一宽度 K2 + 哨兵 S 右 pad（下游 valid = sel < S 统一口径；
+        # backend eager decode 的 torch.stack 要求行宽一致）
+        if sel.shape[-1] < K2:
+            pad = torch.full(
+                (Hkv, K2 - sel.shape[-1]), S, dtype=sel.dtype, device=device
+            )
+            sel = torch.cat([sel, pad], dim=-1)
+        return sel
+
+    def _select_batched_taskmd(
+        self, index: dict, q: torch.Tensor, t_arr: torch.Tensor
+    ) -> torch.Tensor:
+        """E112：prefill 批量选择的 TASK.md 语义回退——逐行 _select_taskmd。
+
+        M10 prefill 慢路径 kernel 与 B' 固定分区绑定，本分支旁路（诚实
+        降级：prefill kernel 化留第二阶段）。_select_taskmd 恒定输出宽
+        K2（池不足槽位哨兵 S 右 pad）→ 直接 stack（下游
+        valid = sel < S 统一口径）。
+        """
+        return torch.stack(
+            [
+                self._select_taskmd(index, q[i : i + 1], int(t_arr[i]))
+                for i in range(q.shape[0])
+            ]
+        )  # [Nq, Hkv, K2]
+
     def select(
         self,
         index: dict,
@@ -417,6 +719,13 @@ class TLIIndexer:
         # 泛化假设）。幂等置位，静态掩码存在时优先动态口径（阈值可关）。
         if getattr(p, "dyn_far_gate", False) and self.dyn_far_stat is not None:
             self.skip_far = self.dyn_far_stat < p.dyn_far_thresh
+        # ---- E112（#149 第一阶段）：TASK.md α/β/γ + method 组合语义 ----
+        # has_abg=True（任一 α/β/γ/far_method/near_method env 显式设置）时
+        # 走权威语义路径；use_l1_kernel/use_l2_kernel/tail_k 均为旧 B' 路径
+        # 专用（M8 fused kernel 与 B' 固定分区绑定）——本分支一律忽略，
+        # 诚实降级 eager（待第二阶段 kernel 化）。
+        if getattr(p, "has_abg", False):
+            return self._select_taskmd(index, q, t)
         S = index["S"]
         Hkv = index["kmin"].shape[1]
         H = q.shape[1]
@@ -613,6 +922,11 @@ class TLIIndexer:
         # 优先的设计覆盖，见 select() 幂等置位注释）。
         if getattr(p, "dyn_far_gate", False):
             self.skip_far = False
+        # ---- E112（#149 第一阶段）：TASK.md α/β/γ + method 组合语义 ----
+        # M7 快路径 / M10 prefill kernel 均与 B' 固定分区绑定——本分支
+        # 逐行 eager 回退（诚实降级，待第二阶段 kernel 化）。
+        if getattr(p, "has_abg", False):
+            return self._select_batched_taskmd(index, q, t_arr)
         S = index["S"]
         Hkv = index["kmin"].shape[1]
         Nq, H, D = q.shape
@@ -1065,7 +1379,7 @@ class TLIIndexer:
             return
         Hkv = k_new.shape[1]
         nd2 = self.nd2
-        d1 = p.coarse_dim
+        d1 = self.d1  # E112：has_abg+full → head_dim（与 pool 分配同口径）
         device = k_new.device
         S_cap = pool_l["kq_q"].shape[1]
         nblk_cap = pool_l["kmin"].shape[1]
@@ -1091,7 +1405,7 @@ class TLIIndexer:
 
         # ---- kmin/kmax：对齐行开新块（min=max=新 token），非对齐行
         # 与旧尾块 min/max 合并（结合律，与逐行 update 逐位一致）----
-        ks = k_new[..., self.idx1]  # [n, Hkv, d']
+        ks = k_new[..., self.idx_l1]  # [n, Hkv, d1]（E112：与 build 同维口径）
         aligned = S_old_t % bs == 0  # [n]
         nblk_old = (S_old_t + bs - 1) // bs
         blk_idx = torch.where(aligned, nblk_old, nblk_old - 1)  # 目标块
@@ -1166,6 +1480,41 @@ class TLIIndexer:
         换取形状与 S 值无关。
         """
         p = self.profile
+        # ---- E112（#149 第一阶段）：TASK.md α/β/γ + method 组合语义 ----
+        # M5 静态宽度 / M8 批量 kernel / M8-topk 压缩均与 B' 固定分区绑定
+        # ——本分支逐行 eager 回退（诚实降级，待第二阶段 kernel 化）。
+        # 注意：本路径含 torch.nonzero / int()（host 同步），不可被 CUDA
+        # graph 捕获——backend 侧 has_abg 已 veto graph（_use_graph_path）。
+        if getattr(p, "has_abg", False):
+            if torch.is_tensor(S_list):
+                S_list = S_list.to("cpu").tolist()
+            rows_l = rows.to("cpu").tolist() if torch.is_tensor(rows) else list(rows)
+            sels = []
+            for i in range(n):
+                S_i = int(S_list[i])
+                row = rows_l[i]
+                # 行 view dict（= backend._row_views 同构：容量 padding 靠
+                # index["S"]/["nblk"] 切片规避；kavg 未分配则不出键）
+                index_i = {
+                    "S": S_i,
+                    "nblk": (S_i + p.block_size - 1) // p.block_size,
+                    "kmin": pool_l["kmin"][row],
+                    "kmax": pool_l["kmax"][row],
+                    "kq_q": pool_l["kq_q"][row],
+                    "kq_sc": pool_l["kq_sc"][row],
+                    "kq_mn": pool_l["kq_mn"][row],
+                    **(
+                        {"kavg": pool_l["kavg"][row]}
+                        if "kavg" in pool_l
+                        else {}
+                    ),
+                }
+                sels.append(
+                    self._select_taskmd(index_i, q[i : i + 1], S_i - 1)
+                )
+            # _select_taskmd 恒定宽 K2；行哨兵 = S_i（< S_cap，下游
+            # valid = sel < S_i 逐行界统一掩掉）
+            return torch.stack(sels)  # [n, Hkv, K2]
         device = q.device
         n = q.shape[0]
         kq_pool, kq_sc_pool, kq_mn_pool = pool_l["kq_q"], pool_l["kq_sc"], pool_l["kq_mn"]
