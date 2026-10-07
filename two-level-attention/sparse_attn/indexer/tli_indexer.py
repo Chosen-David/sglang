@@ -26,6 +26,27 @@ DEFAULT_MASK = os.path.join(
     os.path.dirname(__file__), "..", "..", "exp", "trace", "results", "tli_layer_skip_mask.json"
 )
 
+# ---- E113b：Triton 贪心 kernel（sim_greedy 臂的 Python 循环 → GPU kernel）----
+#   开关：SGLANG_TLI_GREEDY_KERNEL（默认 1 = 用 kernel；0 = 回退 Python 循环，
+#   供对拍/回退）。kernel 本体在 sparse_attn/indexer/greedy_triton.py（与
+#   exp/trace/e113_greedy_triton.py 单一事实源），两路径语义逐位一致
+#   （exp/trace/test_e113_greedy_triton.py T1-T5 对拍 + E110/E109a 回归零差异）。
+#   惰性加载：非 sim_greedy 臂不 import triton（对正在跑的扫描臂零影响）。
+_GREEDY_TRITON_FN = None   # None=未尝试；False=不可用（回退）；其余=greedy_pass_triton
+
+
+def _load_greedy_triton():
+    global _GREEDY_TRITON_FN
+    if _GREEDY_TRITON_FN is None:
+        try:
+            from .greedy_triton import greedy_pass_triton
+            _GREEDY_TRITON_FN = greedy_pass_triton
+        except Exception as e:   # triton 缺失/导入失败 → 回退 Python 循环
+            print(f"[TLI] E113b: Triton 贪心 kernel 加载失败（{type(e).__name__}: {e}），"
+                  f"回退 Python 循环")
+            _GREEDY_TRITON_FN = False
+    return _GREEDY_TRITON_FN if _GREEDY_TRITON_FN else None
+
 
 class TLIIndexer(TIAIndexer):
     """A+B+D' 全开为 method='tli'；参数可单独关闭做消融。"""
@@ -446,7 +467,44 @@ class TLIIndexer(TIAIndexer):
 
     @staticmethod
     def _greedy_cluster_pass(x, sim, sums, cnt, sq, k_live):
-        """增量贪心聚类一趟（语义 = e64a / E108 probe 的 greedy_cluster_assign：
+        """E113b：贪心一趟的调度器 —— CUDA 上默认走 Triton kernel，否则回退 Python。
+
+        开关 SGLANG_TLI_GREEDY_KERNEL（默认 1；0 = 强制 Python 循环，供对拍/回退）。
+        回退条件：env=0 / x 在 CPU / triton 不可用 / dd 非 2 的幂（tl.arange 编译
+        硬约束；现有 sim_dims 口径全为 2 的幂，此为防御性回退）。
+        两条路径语义逐位一致（exp/trace/test_e113_greedy_triton.py 对拍 +
+        test_e113b_kernel_integration.py 开关双跑对拍）。
+        """
+        if (os.environ.get("SGLANG_TLI_GREEDY_KERNEL", "1") not in ("0", "false", "False")
+                and x.is_cuda):
+            fn = _load_greedy_triton()
+            T, H, dd = x.shape
+            if fn is not None and T > 0 and dd > 0 and (dd & (dd - 1)) == 0:
+                return TLIIndexer._greedy_cluster_pass_triton(x, sim, sums, cnt, sq,
+                                                              k_live, fn)
+        return TLIIndexer._greedy_cluster_pass_python(x, sim, sums, cnt, sq, k_live)
+
+    @staticmethod
+    def _greedy_cluster_pass_triton(x, sim, sums, cnt, sq, k_live, fn):
+        """E113b：Triton kernel 路径。长段分 chunk=16384（E113 microbench 实测最优
+        chunk，launch 间隙效应 1.75×）；分段不改语义——贪心时序跨段精确延续，
+        对拍见 test_e113_greedy_triton.py T3（分段续跑 ≡ 全量重放，逐位）。"""
+        T, H, dd = x.shape
+        CHUNK = 16384
+        if T <= CHUNK:
+            return fn(x, sim, sums, cnt, sq, k_live)
+        assign = torch.empty(H, T, dtype=torch.long, device=x.device)
+        for c0 in range(0, T, CHUNK):
+            seg = x[c0:c0 + CHUNK]
+            sums, cnt, sq, k_live, a = fn(seg, sim, sums, cnt, sq, k_live)
+            assign[:, c0:c0 + seg.shape[0]] = a
+        return sums, cnt, sq, k_live, assign
+
+    @staticmethod
+    def _greedy_cluster_pass_python(x, sim, sums, cnt, sq, k_live):
+        """增量贪心聚类一趟 —— Python 参考实现（E110 原版原样保留；E113b 起
+        作为 SGLANG_TLI_GREEDY_KERNEL=0 的回退路径与对拍基准。语义 =
+        e64a / E108 probe 的 greedy_cluster_assign：
         token 按序到达，与现有簇心（成员 running mean）余弦相似度最大的活簇
         cos >= sim 则归并，否则新建簇；簇心由 sums/cnt 增量维护（算术均值）。
 

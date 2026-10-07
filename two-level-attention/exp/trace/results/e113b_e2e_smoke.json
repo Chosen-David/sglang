@@ -1,0 +1,50 @@
+{
+  "experiment": "E113b",
+  "title": "Triton 贪心 kernel 接入 e2e 路径（tli_indexer.py 调度器 + 开关对拍）",
+  "date": "2026-10-07",
+  "integration": {
+    "kernel_module": "two-level-attention/sparse_attn/indexer/greedy_triton.py",
+    "dispatcher": "TLIIndexer._greedy_cluster_pass（env SGLANG_TLI_GREEDY_KERNEL，默认 1=kernel，0=Python 回退）",
+    "fallback_conditions": "env=0 / CPU / triton 导入失败 / dd 非 2 的幂（tl.arange 编译硬约束）",
+    "paths_covered": ["far 冷启动全量（_update_far_greedy COLD）", "far decode 增量续跑（far_hi 前移段）", "near 侧全量重建（_update_near_cluster sim_greedy 分支）"],
+    "long_segment_chunking": "chunk=16384（E113 microbench 实测最优；分段不改语义，T3 对拍）",
+    "lazy_import": "非 sim_greedy 臂不 import triton（对在跑扫描臂零影响）"
+  },
+  "verification": {
+    "kernel_vs_python_bitwise": {
+      "test": "exp/trace/test_e113_greedy_triton.py",
+      "result": "5/5 PASS；T2 多 seed 393216 token 位 0 mismatch（8 seed × 3 sim）"
+    },
+    "integration_switch_bitwise": {
+      "test": "two-level-attention/test_e113b_kernel_integration.py",
+      "result": "5/5 PASS（调度器对拍 T=8192 多 head；增量≡全量重放；cavg_sim/ccluster_sim 全链路 mask 逐位一致；clear 重置；env 路由 + dd 非 2 幂回退）"
+    },
+    "regression_e110": "test_e110_ccluster.py 9/9 PASS（CPU 自动回退 Python 路径）",
+    "regression_e109a": "/tmp/e109a_regression_test.py ALL PASS（6/6）",
+    "incremental_equals_replay": "E110 铁律保持：kernel 路径 S 6144→6656 增量 8 次 assign 逐位 == 全量重放"
+  },
+  "e2e_smoke": {
+    "config": "Qwen3-8B, hotpotqa 8 样本临时集, ccluster_sim 臂（far+near 双 sim_greedy, sim=0.9）, α=0.125 β=0.25 γ=0.75, K1=128 K2=1024 cmp4, layer_skip=false, GPU1（与 E109 v2 扫描共存）",
+    "kernel_on": {
+      "pred_file": "/tmp/e113b_smoke/out_kernel/pred_e113b_kernel/hotpotqa-tli_64_128_1024_c4_AB-benchmarklaunchtime.jsonl",
+      "wall_time_s": 168,
+      "sec_per_sample": 21.1,
+      "ave_budget": 942.5625
+    },
+    "kernel_off_python": {
+      "pred_file": "/tmp/e113b_smoke/out_python/pred_e113b_python/hotpotqa-tli_64_128_1024_c4_AB-benchmarklaunchtime.jsonl",
+      "wall_time_s": 1290,
+      "sec_per_sample": 160.0,
+      "ave_budget": 942.5625
+    },
+    "bitwise_verdict": "8 样本全字段逐位比对差异字段数 = 0；pred 逐字节相等；ave_budget 逐位相同（942.5625）",
+    "e2e_speedup": 7.7,
+    "note": "GPU 与 E109 扫描共享，绝对时间含干扰；相对比口径可信（贪心段 Python 253μs/token → Triton 17μs/token）"
+  },
+  "deployment_remote": {
+    "rsync_target": "sparse_attn 目录（kernel 本体 greedy_triton.py 随目录携带）",
+    "env": "SGLANG_TLI_GREEDY_KERNEL 默认 1，无需显式设置；回退设 0",
+    "remote_env_verified": "torch 2.8.0+cu128 + triton 3.4.0（与本机同版本）+ py3.9.9（全部改动 ast feature_version=(3,9) 语法检查通过）",
+    "triton_cache": "首次 launch JIT 编译（DD/BT 特化），TRITON_CACHE_DIR 需可写，默认 ~/.triton/cache"
+  }
+}
