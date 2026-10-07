@@ -1,0 +1,14 @@
+{
+ "exp": "E109 interim",
+ "finding": "aavg_a0.125_b0.25_g0.375 vs mavg_a0.125_b0.25_g0.375 pred 逐位相同 400/400（hq 200 + mu 200）",
+ "context": {
+  "E105 已知坍缩": "高α/β(0.875) aavg≡mminmax 逐位同（far 池坍缩至 method 差异不可见）",
+  "E109 新增坍缩": "低α(0.125) aavg≡mavg 逐位同——far_method avg vs minmax 在此配置 e2e 零影响",
+  "待判定": "aavg a0.5 中间点臂（扫描内）出来后可判定 far_method=avg 是否在 e2e 路径全局未生效（E110 口径发现：subspace=full → L1 分数源退化疑云）",
+  "推翻注意": "E105 aavg 全量 50.29 vs mavg 50.78 差异全部来自 (α,β,γ) 配置差异而非 far_method——method 矩阵 e2e 真实自由度可能远小于名义 5 组合"
+ },
+ "evidence": {
+  "hotpotqa": "200/200 identical",
+  "musique": "200/200 identical"
+ }
+}
