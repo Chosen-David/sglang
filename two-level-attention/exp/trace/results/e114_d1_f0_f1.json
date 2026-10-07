@@ -1,0 +1,79 @@
+{
+ "experiment": "E114 (R2a-D1): F0 vs F1 equal-width-32 real-scalar discrimination",
+ "source_doc": "research/docs/子空间设计改进建议_by_gpt (1).md §15.4/§18.7/§19.4/§19.6",
+ "protocol": "E65 group-C: coarse fixed tail32 minmax top16 blocks, fine per-arm feature top512, oracle = full-dim softmax per-head far mass capture",
+ "arms": {
+  "F0": "16 original complete rotation pairs (tail32 isomorphic, 48..63+112..127)",
+  "F1": "8 key FCs (lowest-freq pairs j=56..63, 16 scalars) + H-orthogonal-complement shared-SVD top-8 (16 scalars real dims) = 24 scalars",
+  "F1w": "8 key FCs (16) + H shared-SVD top-16 (16) = 32 scalars equal-width"
+ },
+ "summary": {
+  "C_F0_16pairs_b64": {
+   "mean": 0.8709,
+   "n": 50
+  },
+  "C_F1_8fcH8_b64": {
+   "mean": 0.8666,
+   "n": 50
+  },
+  "C_F1w_8fcH16_eq32_b64": {
+   "mean": 0.8697,
+   "n": 50
+  },
+  "oracle128_b64": {
+   "mean": 0.9993,
+   "n": 50
+  },
+  "L_score_sq": {
+   "mean": 26.9877,
+   "n": 150
+  },
+  "L_sens_alpha_abs_e": {
+   "mean": 0.7623,
+   "n": 150
+  },
+  "CA_F0_F1w": {
+   "mean": 0.6542,
+   "n": 150
+  },
+  "C_F0_16pairs_b128": {
+   "mean": 0.8712,
+   "n": 50
+  },
+  "C_F1_8fcH8_b128": {
+   "mean": 0.8705,
+   "n": 50
+  },
+  "C_F1w_8fcH16_eq32_b128": {
+   "mean": 0.8709,
+   "n": 50
+  },
+  "oracle128_b128": {
+   "mean": 0.9998,
+   "n": 50
+  },
+  "C_F0_16pairs_b256": {
+   "mean": 0.8712,
+   "n": 50
+  },
+  "C_F1_8fcH8_b256": {
+   "mean": 0.8712,
+   "n": 50
+  },
+  "C_F1w_8fcH16_eq32_b256": {
+   "mean": 0.8712,
+   "n": 50
+  },
+  "oracle128_b256": {
+   "mean": 1.0,
+   "n": 50
+  }
+ },
+ "discrimination_gate": "F1/F1w mass recall must BEAT F0 to proceed to D2 teacher-forced (doc §15.4)",
+ "per_budget_verdict": [
+  "b64: F0=0.8709 F1w=0.8697 oracle=0.9993 — F0 wins",
+  "b128: F0=0.8712 F1w=0.8709 oracle=0.9998 — F0 wins",
+  "b256: F0=0.8712 F1w=0.8712 oracle=1.0 — tie"
+ ],
+ "verdict": "saturation analysis: b512 oracle=1.0 (mass locked by coarse pool); discrimination at b64/128/256 — F1 never beats F0 → STOP per §15.4"
+}
