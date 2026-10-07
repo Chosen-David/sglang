@@ -124,6 +124,16 @@
   "musique": 16.99,
   "avg2": 27.73
  },
+ "E109_mminmax_a0.25_b0.5_g0.5": {
+  "hotpotqa": 42.12,
+  "musique": 19.43,
+  "avg2": 30.77
+ },
+ "E109_mminmax_a0.25_b0.875_g0.5": {
+  "hotpotqa": 41.73,
+  "musique": 19.4,
+  "avg2": 30.56
+ },
  "E109_mminmax_a0.875_b0.875_g0.125": {
   "hotpotqa": 53.11,
   "musique": 32.12,
