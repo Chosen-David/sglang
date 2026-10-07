@@ -6,5 +6,9 @@
  "E109_mminmaxCHAMP_a0.875_b0.875_g0.5": {
   "hotpotqa": 53.11,
   "musique": 32.12
+ },
+ "E109_aavgCHAMP_a0.875_b0.875_g0.375": {
+  "hotpotqa": 53.23,
+  "musique": 30.17
  }
 }
