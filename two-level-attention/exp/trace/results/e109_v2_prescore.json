@@ -64,10 +64,60 @@
   "musique": 29.3,
   "avg2": 43.04
  },
+ "E109_cavgsim_a0.125_b0.25_g0.125": {
+  "hotpotqa": 54.45,
+  "musique": 33.39,
+  "avg2": 43.92
+ },
+ "E109_cavgsim_a0.125_b0.25_g0.25": {
+  "hotpotqa": 55.63,
+  "musique": 31.66,
+  "avg2": 43.65
+ },
+ "E109_cavgsim_a0.125_b0.25_g0.75": {
+  "hotpotqa": 37.93,
+  "musique": 17.13,
+  "avg2": 27.53
+ },
+ "E109_cavgsim_a0.5_b0.125_g0.75": {
+  "hotpotqa": 48.86,
+  "musique": 23.75,
+  "avg2": 36.3
+ },
+ "E109_cavgsim_a0_b0_g0": {
+  "hotpotqa": 54.36,
+  "musique": 33.41,
+  "avg2": 43.88
+ },
  "E109_cclusterkm_a0.125_b0.25_g0.75": {
   "hotpotqa": 37.94,
   "musique": 16.73,
   "avg2": 27.34
+ },
+ "E109_cclustersim_a0.125_b0.25_g0.125": {
+  "hotpotqa": 54.8,
+  "musique": 34.12,
+  "avg2": 44.46
+ },
+ "E109_cclustersim_a0.125_b0.25_g0.25": {
+  "hotpotqa": 55.1,
+  "musique": 32.05,
+  "avg2": 43.58
+ },
+ "E109_cclustersim_a0.125_b0.25_g0.75": {
+  "hotpotqa": 37.65,
+  "musique": 16.81,
+  "avg2": 27.23
+ },
+ "E109_cclustersim_a0.5_b0.125_g0.75": {
+  "hotpotqa": 48.32,
+  "musique": 23.62,
+  "avg2": 35.97
+ },
+ "E109_cclustersim_a0_b0_g0": {
+  "hotpotqa": 54.36,
+  "musique": 33.41,
+  "avg2": 43.88
  },
  "E109_mavgCHAMP_a0.125_b0.375_g0.625": {
   "hotpotqa": 37.7,
