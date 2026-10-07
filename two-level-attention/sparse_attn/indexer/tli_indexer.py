@@ -305,6 +305,10 @@ class TLIIndexer(TIAIndexer):
             sink_tok = self.sink_blocks * bs
             mid_len = max(0, S - sink_tok - swa_tok)
             near_len_dyn = max(bs, int(self.alpha * mid_len))
+        elif self.far_select != "4bit" and self.alpha == 0 and self.beta == 0:
+            # TASK.md L231 严格口径：cluster 组合 (0,0) 单池点 = 纯 cluster 全 mid
+            # （near 区空；swa 仍正交强制不占预算）
+            near_len_dyn = swa_tok
         else:
             near_len_dyn = self.near_len
         far_hi_blk = max(self.sink_blocks + 1, (S - near_len_dyn) // bs)
@@ -725,6 +729,9 @@ class TLIIndexer(TIAIndexer):
             sink_tok = self.sink_blocks * bs
             mid_len = max(0, kt * bs - sink_tok - swa_tok)
             near_len_dyn = max(bs, int(self.alpha * mid_len))  # near 只算 mid 部分（不含 swa）
+        elif self.far_select != "4bit" and self.alpha == 0 and self.beta == 0:
+            # TASK.md L231 严格口径：cluster 组合 (0,0) 单池点 = 纯 cluster 全 mid
+            near_len_dyn = swa_tok
         else:
             near_len_dyn = self.near_len
         near_blks = max(self.sink_blocks, (kt * bs - near_len_dyn) // bs)
@@ -935,6 +942,10 @@ class TLIIndexer(TIAIndexer):
                         nt_near = min(int(nb_near * bs * self.gamma), K2_mid)
                         # TASK.md L172 严格口径（与 E109a-γ 同步）：无 64 保底
                         far_budget = max(0, K2_mid - nt_near)
+                    elif self.alpha == 0 and self.beta == 0:
+                        # TASK.md L231 严格口径：cluster 组合 (0,0) 单池点
+                        # far（簇分）拿全部 mid 预算（near 区已空）
+                        far_budget = K2_mid
                     else:
                         far_budget = self.far_tokens
                     k2_far = min(far_budget, Tfar, K2_mid)
