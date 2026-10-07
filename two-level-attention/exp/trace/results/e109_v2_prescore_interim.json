@@ -1,0 +1,109 @@
+{
+ "experiment": "E109 v2 interim prescore (20 complete arms, hq+mu screen, n=200)",
+ "note": "cavgsim(.125,.25,.75) hq=37.93 partial entry kept separately; gamma-cliff model 20/20 consistent",
+ "single_pool_far_method_comparison": {
+  "far_avg": {
+   "hq": 57.26,
+   "mu": 30.52,
+   "avg": 72.52
+  },
+  "far_sim_greedy": {
+   "hq": 54.36,
+   "mu": 33.41,
+   "avg": 71.06,
+   "note": "cavg(0,0)≡ccluster(0,0) legal: single-pool near inactive"
+  },
+  "far_minmax": {
+   "hq": 53.89,
+   "mu": 32.59,
+   "avg": 70.19
+  }
+ },
+ "new_this_round": [
+  "aavg(.5,.125,.375)=55.08/31.84 -> rank #3 (far_budget=576 healthy)",
+  "cavgsim(0,0)=cclustersim(0,0)=54.36/33.41: sim_greedy far wins musique (+2.89 vs avg far) but loses hotpotqa (-2.9)",
+  "cavgsim(.125,.25,.75) hq=37.93: gamma cliff (beta=.25 threshold gamma=.375, .75 >>) confirmed on cluster path"
+ ],
+ "arms": {
+  "E109_mavg_a0.125_b0.125_g0.625": {
+   "hotpotqa": 54.37,
+   "musique": 34.3
+  },
+  "E109_mavg_a0.125_b0.875_g0.625": {
+   "hotpotqa": 38.48,
+   "musique": 16.99
+  },
+  "E109_mavg_a0.25_b0.125_g0.625": {
+   "hotpotqa": 53.53,
+   "musique": 35.63
+  },
+  "E109_mavg_a0_b0_g0": {
+   "hotpotqa": 53.89,
+   "musique": 32.59
+  },
+  "E109_mavg_a0.25_b0.5_g0.625": {
+   "hotpotqa": 42.12,
+   "musique": 19.43
+  },
+  "E109_mavg_a0.25_b0.875_g0.625": {
+   "hotpotqa": 41.73,
+   "musique": 19.4
+  },
+  "E109_mavg_a0.5_b0.5_g0.625": {
+   "hotpotqa": 48.37,
+   "musique": 23.47
+  },
+  "E109_mavg_a0.125_b0.375_g0.125": {
+   "hotpotqa": 54.43,
+   "musique": 34.76
+  },
+  "E109_mavg_a0.125_b0.375_g0.25": {
+   "hotpotqa": 37.7,
+   "musique": 17.51
+  },
+  "E109_mavg_a0.5_b0.375_g0.625": {
+   "hotpotqa": 48.46,
+   "musique": 24.92
+  },
+  "E109_mavg_a0.875_b0.25_g0.625": {
+   "hotpotqa": 53.04,
+   "musique": 29.7
+  },
+  "E109_mavg_a0.875_b0.375_g0.625": {
+   "hotpotqa": 53.87,
+   "musique": 30.03
+  },
+  "E109_aavg_a0.125_b0.125_g0.375": {
+   "hotpotqa": 53.72,
+   "musique": 33.63
+  },
+  "E109_aavg_a0_b0_g0": {
+   "hotpotqa": 57.26,
+   "musique": 30.52
+  },
+  "E109_mavg_a0.125_b0.375_g0.75": {
+   "hotpotqa": 37.7,
+   "musique": 17.51
+  },
+  "E109_aavg_a0.25_b0.125_g0.375": {
+   "hotpotqa": 53.61,
+   "musique": 33.12
+  },
+  "E109_aavg_a0.125_b0.875_g0.375": {
+   "hotpotqa": 38.19,
+   "musique": 17.78
+  },
+  "E109_aavg_a0.5_b0.125_g0.375": {
+   "hotpotqa": 55.08,
+   "musique": 31.84
+  },
+  "E109_cavgsim_a0_b0_g0": {
+   "hotpotqa": 54.36,
+   "musique": 33.41
+  },
+  "E109_cclustersim_a0_b0_g0": {
+   "hotpotqa": 54.36,
+   "musique": 33.41
+  }
+ }
+}
