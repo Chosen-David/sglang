@@ -1,0 +1,53 @@
+{
+  "meta": {
+    "bench": "E113 sim_greedy kernel microbench（#150 备用脚本）",
+    "device": "NVIDIA H20-3e",
+    "data": "synthetic（簇结构合成；--dump 接真实 k 待补）",
+    "note": "reference=HEAD Python 循环基线；cudagraph=C1 原型；fused=V1 kernel TODO",
+    "started": "2026-10-07 14:18:24"
+  },
+  "grid": [
+    {
+      "T": 4096,
+      "sim": 0.9,
+      "dd": 32,
+      "H": 8,
+      "reference_s": 1.0568,
+      "us_per_token": 258.01,
+      "C_over_N": 0.2466,
+      "cudagraph_s": 0.4276,
+      "cudagraph_speedup": 2.47,
+      "assign_diff_rate": 0.0,
+      "klive_match": true,
+      "fused": "TODO（CUDA persistent kernel 落地后接入）"
+    },
+    {
+      "T": 8192,
+      "sim": 0.9,
+      "dd": 32,
+      "H": 8,
+      "reference_s": 2.0925,
+      "us_per_token": 255.43,
+      "C_over_N": 0.2467,
+      "cudagraph_s": 0.8621,
+      "cudagraph_speedup": 2.43,
+      "assign_diff_rate": 0.0,
+      "klive_match": true,
+      "fused": "TODO（CUDA persistent kernel 落地后接入）"
+    },
+    {
+      "T": 16384,
+      "sim": 0.9,
+      "dd": 32,
+      "H": 8,
+      "reference_s": 4.4016,
+      "us_per_token": 268.65,
+      "C_over_N": 0.246,
+      "cudagraph_s": 1.928,
+      "cudagraph_speedup": 2.28,
+      "assign_diff_rate": 0.0,
+      "klive_match": true,
+      "fused": "TODO（CUDA persistent kernel 落地后接入）"
+    }
+  ]
+}
