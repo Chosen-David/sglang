@@ -1,4 +1,13 @@
 {
- "tasks": {},
+ "tasks": {
+  "E109_cavgsim_a0.125_b0.25_g0.125": {
+   "qasper": 43.32,
+   "hotpotqa": 54.45,
+   "musique": 33.39,
+   "gov_report": 33.18,
+   "repobench-p": 66.93,
+   "AVG5": 46.25
+  }
+ },
  "note": "E109 海选五任务（qasper/hotpotqa/musique/gov_report/repobench-p）增量落袋；YaRN 外推口径待全量 RULER 阶段按 Prism 配置统一"
 }
