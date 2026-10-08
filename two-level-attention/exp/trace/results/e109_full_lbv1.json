@@ -1,0 +1,63 @@
+{
+  "FullKV": {
+    "avg": 50.36,
+    "per_task": {
+      "2wikimqa": 38.29,
+      "gov_report": 33.17,
+      "hotpotqa": 53.48,
+      "lcc": 68.81,
+      "multifieldqa_en": 53.4,
+      "multi_news": 24.93,
+      "musique": 32.14,
+      "narrativeqa": 25.61,
+      "passage_retrieval_en": 100.0,
+      "qasper": 44.17,
+      "qmsum": 23.53,
+      "repobench": 66.5,
+      "triviaqa": 90.71
+    },
+    "n_tasks": 13
+  },
+  "mavg(.25,.125,.625)": {
+    "avg": 50.66,
+    "per_task": {
+      "2wikimqa": 39.64,
+      "gov_report": 33.4,
+      "hotpotqa": 53.53,
+      "lcc": 69.24,
+      "multifieldqa_en": 52.93,
+      "multi_news": 24.32,
+      "musique": 35.63,
+      "narrativeqa": 25.18,
+      "passage_retrieval_en": 98.5,
+      "qasper": 44.21,
+      "qmsum": 23.99,
+      "repobench": 67.96,
+      "triviaqa": 89.99
+    },
+    "n_tasks": 13
+  },
+  "aavg(0,0)": {
+    "avg": 50.26,
+    "per_task": {
+      "2wikimqa": 39.53,
+      "gov_report": 33.44,
+      "hotpotqa": 57.26,
+      "lcc": 68.94,
+      "multifieldqa_en": 53.78,
+      "multi_news": 24.65,
+      "musique": 30.52,
+      "narrativeqa": 23.48,
+      "passage_retrieval_en": 100.0,
+      "qasper": 44.19,
+      "qmsum": 23.97,
+      "repobench": 63.72,
+      "triviaqa": 89.96
+    },
+    "n_tasks": 13
+  },
+  "delta_vs_fullkv": {
+    "mavg(.25,.125,.625)": 0.3,
+    "aavg(0,0)": -0.1
+  }
+}
