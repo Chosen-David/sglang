@@ -878,12 +878,18 @@ class TLIIndexer(TIAIndexer):
                 -1, indices, torch.ones_like(indices, dtype=torch.bool)
             )
             import os as _os
-            if _os.environ.get("TLI_DEBUG") and self.layer_idx == 1:
+            # TLI_DEBUG 显式布尔解析（字符串 "0"/"" 均为关——原字符串真值
+            # 会把 TLI_DEBUG=0 也判开）；far-empty（i_f 空）时 min/max 用
+            # -1 哨兵（与 i_n 同款保护，TL-DEBUG-FAR-EMPTY-006）
+            _dbg = _os.environ.get("TLI_DEBUG", "").strip().lower() not in ("", "0", "false")
+            if _dbg and self.layer_idx == 1:
                 i_n_min = i_n.min().item() if i_n.numel() else -1
                 i_n_max = i_n.max().item() if i_n.numel() else -1
+                i_f_min = i_f.min().item() if i_f.numel() else -1
+                i_f_max = i_f.max().item() if i_f.numel() else -1
                 print(f"[L1dbg] kt={kt} near_blks={near_blks} swa_lo_blk={swa_lo_blk} "
                       f"nb_far={nb_far} nb_near={nb_near} "
-                      f"i_f_blk_min={i_f.min().item()} i_f_blk_max={i_f.max().item()} "
+                      f"i_f_blk_min={i_f_min} i_f_blk_max={i_f_max} "
                       f"i_n_blk_min={i_n_min} i_n_blk_max={i_n_max}", flush=True)
         else:
             # E109a 修复：单池（α=0 或 β=0）L1 分数源按 far_method 选择

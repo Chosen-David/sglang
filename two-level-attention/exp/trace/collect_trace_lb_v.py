@@ -44,6 +44,30 @@ PROMPTS = {
 CAPTURE = {"enabled": False, "sink": None}
 
 
+def _sample_complete(pdir, layer_set):
+    """TL-TRACE-COMPLETE-004 修复 2/3：幂等跳过条件 = meta 存在且声明层
+    覆盖请求层、且每个 layerNN.pt 可回读且含 k/v/q/qpos/S 五键。
+
+    旧条件只看 meta.json 存在——请求层集合被冒充已采集层、截断/损坏的
+    .pt 也会被跳过，缺层 trace 被静默当完整样本消费。
+    """
+    mpath = os.path.join(pdir, "meta.json")
+    if not os.path.exists(mpath):
+        return False
+    try:
+        meta = json.load(open(mpath))
+        if not set(layer_set) <= set(meta.get("layers", [])):
+            return False
+        for l in layer_set:
+            d = torch.load(os.path.join(pdir, f"layer{l:02d}.pt"),
+                           map_location="cpu")
+            if not {"k", "v", "q", "qpos", "S"} <= set(d):
+                return False
+    except Exception:
+        return False
+    return True
+
+
 def _extract_value(key_states, args, kwargs):
     """从 sdpa attention 调用中防御性提取 value_states。
 
@@ -103,6 +127,12 @@ def main():
         trust_remote_code=True, attn_implementation="sdpa").eval()
     install_hook()
     n_layers = model.config.num_hidden_layers
+    # TL-TRACE-COMPLETE-004 修复 1/3：模型加载后立即校验层号范围/非空
+    # （非法输入在任何样本执行前失败，不留半成品目录）
+    assert layer_set, "--layers 解析为空集"
+    bad_layers = sorted(l for l in layer_set if not (0 <= l < n_layers))
+    assert not bad_layers, \
+        f"层号越界 {bad_layers}（num_hidden_layers={n_layers}，合法 [0,{n_layers})）"
 
     for ds in datasets:
         tmpl = PROMPTS[ds]
@@ -111,7 +141,7 @@ def main():
         for si, row in enumerate(rows):
             name = f"lb_{ds}_{si}"
             pdir = os.path.join(ns.out, name)
-            if os.path.exists(os.path.join(pdir, "meta.json")):
+            if _sample_complete(pdir, layer_set):
                 print(f"[{name}] exists, skip")
                 continue
             os.makedirs(pdir, exist_ok=True)
@@ -151,8 +181,16 @@ def main():
             CAPTURE["sink"] = sink
             CAPTURE["enabled"] = True
             with torch.no_grad():
-                out = model(torch.tensor([ids], device=ns.device))
+                # TL-TRACE-LOGITS-005 修复：只消费末 token 预测，logits_to_keep=1
+                # 免算全序列 vocab logits（32K token × 151936 vocab × bf16 ≈ 9.27 GiB
+                # 纯浪费峰值；接口为 transformers v4.5x Qwen3 forward 语义）
+                out = model(torch.tensor([ids], device=ns.device), logits_to_keep=1)
             CAPTURE["enabled"] = False
+            # TL-TRACE-COMPLETE-004 修复 3/3：请求层必须全部命中 hook 才发布
+            # 完成标记——缺层（接口漂移/hook 未触发）硬失败，不写 meta.json
+            missing = layer_set - set(stored)
+            assert not missing, \
+                f"[{name}] hook 未命中层 {sorted(missing)}——trace 不完整，不发布完成标记"
             for layer_idx, (k, v, qi, qpos) in stored.items():
                 torch.save({"k": k, "v": v, "q": qi, "qpos": qpos, "S": S},
                            os.path.join(pdir, f"layer{layer_idx:02d}.pt"))

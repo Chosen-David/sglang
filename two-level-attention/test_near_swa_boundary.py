@@ -168,6 +168,29 @@ def n6_short_seq_far_empty():
         assert bool(mask.all()), (
             f"far-empty 路径 mask 非全 True（{n_true}/{S}）——C-1 空池控制流被"
             f"旁路（单池兜底只给 K2=100）或强制区缺失")
+        # 【TL-DEBUG-FAR-EMPTY-006 回归】far-empty + layer_idx=1 + TLI_DEBUG=1：
+        # 调试打印访问空 i_f 的 min/max 须用 -1 哨兵不崩（修复前直接
+        # i_f.min() RuntimeError）；同时核对哨兵值确实打印出来
+        import contextlib
+        import io
+        _old_dbg = os.environ.get("TLI_DEBUG")
+        os.environ["TLI_DEBUG"] = "1"
+        buf = io.StringIO()
+        try:
+            idx_dbg = IDX_OLD.TLIIndexer(args)
+            idx_dbg.layer_idx = 1
+            cu = torch.tensor([0, S])
+            q_ids = torch.tensor([S - 1])
+            with contextlib.redirect_stdout(buf):
+                idx_dbg.prepare_mask(q, q_ids, k, cu, q.shape[-1] ** -0.5)
+        finally:
+            if _old_dbg is None:
+                os.environ.pop("TLI_DEBUG", None)
+            else:
+                os.environ["TLI_DEBUG"] = _old_dbg
+        dbg = buf.getvalue()
+        assert "i_f_blk_min=-1" in dbg, \
+            f"far-empty 调试打印未出空哨兵（TL-DEBUG-FAR-EMPTY-006 回归）: {dbg!r}"
         assert bool(mask[..., :sink_blocks * bs].all()), "sink 强制区缺失"
         assert bool(mask[..., max(0, S - swa_tok):].all()), "swa 强制区缺失"
         report(name, True, f"far 区宽 {far_width}（空）、i_f/sc_near 空池不崩、"
