@@ -147,6 +147,36 @@ class TLISparseAttnBackend(AttentionBackend):
             assert self.proj_basis.shape[:1] == (n_layers,), (
                 f"PCA basis 层数 {self.proj_basis.shape[0]} != 模型 {n_layers}"
             )
+            # bug3 修复（GPT 复查 2026-10-08）：PCA basis 按全局 Hkv 离线
+            # 校准（[n_layers, Hkv_global, D, r]），TP>1 时每卡只持有
+            # Hkv_global/attn_tp_size 个 kv-head——原样传给 TLIIndexer
+            # （basis[li] 的 Hkv 维 = 全局值）形状错配即崩，且 TP=1 下
+            # Hkv 不匹配也无断言（静默错用防线缺失）。修复=按 attn_tp_rank
+            # 切本卡 kv-head 片 + 两种情形都断言 Hkv 对齐。
+            try:
+                from sglang.srt.distributed import get_parallel
+
+                _par = get_parallel()
+                _tp_size, _tp_rank = _par.attn_tp_size, _par.attn_tp_rank
+            except Exception:
+                _tp_size, _tp_rank = 1, 0
+            _g = int(self.proj_basis.shape[1])
+            if _tp_size > 1:
+                assert _g % _tp_size == 0, (
+                    f"PCA basis 全局 Hkv {_g} 不能被 attn_tp_size {_tp_size} 整除"
+                )
+                _per = _g // _tp_size
+                assert _per == self.num_kv_heads, (
+                    f"PCA basis 每卡 Hkv {_per} != 本卡 num_kv_heads "
+                    f"{self.num_kv_heads}"
+                )
+                self.proj_basis = self.proj_basis[
+                    :, _tp_rank * _per : (_tp_rank + 1) * _per
+                ]
+            else:
+                assert _g == self.num_kv_heads, (
+                    f"PCA basis Hkv {_g} != num_kv_heads {self.num_kv_heads}"
+                )
         self.dense_threshold = self.profile.dense_threshold
         # 新版 sglang：pool 挂在 model_runner 上（ForwardBatch 不再携带）
         self.token_to_kv_pool = runner.token_to_kv_pool
