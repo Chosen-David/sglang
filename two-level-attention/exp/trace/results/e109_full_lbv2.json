@@ -1,0 +1,31 @@
+{
+  "experiment": "E109_full_suite_piece2_lbv2",
+  "date": "2026-10-09",
+  "model": "Qwen3-8B",
+  "protocol": {
+    "task": "lbv2 (LongBench-v2) 503 题四选一 MCQ",
+    "metric": "lbv2_choice_score accuracy",
+    "max_length": 31500,
+    "maxlen": 128,
+    "official_prompt": "0shot 官方模板",
+    "caveat": "内部 31.5K 中段截断口径 vs 官方 120K——绝对分不可横比官方榜单，三臂同口径内部公平",
+    "sharding": "每臂拆 3 份 (168+168+167) 三机并行，合并后 _id 序 0..502 与源逐位断言通过"
+  },
+  "arms": {
+    "FullKV": {
+      "score": 32.21,
+      "method": "none",
+      "shards": "H20 GPU0/2/4"
+    },
+    "mavg_a0.25_b0.125_g0.625": {
+      "score": 32.01,
+      "method": "far=minmax near=avg",
+      "shards": ".187 GPU1/3/5",
+      "delta_vs_fullkv": -0.2
+    }
+  },
+  "pending": {
+    "aavg_a0_b0_g0": "3 分片在跑 (H20 GPU6/7 p1/p2 + .187 GPU6 p3)"
+  },
+  "lbv1_side_effect": "mavg 合并目录同含 v1 12/13 任务分数（multi_news 在跑）AVG12=52.85 临时值"
+}
