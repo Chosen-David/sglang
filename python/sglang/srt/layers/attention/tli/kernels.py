@@ -154,7 +154,8 @@ def tli_l2_partition_topk(
     """返回 [Hkv, K2] 选中 token 位置（int64，池不足时 pad = 哨兵 S）。
 
     哨兵约定：位置合法值域 [0, S)，S 为 pad；下游 valid = sel < S。
-    topk 池不足时选到 -inf pad lane → gather 出哨兵 S，天然去 junk。
+    topk 池不足时选到 -inf 槽位（pad lane 或池外真实候选位）→
+    keep 掩码统一转哨兵 S（见下 F04 轮修复注记）。
 
     与 eager select 的精确对齐（两处语义修正的来源）：
     - 滑窗 [sw_lo, t] 全部位置强制入选（不管是否候选——eager 的 +inf
@@ -184,8 +185,18 @@ def tli_l2_partition_topk(
     k2_near_eff = max(0, k2_near - F)
     i_f = torch.topk(far_scr, k2_far, dim=-1).indices  # [HKV, k2_far] 精确
     i_n = torch.topk(near_scr, k2_near_eff, dim=-1).indices
+    sc_f = torch.gather(far_scr, 1, i_f)
+    sc_n = torch.gather(near_scr, 1, i_n)
     sel_f = torch.gather(cand_pad.expand(HKV, -1), 1, i_f)
     sel_n = torch.gather(cand_pad.expand(HKV, -1), 1, i_n)
+    # bug1 修复（GPT 复查 2026-10-08，S3 同类漏网）：topk 的 -inf 槽位
+    # 有两类——pad lane（cand_pad[S] 本就是哨兵）与**池内真实候选位**
+    # （far_scr 对 near/swa 候选也写 -inf）。后者 gather 出真实 token
+    # 位置 → 下游 valid = sel < S 判有效、以真实 logit 计入（错误池
+    # token 混入选中集）。补 keep 掩码统一转哨兵 S——与 select() /
+    # select_decode_batched 的 where(sc > -inf, ..., S) 同款口径。
+    sel_f = torch.where(sc_f > float("-inf"), sel_f, S)
+    sel_n = torch.where(sc_n > float("-inf"), sel_n, S)
     forced = torch.arange(sw_lo, t + 1, device=q.device).unsqueeze(0).expand(HKV, -1)
     return torch.cat([sel_f, sel_n, forced], dim=-1)  # [HKV, K2]（池足时）
 

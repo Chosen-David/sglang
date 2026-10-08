@@ -584,8 +584,10 @@ class TLIIndexer:
 
         # ---- L2: 4bit 部分维 token 精筛 ----
         # fused 分区 kernel（单 launch/head：精筛分数 + far/near 分区 topk +
-        # 滑窗强制 + 直接写位置）。D' 跳层 / far 区为空时退回 eager。
-        if use_l2_kernel and not self.skip_far:
+        # 滑窗强制 + 直接写位置）。D' 跳层 / far 区为空 / q_agg=max（kernel
+        # 内 group-sum，max 聚合不支持，bug2 修复新增旁路条件）时退回 eager。
+        q_agg_max = getattr(p, "q_agg", "sum") == "max"
+        if use_l2_kernel and not self.skip_far and not q_agg_max:
             far_tok_lo = p.sink_blocks * p.block_size
             far_tok_hi = max(far_tok_lo, t + 1 - p.near_len)
             if far_tok_hi > far_tok_lo:
@@ -618,13 +620,20 @@ class TLIIndexer:
 
         nd2 = self.nd2
         kq = index["kq_q"]  # M6 uint8 格点 [S, Hkv, nd2]（容量 padding 靠 cand_pos < S 规避）
-        q2 = self._q_refine(q).reshape(1, Hkv, G, nd2).sum(2)  # [1, Hkv, nd2]
+        # bug2 修复（GPT 复查 2026-10-08）：q_agg=max 原在 decode per-request
+        # 路径未生效（此处写死 sum，仅 prefill L1003/L1042/L1211 有分支）。
+        # max = 逐 q-head 打分取组内 max（#58 30B G=8 投影符号冲突时
+        # sum 互相抵消 → 打分失真）。
+        q_g = self._q_refine(q).reshape(1, Hkv, G, nd2)  # [1, Hkv, G, nd2]
         sel_mask = blk_onehot.any(0).repeat_interleave(p.block_size)[:S]
         cand_pos = torch.nonzero(sel_mask).squeeze(1)
         kq_h = kq_unpack(
             kq[cand_pos], index["kq_sc"][cand_pos], index["kq_mn"][cand_pos]
         )  # [Tc, Hkv, nd2]（逐位 == fp32 存储版）
-        s2 = torch.einsum("hd,thd->ht", q2[0], kq_h)  # [Hkv, Tc]
+        if q_agg_max:
+            s2 = torch.einsum("hgd,thd->hgt", q_g[0], kq_h).max(1).values  # [Hkv, Tc]
+        else:
+            s2 = torch.einsum("hd,thd->ht", q_g.sum(2)[0], kq_h)  # [Hkv, Tc]
         fine = torch.full((Hkv, S), float("-inf"), device=device)
         fine[:, cand_pos] = s2
         fine = fine.masked_fill(
@@ -759,7 +768,12 @@ class TLIIndexer:
         # ---- L2：4bit 部分维精筛（与旧 eager 路径同 einsum 口径）----
         nd2 = self.nd2
         kq = index["kq_q"]
-        q2 = self._q_refine(q).reshape(1, Hkv, G, nd2).sum(2)  # [1, Hkv, nd2]
+        # bug2 修复（GPT 复查 2026-10-08）：q_agg=max 原在 decode per-request
+        # taskmd 路径未生效（写死 sum）。max = 逐 q-head 打分取组内 max
+        # （#58，与 select() / prefill L1042/L1211 同款分支）。
+        q_g = self._q_refine(q).reshape(1, Hkv, G, nd2)  # [1, Hkv, G, nd2]
+        q_agg_max = getattr(p, "q_agg", "sum") == "max"
+        q2 = None if q_agg_max else q_g.sum(2)  # [1, Hkv, nd2]
         sel_mask = blk_onehot.any(0).repeat_interleave(bs)[:S]
         cand_pos = torch.nonzero(sel_mask).squeeze(1)
         kq_h = kq_unpack(
@@ -769,11 +783,20 @@ class TLIIndexer:
             # E112 对拍口径：L2 einsum 零填充回全 D 维（归约树与
             # two-level 的全维 k_qat 一致 → 分数逐位同；32 维直接归约
             # 有 ulp 差异会在 topk 边界翻转近并列 token，见 _pad_refine_full）
-            q2f = self._pad_refine_full(q2, q.shape[-1])  # [1, Hkv, D]
             kq_full = self._pad_refine_full(kq_h, q.shape[-1])  # [Tc, Hkv, D]
-            s2 = torch.einsum("hd,thd->ht", q2f[0], kq_full)  # [Hkv, Tc]
+            if q_agg_max:
+                q_gf = self._pad_refine_full(q_g, q.shape[-1])  # [1, Hkv, G, D]
+                s2 = torch.einsum(
+                    "hgd,thd->hgt", q_gf[0], kq_full
+                ).max(1).values  # [Hkv, Tc]
+            else:
+                q2f = self._pad_refine_full(q2, q.shape[-1])  # [1, Hkv, D]
+                s2 = torch.einsum("hd,thd->ht", q2f[0], kq_full)  # [Hkv, Tc]
         else:
-            s2 = torch.einsum("hd,thd->ht", q2[0], kq_h)  # [Hkv, Tc]
+            if q_agg_max:
+                s2 = torch.einsum("hgd,thd->hgt", q_g[0], kq_h).max(1).values
+            else:
+                s2 = torch.einsum("hd,thd->ht", q2[0], kq_h)  # [Hkv, Tc]
         fine = torch.full((Hkv, S), float("-inf"), device=device)
         fine[:, cand_pos] = s2
         fine = fine.masked_fill(
@@ -1492,20 +1515,39 @@ class TLIIndexer:
                 onehot = onehot_h.any(1)  # [n, nblk] 候选并集
 
             # ---- L2：全宽 einsum fine 矩阵（候选并集语义 → per-head 掩码）----
-            q2 = self._q_refine(q_c).reshape(n, Hkv, G, nd2).sum(2)
+            # bug2 修复（GPT 复查 2026-10-08）：q_agg=max 原在 taskmd
+            # prefill 批量路径未生效（写死 sum）——补 max 分支（#58）。
+            q_g = self._q_refine(q_c).reshape(n, Hkv, G, nd2)  # [n, Hkv, G, nd2]
+            q_agg_max = getattr(p, "q_agg", "sum") == "max"
+            q2 = None if q_agg_max else q_g.sum(2)  # [n, Hkv, nd2]
             if self.basis is None:
                 # E112 对拍口径：零填充回全 D 维 + 逐行 "hd,thd->ht" 形式
                 # （与 two-level / per-request 归约树逐位一致——批量形式
                 # "ahd,shd->ahs" 的 einsum 降维顺序有 ulp 差异，会在 topk
                 # 边界翻转近并列 token；见 _pad_refine_full）
-                q2f = self._pad_refine_full(q2, D)  # [n, Hkv, D]
                 kq_ff = self._pad_refine_full(kq_f, D)  # [S, Hkv, D]
-                fine = torch.stack(
-                    [
-                        torch.einsum("hd,thd->ht", q2f[a], kq_ff)
-                        for a in range(n)
-                    ]
-                )  # [n, Hkv, S]
+                if q_agg_max:
+                    q_gf = self._pad_refine_full(q_g, D)  # [n, Hkv, G, D]
+                    fine = torch.stack(
+                        [
+                            torch.einsum("hgd,thd->hgt", q_gf[a], kq_ff)
+                            .max(1)
+                            .values
+                            for a in range(n)
+                        ]
+                    )  # [n, Hkv, S]
+                else:
+                    q2f = self._pad_refine_full(q2, D)  # [n, Hkv, D]
+                    fine = torch.stack(
+                        [
+                            torch.einsum("hd,thd->ht", q2f[a], kq_ff)
+                            for a in range(n)
+                        ]
+                    )  # [n, Hkv, S]
+            elif q_agg_max:
+                fine = torch.einsum("ahgd,shd->ahgs", q_g, kq_f).max(
+                    2
+                ).values  # [n, Hkv, S]
             else:
                 fine = torch.einsum("ahd,shd->ahs", q2, kq_f)  # [n, Hkv, S]
             causal_full = pos.view(1, S) <= t_c.view(-1, 1)
@@ -1912,12 +1954,19 @@ class TLIIndexer:
         # 在扫 -inf；静态上界 WNCAP = sink + (near_len - sliding_window) = 2048，
         # topk 宽度 30×↓；slot 确定性（前缀 sink slot=c / 后缀近带 slot=ps+c-pf）
         # 保持 CUDA graph replay 逐位一致）
-        q2 = self._q_refine(q).reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
+        # bug2 修复（GPT 复查 2026-10-08）：q_agg=max 原在 decode 批量
+        # 路径未生效（写死 sum）——补 max 分支；M8 fused kernel 输入是
+        # group-sum 后的 q2 且 kernel 内做 group-sum，max 聚合不支持
+        # → q_agg=max 时旁路 kernel 走 eager。
+        q_g = self._q_refine(q).reshape(n, Hkv, G, nd2)  # [n, Hkv, G, nd2]
+        q_agg_max = getattr(p, "q_agg", "sum") == "max"
+        q2 = None if q_agg_max else q_g.sum(2)  # [n, Hkv, nd2]
         far_sc = near_sc = None
         near_tok_c = None
         WNCAP = far_lo + max(0, p.near_len - p.sliding_window)
         if (
             getattr(p, "use_l2_batched_kernel", False)
+            and not q_agg_max
             and n >= 2
             and (Hkv & (Hkv - 1)) == 0
             and (nd2 & (nd2 - 1)) == 0
@@ -1977,7 +2026,13 @@ class TLIIndexer:
                 sc_c = kq_sc_pool.reshape(-1)[flat_s.view(-1)].view(m, Tc, Hkv)
                 mn_c = kq_mn_pool.reshape(-1)[flat_s.view(-1)].view(m, Tc, Hkv)
                 kq_c = grid_c.float() * sc_c.unsqueeze(-1) + mn_c.unsqueeze(-1)
-                s2[r0:r1] = torch.einsum("ahd,athd->aht", q2[r0:r1], kq_c)
+                if q_agg_max:
+                    # bug2 修复：max = 逐 q-head 打分取组内 max（#58）
+                    s2[r0:r1] = torch.einsum(
+                        "ahgd,athd->ahgt", q_g[r0:r1], kq_c
+                    ).max(2).values
+                else:
+                    s2[r0:r1] = torch.einsum("ahd,athd->aht", q2[r0:r1], kq_c)
 
         SENT = S_cap
 
@@ -2269,13 +2324,23 @@ class TLIIndexer:
         tok_c = tok.clamp(max=S_cap - 1)
 
         # ---- L2 精筛打分（eager flat gather：M8 fused kernel 旁路）----
-        q2 = self._q_refine(q).reshape(n, Hkv, G, nd2).sum(2)  # [n, Hkv, nd2]
+        # bug2 修复（GPT 复查 2026-10-08）：q_agg=max 原在 decode 批量
+        # taskmd 路径未生效（写死 sum）——补 max 分支（#58）。
+        q_g = self._q_refine(q).reshape(n, Hkv, G, nd2)  # [n, Hkv, G, nd2]
+        q_agg_max = getattr(p, "q_agg", "sum") == "max"
+        q2 = None if q_agg_max else q_g.sum(2)  # [n, Hkv, nd2]
         # E112 对拍口径：零填充回全 D 维（归约树与 two-level / per-request
         # / prefill 批量一致，见 _pad_refine_full；chunk 循环内按 chunk 物化）
-        q2_use = (
-            self._pad_refine_full(q2, q.shape[-1]) if self.basis is None else q2
-        )
-        D_eff = q2_use.shape[-1]
+        D_eff = q.shape[-1]
+        if q_agg_max:
+            q_use = (
+                self._pad_refine_full(q_g, D_eff) if self.basis is None else q_g
+            )  # [n, Hkv, G, D 或 nd2]
+        else:
+            q_use = (
+                self._pad_refine_full(q2, D_eff) if self.basis is None else q2
+            )  # [n, Hkv, D 或 nd2]
+        D_eff = q_use.shape[-1]
         s2 = torch.empty(n, Hkv, Tc, dtype=torch.float32, device=device)
         d_off = torch.arange(nd2, device=device)
         h_off = torch.arange(Hkv, device=device).view(1, Hkv, 1) * nd2
@@ -2307,12 +2372,21 @@ class TLIIndexer:
                 # "ahd,athd->aht" 有 ulp 差异，见 _pad_refine_full）
                 kq_c = self._pad_refine_full(kq_c, D_eff)
                 for j in range(m):
-                    s2[rr0 + j] = torch.einsum(
-                        "hd,thd->ht", q2_use[rr0 + j], kq_c[j]
-                    )
+                    if q_agg_max:
+                        s2[rr0 + j] = torch.einsum(
+                            "hgd,thd->hgt", q_use[rr0 + j], kq_c[j]
+                        ).max(1).values
+                    else:
+                        s2[rr0 + j] = torch.einsum(
+                            "hd,thd->ht", q_use[rr0 + j], kq_c[j]
+                        )
+            elif q_agg_max:
+                s2[rr0:rr1] = torch.einsum(
+                    "ahgd,athd->ahgt", q_use[rr0:rr1], kq_c
+                ).max(2).values
             else:
                 s2[rr0:rr1] = torch.einsum(
-                    "ahd,athd->aht", q2_use[rr0:rr1], kq_c
+                    "ahd,athd->aht", q_use[rr0:rr1], kq_c
                 )
         # E112 per-head L1 掩码：s2 恢复 per-head topk_mask 语义（并集
         # 候选仅 gather 效率口径）；单池路径的 swa +inf 强制在其后覆盖
