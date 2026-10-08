@@ -1025,7 +1025,15 @@ class TLISparseAttnBackend(AttentionBackend):
         k_buf, v_buf = pool.get_kv_buffer(layer_id)
         nq, H = q_b.shape[0], q_b.shape[1]
         S = locs.shape[0]  # 请求序列长（哨兵界）
-        valid = sel < S  # [nq, Hkv, K2] 逐槽有效（哨兵/越界 → False）
+        # S1 纵深防御（GPT F01 / Kimi3 S1，2026-10-08）：extend 的 query
+        # 行恒为序列尾部 [S-nq, S)（调用方 t_arr = arange(prefix, S)），
+        # 逐行因果界 t_r = S-nq+r → valid = sel < t_r+1。比全局 sel < S
+        # 更严：哨兵（全局 S）与任何越出该行因果界的槽位（含未来 token
+        # t_r+1 本身）都被屏蔽，选择器协议漂移不再泄漏到输出。
+        row_bound = (
+            S - nq + torch.arange(nq, device=sel.device) + 1
+        ).view(-1, 1, 1)
+        valid = sel < row_bound  # [nq, Hkv, K2] 逐槽有效（哨兵/越界/未来 → False）
         sel_g = sel.clamp(max=S - 1)  # gather 界内（不改 valid lane）
         # M11 fused 路径：sel 逻辑位置 → pool 槽位（与 eager 相同的一次小 gather）
         # 注意：q_raw 是父张量 q[starts[b]:ends[b]] 的切片 view，行 stride 可能

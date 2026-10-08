@@ -794,16 +794,24 @@ class TLIIndexer:
             far_tok_lo = sink_tok
             far_tok_hi = min(near_blks * bs, S)
             k2_far = min(far_budget, far_tok_hi - far_tok_lo, K2_mid)
-            i_f2 = (
-                torch.topk(fine[:, far_tok_lo:far_tok_hi], k2_far, dim=-1).indices
-                + far_tok_lo
+            # S3 修复（Kimi3 审查 2026-10-08）：池不足时 topk 的 -inf 槽位
+            # 是池内真实位置（< S）→ 消费端判有效并以真实 logit 计入；
+            # 批量版用 keep = sc > -inf 转哨兵——本处补齐同款口径，
+            # n==1 与 n≥2 decode 语义统一。
+            f2_r = fine[:, far_tok_lo:far_tok_hi]
+            i_f2_raw = torch.topk(f2_r, k2_far, dim=-1).indices
+            sc_f2 = torch.gather(f2_r, 1, i_f2_raw)
+            i_f2 = torch.where(
+                sc_f2 > float("-inf"), i_f2_raw + far_tok_lo, S
             )  # [Hkv, k2_far]（k2_far=0 时 topk 空，已验证安全）
             k2_near = max(0, K2_mid - k2_far)
             near_f = fine[:, far_tok_hi:swa_lo_tok]
-            i_n2 = (
-                torch.topk(near_f, min(k2_near, near_f.shape[-1]), dim=-1).indices
-                + far_tok_hi
-            )  # [Hkv, ≤k2_near]（near 池不足时宽 < k2_near）
+            k2n_sel = min(k2_near, near_f.shape[-1])
+            i_n2_raw = torch.topk(near_f, k2n_sel, dim=-1).indices
+            sc_n2 = torch.gather(near_f, 1, i_n2_raw)
+            i_n2 = torch.where(
+                sc_n2 > float("-inf"), i_n2_raw + far_tok_hi, S
+            )  # [Hkv, ≤k2_near]（-inf 槽位转哨兵；宽度不足由下 w_pad 补）
             # 哨兵 pad：i_n2 欠宽槽位 → S（下游 valid 掩码屏蔽；
             # two-level 同位是 softmax 后 p=0 的垃圾 True 位，注意力权重 0
             # ≈ 不选，集合语义一致）
@@ -1544,10 +1552,13 @@ class TLIIndexer:
                     < k2_far_r.view(-1, 1, 1)
                 )
                 keep_f2 = (sc_f2 > float("-inf")) & rank_f2
-                # B01 修复：无效槽位哨兵 S_r（下游 valid = sel < S 屏蔽；
-                # 原转 0 使 token 0 被重复计权）
+                # B01 修复：无效槽位哨兵全局 S（下游 valid = sel < S 屏蔽；
+                # 原转 0 使 token 0 被重复计权。S1 修复（GPT F01/Kimi3 双
+                # 审查 2026-10-08）：原用逐行 S_r=t_r+1，中间行 S_r<S 被
+                # 消费端判有效 → 读入未来 token t_r+1（因果泄漏）；哨兵值
+                # 必须与消费端界同源 = 全局 S）
                 sel_f2 = torch.where(
-                    ~keep_f2, S_r.view(-1, 1, 1), i_f2
+                    ~keep_f2, S, i_f2
                 )
                 # near 池 topk（静态宽 nt_near_cap）
                 in_near_tok = (pos.view(1, S) >= far_hi_t.view(-1, 1)) & (
@@ -1565,19 +1576,19 @@ class TLIIndexer:
                     < k2_near_r.view(-1, 1, 1)
                 )
                 keep_n2 = (sc_n2 > float("-inf")) & rank_n2
-                # B01 修复：无效槽位哨兵 S_r（同 far 池口径）
+                # B01 修复：无效槽位哨兵全局 S（S1 同 far 池口径）
                 sel_n2 = torch.where(
-                    ~keep_n2, S_r.view(-1, 1, 1), i_n2
+                    ~keep_n2, S, i_n2
                 )
                 # 正交强制区：sink 头部（宽 sink_tok）+ swa 尾部（宽 swa_tok，
-                # 早行 t_r < swa-1 的越界槽位 B01 修复后转哨兵 S_r 而非 0）
+                # 早行 t_r < swa-1 的越界槽位转哨兵全局 S 而非 0——S1 修复）
                 sink_pos = torch.arange(sink_tok, device=device).view(1, -1)
                 sink_pad = (
                     torch.arange(sink_tok, device=device).view(1, -1)
                     >= S_r.view(-1, 1)
                 )
                 sink_out = torch.where(
-                    sink_pad, S_r.view(-1, 1), sink_pos
+                    sink_pad, S, sink_pos
                 ).unsqueeze(1).expand(n, Hkv, -1)
                 f_pos = swa_lo_t.view(-1, 1) + torch.arange(
                     swa_tok, device=device
@@ -1588,7 +1599,7 @@ class TLIIndexer:
                     >= F_t.view(-1, 1)
                 )
                 forced_out = torch.where(
-                    f_pad, S_r.view(-1, 1), f_pos
+                    f_pad, S, f_pos
                 ).unsqueeze(1).expand(n, Hkv, -1)
                 res = torch.cat(
                     [sel_f2, sel_n2, sink_out, forced_out], dim=-1
@@ -1975,7 +1986,15 @@ class TLIIndexer:
             causal = tok <= t_t.view(-1, 1)
             valid = tok < S_cap
             sc = s2.masked_fill(~(valid & causal).unsqueeze(1), float("-inf"))
-            sc = sc.masked_fill((tok >= sw_lo_t.view(-1, 1)).unsqueeze(1), float("inf"))
+            # S2 修复（Kimi3 审查 2026-10-08）：原条件 (tok >= sw_lo_t) 对
+            # 哨兵 lane（tok = S_cap 未 clamp ≥ sw_lo_t 恒真）把刚打的 -inf
+            # 复活为 +inf → topk 被 +inf 哨兵挤占、退化「只看滑窗」、
+            # 最坏 0 有效 lane → softmax 全 -inf = NaN。sw_lo ≤ t 已蕴含
+            # causal，补 & valid 即可。
+            sc = sc.masked_fill(
+                ((tok >= sw_lo_t.view(-1, 1)) & valid).unsqueeze(1),
+                float("inf"),
+            )
             k = min(p.token_budget, Tc)
             i_g = torch.topk(sc, k, dim=-1).indices
             sc_g = torch.gather(sc, 2, i_g)
@@ -2403,8 +2422,16 @@ class TLIIndexer:
 
         # ---- 单池：整行 topk + swa +inf（two-level 单池语义）----
         sc = s2.masked_fill(~(valid & causal).unsqueeze(1), float("-inf"))
+        # S2 修复第二处（Kimi3 审查 2026-10-08）：与 _select_batched 的
+        # L1975-1978 同款 bug——原条件 (tok >= swa_lo_t) 对哨兵 lane
+        # （tok = S_cap 未 clamp ≥ swa_lo_t 恒真）把刚打的 -inf 复活为
+        # +inf → topk 被 +inf 哨兵挤占、退化「只看滑窗」、最坏 0 有效
+        # lane → softmax 全 -inf = NaN。swa_lo ≤ t 已蕴含 causal，补
+        # & valid 即可。taskmd 单池臂（α=0/β=0，含 (0,0) 退化点）的
+        # 批量 decode/CUDA graph 路径每步都走这里。
         sc = sc.masked_fill(
-            (tok >= swa_lo_t.view(-1, 1)).unsqueeze(1), float("inf")
+            ((tok >= swa_lo_t.view(-1, 1)) & valid).unsqueeze(1),
+            float("inf"),
         )
         k = min(p.token_budget, Tc)
         i_g = torch.topk(sc, k, dim=-1).indices
