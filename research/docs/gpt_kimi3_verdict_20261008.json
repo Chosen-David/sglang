@@ -49,6 +49,14 @@
       "verification": "test_b1_b2_fix.py：①G=1 时 max ≡ sum 逐位相同（单元素 max=本身，接线正确性不变量）②G=2 符号冲突（组内 +w/−w，sum 抵消）时 max 输出 ≠ sum（修复前 max 写死 sum → 相同 → FAIL 检测力成立）③既有回归 6/6 全绿（sum 默认路径零扰动）",
       "e109_impact": "零——E109 全臂 q_agg=sum 默认（30B 投影场景才用 max），且走 two-level 路径"
     },
+    "Bug3_pca_basis_tp_mismatch": {
+      "source": "GPT 复查（用户转发总表 #3）",
+      "truth": true,
+      "root_cause": "PCA basis 按全局 Hkv 离线校准 [n_layers, Hkv_global, D, r]，TP>1 时每卡 num_kv_heads = Hkv_global/attn_tp_size——原样传给 TLIIndexer（basis[li] 的 Hkv 维 = 全局值）形状错配即崩；TP=1 下 Hkv 不匹配也无断言（静默错用防线缺失）",
+      "fix": "backend.py 加载处：get_parallel().attn_tp_rank 切本卡 kv-head 片（basis[:, rank*per:(rank+1)*per]）+ TP>1（整除/每卡数）与 TP=1（Hkv 等价）两情形都断言（commit 3b1482744）",
+      "verification": "test_b3_pca_tp.py 5/5：①TP=1 不切逐位相同 ②TP=2 rank0/rank1 各 4 head 并集=全集、无重叠 ③TP=4 四 rank 片正确 ④三类 shape 错配（整除失败/每卡数不匹配/TP=1 Hkv 不匹配）全部触发断言 ⑤切片后 einsum 与「全局投影再切片」逐位一致（切片无信息损失）；既有回归全绿（b01_b02 3/3、s1 3/3、s2 2/2、incremental_prefill 6/6）",
+      "e109_impact": "零——E109 单卡跑（无 TP>1），且 PCA basis 非默认路径"
+    },
     "N1_chain_heredoc_overwrite": {
       "truth": true,
       "status": "DEFERRED — 链收官后跑 e109_score_v2.py 自愈重建 selection.json（无 AVG5 臂重打分）；绝不编辑运行中的 /tmp/e109_screen4_chain.sh（bash 按字节偏移读脚本）；.fixed 版原子替换待两链收官"
