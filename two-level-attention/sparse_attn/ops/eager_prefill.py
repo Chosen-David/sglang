@@ -15,9 +15,12 @@ chunk 共享选择语义（MoBA 口径，MoBA 论文 §3.2 TopK Gating）：
 的行（含整个首 chunk）走 dense——等价 identity 选择，对齐 B02/S1 的
 短行语义（短序列 dense 等价）。
 
-swa 语义：decode 侧 mask 的 swa 强制区是「末行视角最近 128」；prefill
-chunk 共享选择下早行的近窗由选集 ∩ 因果自然近似（MoBA 同款语义），
-不为早行单独重算选择。
+swa 语义【10-09 TL-PREFILL-SWA-002 修复（GPT 审计）】：共享选择只强制
+chunk 末行的 sink/SWA，块内早行自己的 128-token 局部窗口不保证在选集内
+（例：chunk [2048,3000) 首行的自身 SWA [1921,2048] 与末行 SWA [2872,2999]
+零重叠）→ 每行显式 OR 自身保护带（sink [0,128) + 自身窗口 [p-127,p]，
+∩ 因果），保护 token 不占 mid top-k 预算（对齐 decode 侧 sink/swa 强制
+区在 K2_mid 之外的契约）。
 
 已知成本（E107a 诊断）：每 chunk 的 prepare_mask 走 prepare_index 全量
 重建 O(S²/chunk)——质量路径可接受；sglang serving 路径已有 F1-F3 增量化。
@@ -34,12 +37,18 @@ SPARSE_PREFILL_CHUNK = 2048
 _ROW_BLOCK_MAX_ELEM = 1 << 27
 
 
-def _chunk_rows_attn(q_c, k_c, v_c, sel, pos_lo, G, softmax_scale):
+def _chunk_rows_attn(q_c, k_c, v_c, sel, pos_lo, G, softmax_scale,
+                     sink_tok=0, swa_tok=0):
     """单个 chunk 的行级 attention（dense 与稀疏共用，dense 时 sel=None）。
 
     q_c: [1, len, H, D]；k_c/v_c: [1, T, Hkv, D]；sel: [Hkv, T]（kv-head
     共享）或 [H, T]（E103 per_q_head）的 token 级 bool 选择，None=dense。
     行 r 的绝对位置 = pos_lo + r，可见 keys [0, pos_lo + r] ∩ sel。
+
+    TL-PREFILL-SWA-002：sink_tok/swa_tok > 0 时（稀疏 chunk），每行额外
+    OR 自身保护带：sink 列 [0, min(sink_tok, p+1)) ∪ 自身窗口
+    [max(0, p-swa_tok+1), p]（再 ∩ 因果）。dense（sel=None）保护带 ⊆ 因果
+    恒为 no-op，路径不变。
 
     数值口径对齐 decode 侧 eager_decoding_attn：score 在 fp32 计算
     （q*scale → fp32、k → fp32），softmax fp32 后转回模型 dtype 与 v 相乘。
@@ -77,6 +86,14 @@ def _chunk_rows_attn(q_c, k_c, v_c, sel, pos_lo, G, softmax_scale):
             m = causal[:, None, None, :]
         else:
             m = sel_e[None, :, :, :] & causal[:, None, None, :]
+            # TL-PREFILL-SWA-002：行级保护带（自身 sink + 自身 swa 窗口），
+            # ∩ 因果后 OR 进共享选择——块内早行的局部窗口不再依赖末行选集
+            if sink_tok > 0 or swa_tok > 0:
+                pos_r = torch.arange(pos_lo + r0, pos_lo + r1, device=device)
+                prot = (kcol[None, :] < sink_tok) | (
+                    kcol[None, :] >= (pos_r - swa_tok + 1)[:, None]
+                )
+                m = m | (prot & causal)[:, None, None, :]
         # 防御：选择 ∩ 因果全空的行兜底对角线（sink 强制 + pos>=2048 下
         # 不应触发；防御性保 softmax 无 NaN）
         if not bool(m.any(dim=-1).all()):
@@ -122,6 +139,10 @@ def sparse_prefill_attn(
         dense_below = getattr(indexer.args, "tia_level2_topk", 1024)
 
     G = H // k.shape[2]
+    # 行级保护带尺寸（与 indexer mask 强制区同源；getattr 兜底对齐默认配置）
+    swa_tok = int(getattr(indexer, "sliding_window_size", 128))
+    _bs = int(getattr(indexer.args, "tia_block_size", 64))
+    sink_tok = int(getattr(indexer, "sink_blocks", 2)) * _bs
     o = torch.empty_like(q)
     for c0 in range(0, L, chunk_size):
         c1 = min(c0 + chunk_size, L)
@@ -131,8 +152,10 @@ def sparse_prefill_attn(
         k_c = k[:, :c1]
         v_c = v[:, :c1]
         if c0 < dense_below:
-            # 首 chunk / 短行：dense（identity 选择，对齐 B02/S1 短行语义）
+            # 首 chunk / 短行：dense（identity 选择，对齐 B02/S1 短行语义；
+            # 保护带 ⊆ 因果恒 no-op，不传保持 dense 路径逐位不变）
             sel = None
+            prot_args = dict(sink_tok=0, swa_tok=0)
         else:
             # 末行 q 单行调用（indexer 单行 query 设计，规避多行 assert）
             last_q = q[:, c1 - 1 : c1]  # [1, 1, H, D]
@@ -143,7 +166,9 @@ def sparse_prefill_attn(
             )
             m0 = mask[0, 0]        # [h, T_pad]（h=Hkv 共享 或 H per_q_head）
             sel = m0[..., :c1]     # 截到真实 token 数（pad 块尾巴去除）
+            # 稀疏 chunk：行级保护带生效（TL-PREFILL-SWA-002）
+            prot_args = dict(sink_tok=sink_tok, swa_tok=swa_tok)
         o[:, c0:c1] = _chunk_rows_attn(
-            q[:, c0:c1], k_c, v_c, sel, c0, G, softmax_scale
+            q[:, c0:c1], k_c, v_c, sel, c0, G, softmax_scale, **prot_args
         )
     return o

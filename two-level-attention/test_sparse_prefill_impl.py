@@ -14,6 +14,8 @@ chunk 共享选择语义，MoBA 口径）：
       k 长度 = 各 chunk 末位置+1（4096/5000），q_ids = 末行位置
   T5  E103 per_q_head 模式（mask [H,T]）路径可用，输出有限
   T6  dense 臂（sel=None 的 _chunk_rows_attn 直测）== dense 参考
+  T7  TL-PREFILL-SWA-002 行级保护带：最小共享选集（sink∪块末SWA）下
+      chunk 首/中/末行的自身 128-token 窗口必须恢复（GPT 审计反例）
 
 用法：python3 test_sparse_prefill_impl.py   （two-level-attention/ 下）
 """
@@ -67,8 +69,13 @@ def build_qkv(L, H=4, Hkv=2, D=128, seed=20261008):
     return q, k, v
 
 
-def ref_attn(q, k, v, scale, sel_h=None):
-    """fp32 参考因果 attention（GQA 展开）。sel_h: [H, S] bool 或 None=dense。"""
+def ref_attn(q, k, v, scale, sel_h=None, sink_tok=0, swa_tok=0):
+    """fp32 参考因果 attention（GQA 展开）。sel_h: [H, S] bool 或 None=dense。
+
+    sink_tok/swa_tok > 0 时叠加行级保护带（TL-PREFILL-SWA-002 语义，与实现
+    _chunk_rows_attn 同口径）：行 p 额外可见 sink 列 [0, sink_tok) 与自身窗口
+    [max(0, p-swa_tok+1), p]（均 ∩ 因果）。dense 行该带 ⊆ 因果恒 no-op。
+    """
     L, H, D = q.shape[1], q.shape[2], q.shape[3]
     S, Hkv = k.shape[1], k.shape[2]
     G = H // Hkv
@@ -80,6 +87,12 @@ def ref_attn(q, k, v, scale, sel_h=None):
     m = causal[:, None, :].expand(L, H, S)
     if sel_h is not None:
         m = sel_h[None, :, :] & causal[:, None, :]
+    if sink_tok > 0 or swa_tok > 0:
+        pos = torch.arange(L)
+        prot = (torch.arange(S)[None, :] < sink_tok) | (
+            torch.arange(S)[None, :] >= (pos - swa_tok + 1)[:, None]
+        )
+        m = m | (prot & causal)[:, None, :]
     s = s.permute(1, 0, 2).masked_fill(~m, float("-inf"))  # [L,H,S]
     p = torch.softmax(s, dim=-1)
     o = torch.einsum("lhs,shd->lhd", p, v_e)
@@ -171,7 +184,9 @@ def t3_sel_causal():
         sel_h = expand_sel(sel, Hkv, G)               # [H, S]
         assert bool(sel[:, :128].all()), "sink 区 [0,128) 未全保留"
         assert bool(sel[:, -128:].all()), "swa 区（块末最近 128）未全保留"
-        ref = ref_attn(q, k, v, scale, sel_h=sel_h)
+        # 参考 oracle 含行级保护带（TL-PREFILL-SWA-002 后的正确语义；
+        # 旧 oracle 只用末行 sel∩因果 会把缺陷语义复制进参考）
+        ref = ref_attn(q, k, v, scale, sel_h=sel_h, sink_tok=128, swa_tok=128)
         d1 = float((o[0, 2048:] - ref[0, 2048:]).abs().max())
         assert d1 < 1e-5, f"chunk1 max|Δ|={d1:.3e}"
         report(name, True, f"chunk1 max|Δ|={d1:.2e}")
@@ -206,7 +221,7 @@ def t4_intermediate_chunk():
         # sel 右侧 pad False 到全长 5000（未来 token 因果已排除）
         sel1 = expected_sel(TLIIndexer(make_args()), q, k, 4096, scale, pad_to=L)
         sel1_h = expand_sel(sel1, 2, 2)
-        ref1 = ref_attn(q, k, v, scale, sel_h=sel1_h)
+        ref1 = ref_attn(q, k, v, scale, sel_h=sel1_h, sink_tok=128, swa_tok=128)
         d1 = float((o[0, 2048:4096] - ref1[0, 2048:4096]).abs().max())
         assert d1 < 1e-5, f"chunk1 max|Δ|={d1:.3e}"
         report(name, True, f"k_len 序列={seen} chunk1 max|Δ|={d1:.2e}")
@@ -230,10 +245,64 @@ def t5_per_q_head():
         assert o.shape == q.shape and torch.isfinite(o).all(), "输出非有限"
         sel = expected_sel(TLIIndexer(args), q, k, L, scale)  # [H, S]
         assert sel.shape[0] == 4, f"per_q_head mask 头数={sel.shape[0]}"
-        ref = ref_attn(q, k, v, scale, sel_h=sel)
+        ref = ref_attn(q, k, v, scale, sel_h=sel, sink_tok=128, swa_tok=128)
         d = float((o[0, 2048:] - ref[0, 2048:]).abs().max())
         assert d < 1e-5, f"max|Δ|={d:.3e}"
         report(name, True, f"chunk1 max|Δ|={d:.2e}")
+    except AssertionError as e:
+        report(name, False, str(e))
+    except Exception as e:
+        report(name, False, f"异常: {type(e).__name__}: {e}")
+
+
+# ================================================================ T7 行级保护带（TL-PREFILL-SWA-002）
+def t7_row_protection_band():
+    name = "T7 逐行 SWA/sink 保护带：最小选集下首/中/末行自身窗口恢复"
+    # GPT 审计最小验收反例：chunk [2048,3000) 的最小共享选集 = sink ∪ 块末
+    # SWA（[2872,2999]）；行 2048 的自身窗口 [1921,2048] 与之零重叠——
+    # 修复前其有效选集只剩 128 个 sink token，自身 128-token 局部窗口全丢。
+    # 本测试用 monkeypatch 的最小选集（比真实 topk 更极端）直击该反例。
+    try:
+        L = 3000
+        # 构造：q/k 全零 → 所有 score 相等 → softmax 均匀 → 输出 = 选中
+        # token 的 v 均值。v 在三个探针行自身窗口内置 1、其余 0：
+        #   行 2048 窗口 [1921,2048]（chunk 首行）、行 2500 窗口 [2373,2500]
+        #   （中行）、行 2999 窗口 [2872,2999]（末行=块末 SWA 本就在选集）
+        # 修复后各探针行有效选集 = 128 sink(v=0) + 128 自身窗口(v=1) → 0.5
+        # 修复前（无保护带）：首/中行只余 sink → 0.0（末行不受影响 0.5）
+        g = torch.Generator().manual_seed(20261009)
+        H, Hkv, D = 2, 1, 8
+        q = torch.zeros(1, L, H, D)
+        k = torch.zeros(1, L, Hkv, D)
+        v = torch.zeros(1, L, Hkv, D)
+        for lo, hi in [(1921, 2049), (2373, 2501), (2872, 3000)]:
+            v[0, lo:hi, 0, 0] = 1.0
+        idx = TLIIndexer(make_args())
+        idx.layer_idx = 3
+
+        def minimal_sel(qr, qi, kr, cu, sc=None):
+            # 最小共享选集：sink [0,128) ∪ 块末视角 SWA [c1-128, c1)
+            c1 = int(kr.shape[1])
+            m = torch.zeros(1, 1, Hkv, c1, dtype=torch.bool)
+            m[..., :128] = True
+            m[..., c1 - 128:] = True
+            return m, 0
+
+        idx.prepare_mask = minimal_sel
+        scale = D ** -0.5
+        o = sparse_prefill_attn(idx, q, k, v, softmax_scale=scale)
+        probes = {2048: 0.5, 2500: 0.5, 2999: 0.5}
+        for r, expect in probes.items():
+            got = float(o[0, r, :, 0].mean())
+            assert abs(got - expect) < 1e-6, \
+                f"行 {r} 输出 {got:.4f} != {expect}（自身 SWA 未恢复）"
+        # dense 首 chunk 行不受保护带影响：行 2000（chunk 0 内、因果全可见）
+        # 期望 = 均匀 softmax 下 v=1 可见 token 数 / 因果长度 =
+        # [1921,2000] 共 80 个 / 2001
+        got0 = float(o[0, 2000, :, 0].mean())
+        assert abs(got0 - 80.0 / 2001) < 1e-6, \
+            f"dense 行 2000 输出 {got0:.6f} != 80/2001（dense 路径被扰动）"
+        report(name, True, "首/中/末行自身 SWA 恢复（0.5）；dense 行不受扰")
     except AssertionError as e:
         report(name, False, str(e))
     except Exception as e:
@@ -266,6 +335,7 @@ if __name__ == "__main__":
     t4_intermediate_chunk()
     t5_per_q_head()
     t6_dense_rows()
+    t7_row_protection_band()
     n_fail = sum(1 for _, ok, _ in RESULTS if not ok)
     print(f"\n===== {len(RESULTS) - n_fail}/{len(RESULTS)} PASS =====")
     sys.exit(1 if n_fail else 0)
