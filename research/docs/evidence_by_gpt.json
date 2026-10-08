@@ -1,0 +1,109 @@
+{
+  "commit": "9049ba8759896e5efc13f287c442fb72d5e1b563",
+  "verification_scope": "read-only CPU/source fragments and controlled shell/scorer fixtures; no torch, CUDA, model or remote-process validation",
+  "findings": {
+    "prefill_padding_bias": {
+      "verification": "actual host region function + mathematical/NumPy consumer counterexample; no GPU selector execution",
+      "S": 4096,
+      "alpha_beta_gamma": [
+        0.125,
+        0.375,
+        0.625
+      ],
+      "near_valid_tokens": 384,
+      "near_quota": 768,
+      "invalid_zero_slots": 384,
+      "token0_multiplicity": 385,
+      "distinct_selected_tokens": 640,
+      "unmasked_slot_attention": 0.3759765625,
+      "unique_token_attention": 0.0015625
+    },
+    "early_grid_not_dense": {
+      "verification": "NumPy of source grid formula; no CUDA",
+      "K2": 1024,
+      "causal_length": 1000,
+      "duplicated_first_tokens": 24,
+      "grid_output": 0.046875,
+      "dense_output": 0.024
+    },
+    "samsum_runtime_error": {
+      "verification": "executed unmodified AST branch and decode statement with mock model",
+      "exception": "UnboundLocalError",
+      "message": "cannot access local variable 'generated_content' where it is not associated with a value"
+    },
+    "first_eos_not_stopped": {
+      "verification": "actual manual-generation AST with mock logits, not a model benchmark",
+      "eos_id": 2,
+      "generated_ids": [
+        2,
+        1,
+        2
+      ],
+      "model_calls": 3
+    },
+    "per_q_head_mask_axis": {
+      "verification": "executed actual mask-assignment AST with NumPy repeat; no torch",
+      "mask_shape": [
+        8,
+        4,
+        4160
+      ],
+      "score_shape": [
+        8,
+        4,
+        4097
+      ],
+      "exception": "ValueError",
+      "message": "operands could not be broadcast together with shapes (8,4,4160) (8,4,4097) () "
+    },
+    "configuration_name_collision": {
+      "verification": "executed actual method-name function",
+      "different_configs_same_name": "tli_64_128_1024_c4_A",
+      "condition": "same output directory, task and --t causes overwrite; run-specific postfix can avoid it"
+    },
+    "runner_false_success": {
+      "verification": "actual run_ruler.sh, only python binary replaced by exit-23 stub; no GPU/model commands",
+      "python_failed_tasks": 33,
+      "shell_exit_code": 0,
+      "completion_marker": "ALL DONE none",
+      "cd_also_failed": false
+    },
+    "stale_marker": {
+      "verification": "same grep completion predicate on a previous-run fixture",
+      "stale_log_accepted": true,
+      "not_a_live_remote_process_test": true
+    },
+    "scorer_mixed_incomplete_runs": {
+      "verification": "executed actual score_ruler.py against isolated synthetic JSONL fixtures",
+      "result": {
+        "L4096/none": {
+          "niah_single_1": 100.0,
+          "niah_single_2": 0.0
+        }
+      },
+      "new_partial_task_rows": 1,
+      "other_task_from_old_run": true,
+      "missing_tasks_rejected": false,
+      "reported_AVG": 50.0,
+      "exit_code": 0
+    }
+  },
+  "syntax": {
+    "python_files": 41,
+    "python_errors": [],
+    "shell_files": 32,
+    "shell_errors": []
+  },
+  "source_sha256": {
+    "python/sglang/srt/layers/attention/tli/indexer.py": "d8f76335fbbb802ed6d4f6a45a392fdbf55274bad3ba499c3d9ff7ef91d278ac",
+    "python/sglang/srt/layers/attention/tli/backend.py": "4442db8bef2f004ae9ea97eceab857104bd41b85ac3862c2d95ed663bfd477de",
+    "two-level-attention/benchmark/LongBench/pred.py": "abb22cea2dc070b81b9dd5805c00119275b0b6043b1d55d99a5e08e7f70d3ba1",
+    "two-level-attention/sparse_attn/ops/eager_decoding.py": "467820fd158e24b9f8399e642e30f48aba3a525e1fde45e13d80f438e1f8c3ff",
+    "two-level-attention/sparse_attn/info.py": "ba5d45dc15840179f9dffd8cc33228827387f04dfa0e9cf93fd185272aee8d76",
+    "two-level-attention/sparse_attn/indexer/tli_indexer.py": "9662166c5a833e9522a3604d4622a8bea044d2baf710cea257eb8afa2283e63b",
+    "two-level-attention/benchmark/RULER/run_ruler.sh": "fc266e36676518d4cd0a447440fb024c4f15abb1a9863dcc6bff0af68614e96d",
+    "two-level-attention/benchmark/RULER/chain_ruler.sh": "b33f90ac7d191d55c486d37dbfbe8c95c2137d3e2c9bbe271547333147737e87",
+    "two-level-attention/benchmark/RULER/score_ruler.py": "9453c1f2027ab0fc516024f37be91c38169901c744c661e29dcd3926905c041e"
+  },
+  "elapsed_seconds": 0.659
+}

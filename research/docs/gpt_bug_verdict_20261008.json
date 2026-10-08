@@ -1,0 +1,59 @@
+{
+  "verdict_date": "2026-10-08",
+  "reviewer": "GPT (external, commit 9049ba875)",
+  "verdict_summary": "9/9 全部属实。reproduce_by_gpt.py 在本机全部复现通过（elapsed 0.659s）；source_sha256 与当前工作树逐位一致（审查对象确认为当前代码）。",
+  "fixes": {
+    "B01_prefill_invalid_slots_token0": {
+      "truth": true,
+      "root_cause": "_select_batched_taskmd 将无效 near/far/sink/swa 槽位转 0，消费端无掩码 → token 0 重复计权（等价 softmax logit +log(m) 偏置）",
+      "fix": "统一哨兵协议：选择器无效槽位输出哨兵 S（far/near 池、sink/forced pad、M10 kernel 路径共 7 处）；消费端 _sparse_extend_one 以 valid = sel < S 逐槽 -inf 屏蔽 + clamp 保 gather 界内（fused kernel 传 valid=，与 decode 侧协议统一）",
+      "verification": "专项反例复现：消费端输出 1/640=0.001563（与 GPT 反例 0.0015625 精确吻合）；token0 有效位恰 1 次（修复前 385 次）；既有测试 test_incremental_prefill 6/6 + test_tli_m2b 全过",
+      "affected_data": "sglang serving prefill 稀疏路径（E87/E89/E90/E102 等历史 sglang e2e 数据口径受影响须标注）；E109 海选链（HF dense-prefill 路径）零污染"
+    },
+    "B02_early_grid_not_dense": {
+      "truth": true,
+      "root_cause": "早期行 uniform grid 在 K2 不整除 L 时前 K2%L 个 token 重复 floor+1 次；原注释「softmax 数学等价 dense」声称不成立",
+      "fix": "identity grid（每 token 恰一次）+ 哨兵 S 尾垫；_select_taskmd 与 _select_batched_taskmd 尾部两处同修",
+      "verification": "K2=1024/L=1000 场景：每 token 恰一次 + 24 哨兵尾垫；softmax 有效位恰为全部 L 个因果 token（真 dense 等价）",
+      "affected_data": "同 B01（sglang prefill 首 chunk 早期行）"
+    },
+    "B03_samsum_unbound": {
+      "truth": true,
+      "root_cause": "samsum 分支 output=model.generate 但共用 generated_content decode → UnboundLocalError；且 q_input 切出后未接回",
+      "fix": "full_ids = cat(input.input_ids, q_input.input_ids) + attention_mask；generate 后取 output[full_ids.shape[-1]:].tolist()；min_length 改 full_ids 形状口径",
+      "verification": "py_compile 过；分支不在 13 任务默认集与 E109 海选 5 任务集（历史数据零触发）"
+    },
+    "B04_first_eos_not_stopped": {
+      "truth": true,
+      "status": "DEFERRED — 等 E109 海选链收官后修复（改生成循环会改变输出内容，同一扫描内前后任务口径漂移风险）",
+      "impact_assessment": "所有 LongBench 任务共用同一 pred.py 循环（含 FullKV baseline）→ 臂间相对比较公平，已落袋数据可保留；绝对口径与 HF generate 标准协议有偏差（首步 EOS 时多生成 token）"
+    },
+    "B05_per_qh_mask_axis": {
+      "truth": true,
+      "root_cause": "[:, :eos_k-bos_k] 切 dim1（per_qh 的 G 轴 / shared 的 Hkv 轴）而非 token 轴；无 padding 时是 no-op 长期掩盖，投影路径 Tpad>T 时广播失败",
+      "fix": "改 [..., :eos_k-bos_k] 裁 token 轴；无 padding 时逐位等价（四组形状验证 per_qh/shared × bs=1/4 全等价 + padding 场景正确裁剪）",
+      "verification": "等价性程序化验证全过——E109 在跑链行为不变（无 padding 不触发）"
+    },
+    "B06_runner_swallows_failures": {
+      "truth": true,
+      "fix": "run_ruler.sh：逐任务 PIPESTATUS[0] 检查 + FAILED 计数 + 失败 exit 1 且 marker 带 FAILED 标记 + cd 失败即退",
+      "verification": "bash -n 过；GPT 复现的 33 次 python 失败场景下新版将 exit 1"
+    },
+    "B07_stale_marker_gate": {
+      "truth": true,
+      "fix": "chain_ruler.sh 同款失败传播；grep marker 字符串绑定 run-ID 的结构化重构记为 RULER 阶段待办（当前 grep 目标日志为本轮新建，实际污染风险低）"
+    },
+    "B08_scorer_mixed_runs": {
+      "truth": true,
+      "fix": "score_ruler.py：逐 cell 记录样本数 n，n < min-samples（默认 100）打 WARN 且不计入 AVG；每方法 33 cell 完整度警告；JSON 落 n 与 incomplete_cells；顺手修相对路径 out 的 makedirs('') 潜伏 bug",
+      "verification": "GPT 同款 fixture（旧轮 3 错 + 新轮 1 对）：原版 AVG=50 无警告退出 0，新版双 WARN + AVG='-' 不给虚假可比数字"
+    },
+    "B09_config_name_collision": {
+      "truth": true,
+      "status": "DEFERRED — 等 E109 链收官后修（改 get_method_name_with_info 改变输出目录名 → 在跑链断点续跑 SKIP 失配 + 数据分裂）；E109 用 pred_postfix _E109_$tag 隔离未命中",
+      "planned_fix": "输出目录加 run-ID/config hash 后缀（避免破坏已有目录名断点兼容）"
+    }
+  },
+  "e109_impact": "在跑 E109 海选链与已落袋 4 臂 AVG5 零污染：B01/B02 仅 sglang serving prefill 路径（E109 走 HF patch 的 dense-prefill + decode 稀疏）；B03 samsum 不在任务集；B04 全臂同协议内部公平；B05 无 padding 无 per_qh；B06-B08 是 RULER 链 E109 未用；B09 有 postfix 隔离",
+  "test_artifacts": "python/sglang/srt/layers/attention/tli/test_b01_b02_fix.py（B01/B02 专项反例，含 GPT 数值精确吻合断言）"
+}

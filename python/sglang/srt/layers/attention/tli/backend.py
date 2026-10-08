@@ -1013,12 +1013,20 @@ class TLISparseAttnBackend(AttentionBackend):
         """单个请求的稀疏 prefill（select_batched 选择 + gather 前向）。
 
         sel: [nq, Hkv, K2] 逻辑位置（far+near 拼接，scatter 口径无重复）。
+        B01/B02 修复（GPT 审查 2026-10-08）：选择器无效槽位输出哨兵 S
+        （原 M10 口径转 0 → token 0 重复计权）；本端以 valid = sel < S
+        逐槽 -inf 屏蔽（与 decode 侧哨兵协议统一）；哨兵 clamp 到界内
+        保证 gather 安全（clamp 不改变任何 valid lane，与 decode
+        L938 同款约定）。
         M11：SGLANG_TLI_PREFILL_KERNEL=1 时走 Triton fused gather+online
         softmax（省 [n,K2,D] fp32 物化的 3× 带宽，kernel 级 11-16×），
         q_raw 为 bf16 原 view（kernel 输入；eager 路径用 fp32 的 q_b）。
         """
         k_buf, v_buf = pool.get_kv_buffer(layer_id)
         nq, H = q_b.shape[0], q_b.shape[1]
+        S = locs.shape[0]  # 请求序列长（哨兵界）
+        valid = sel < S  # [nq, Hkv, K2] 逐槽有效（哨兵/越界 → False）
+        sel_g = sel.clamp(max=S - 1)  # gather 界内（不改 valid lane）
         # M11 fused 路径：sel 逻辑位置 → pool 槽位（与 eager 相同的一次小 gather）
         # 注意：q_raw 是父张量 q[starts[b]:ends[b]] 的切片 view，行 stride 可能
         # 不等于 H*D（实测 stride=6144 ≠ 4096）；kernel 寻址假设行连续，
@@ -1031,14 +1039,15 @@ class TLISparseAttnBackend(AttentionBackend):
             and (G & (G - 1)) == 0
             and (self.head_dim & (self.head_dim - 1)) == 0
         ):
-            pool_sel = locs[sel]  # [nq, Hkv, K2] pool 槽位
+            pool_sel = locs[sel_g]  # [nq, Hkv, K2] pool 槽位
             q_c = q_raw if q_raw.is_contiguous() else q_raw.contiguous()
             out_k = tli_sparse_gather_attn_dot(
-                q_c, pool_sel, k_buf, v_buf, G, S_loc=k_buf.shape[0]
+                q_c, pool_sel, k_buf, v_buf, G, S_loc=k_buf.shape[0],
+                valid=valid,
             )
             return out_k.view(nq, H * self.head_dim)
         K2 = sel.shape[-1]
-        pool_sel = locs[sel]  # [nq, Hkv, K2] pool 槽位
+        pool_sel = locs[sel_g]  # [nq, Hkv, K2] pool 槽位
         out = torch.empty(nq, H, self.head_dim, device=q_b.device, dtype=q_b.dtype)
         row_chunk = max(1, min(nq, 512))  # [512, K2=1024, D=128] fp32 ≈ 268MB/head
         for h in range(Hkv):
@@ -1051,6 +1060,9 @@ class TLISparseAttnBackend(AttentionBackend):
                 att = torch.einsum("ngd,nkd->ngk", q_h[r0:r1], k_sel) * (
                     self.head_dim**-0.5
                 )
+                att = att.masked_fill(
+                    ~valid[r0:r1, h].unsqueeze(1), float("-inf")
+                )  # B01：哨兵槽位 -inf（原转 0 语义下参与 softmax）
                 att = torch.softmax(att, dim=-1)
                 out[r0:r1, h * G : (h + 1) * G] = torch.einsum(
                     "ngk,nkd->ngd", att, v_sel

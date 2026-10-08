@@ -186,19 +186,25 @@ def get_pred(
         if (
             dataset == "samsum"
         ):  # prevent illegal output on samsum (model endlessly repeat "\nDialogue"), might be a prompting issue
-            # assert False
+            # B03 修复（GPT 审查 2026-10-08）：原版 model.generate(**input) 缺两件事——
+            # ① q_input 切出的 question 没接回，只喂了 prefix；② output 赋值后
+            # generated_content 从未赋值，下方共用 decode 必 UnboundLocalError。
+            # 修法：拼接完整输入（与 else 分支同协议），generate 后取新增 token。
+            full_ids = torch.cat([input.input_ids, q_input.input_ids], dim=-1)
             output = model.generate(
-                **input,
+                input_ids=full_ids,
+                attention_mask=torch.ones_like(full_ids),
                 max_new_tokens=max_gen,
                 num_beams=1,
                 do_sample=False,
                 temperature=1.0,
-                min_length=context_length + 1,
+                min_length=full_ids.shape[-1] + 1,
                 eos_token_id=[
                     tokenizer.eos_token_id,
                     tokenizer.encode("\n", add_special_tokens=False)[-1],
                 ],
             )[0]
+            generated_content = output[full_ids.shape[-1]:].tolist()
         else:
             with torch.no_grad():
                 output = model(

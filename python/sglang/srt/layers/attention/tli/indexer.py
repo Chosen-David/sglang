@@ -1045,9 +1045,10 @@ class TLIIndexer:
                 # ①seq_m where [n,S] + topk 全排序 → tli_compact 块展开；
                 # ②kq_f[tok_c] gather + einsum → KernelC fused gather+dequant+GEMV
                 #   双池直写；③fine [n,Hkv,S] 物化 + masked_fill 链 → 池表
-                # [n,Hkv,Tc]。输出哨兵=S 统一转 0（下游 _sparse_extend_one 无
-                # valid 掩码约定；原版 -inf 垃圾位 ≈ 未覆盖位置起，行为近似；
-                # empty 行（far 区空）走原版整体 topk 特判保语义）
+                # [n,Hkv,Tc]。B01 修复后：无效槽位保留哨兵=S（下游
+                # _sparse_extend_one 以 valid = sel < S 屏蔽——原转 0 使
+                # token 0 重复计权；empty 行（far 区空）走原版整体 topk
+                # 特判保语义）
                 from sglang.srt.layers.attention.tli.kernels import (
                     tli_compact,
                     tli_l2_score_batched_dual,
@@ -1106,8 +1107,10 @@ class TLIIndexer:
                         i_f = torch.topk(far_sc, W_far, dim=-1).indices
                         sc_f = torch.gather(far_sc, 2, i_f)
                         sel_f = torch.gather(tok_e, 2, i_f)
-                    keep_f = sc_f != float("-inf")  # 池不足槽位 → 哨兵 → 0
-                    parts.append(torch.where(~keep_f, torch.zeros_like(sel_f), sel_f))
+                    keep_f = sc_f != float("-inf")
+                    # B01 修复：池不足槽位保留哨兵 SENT（原转 0 使
+                    # token 0 重复计权；下游 valid = sel < S 屏蔽）
+                    parts.append(torch.where(~keep_f, SENT, sel_f))
                 if W_near > 0:
                     if _ds_on:
                         i_n = ds_topk_padded(
@@ -1122,13 +1125,15 @@ class TLIIndexer:
                         sc_n = torch.gather(near_sc, 2, i_n)
                         sel_n = torch.gather(tok_e, 2, i_n)
                     keep_n = sc_n != float("-inf")
-                    parts.append(torch.where(~keep_n, torch.zeros_like(sel_n), sel_n))
+                    # B01 修复：near 池同款哨兵 SENT
+                    parts.append(torch.where(~keep_n, SENT, sel_n))
                 if W_forced > 0:
                     f_pos = sw_lo_t.view(-1, 1) + torch.arange(W_forced, device=device)
                     f_pad = torch.arange(W_forced, device=device).view(1, -1) >= F_t.view(-1, 1)
-                    forced = torch.where(f_pad, torch.zeros_like(f_pos), f_pos)
+                    # B01 修复：forced 段 pad 位哨兵 SENT（原转 0）
+                    forced = torch.where(f_pad, SENT, f_pos)
                     parts.append(forced.unsqueeze(1).expand(n, Hkv, -1))
-                res_k = torch.cat(parts, dim=-1)  # [n, Hkv, K2]（哨兵已转 0）
+                res_k = torch.cat(parts, dim=-1)  # [n, Hkv, K2]（B01 修复后：无效槽位哨兵 S）
                 # empty 行（far 区空）：走原版整体 topk 口径（对拍锚定）。
                 # #65：fine_e 只对 empty 行子集计算（旧版全 n 行 einsum+
                 # 全宽 topk——首 chunk 41% 行 empty 时 chunk0 67ms vs 其余
@@ -1269,9 +1274,14 @@ class TLIIndexer:
         # M10 kernel 路径哨兵转 0 同样不保证行级因果。下游 _sparse_extend_one
         # softmax 无掩码 → 早期行直接看到本 chunk 未来 token，逐层传播污染
         # 全序列（30B 64-token 生成陷入重复循环；审计 caus_over=2095104 全部
-        # 来自前 K2-1 行）。修复：这些行整行替换为 [0, t_r] 均匀重复 grid
-        # （每位置重复次数差 ≤1，softmax 数学等价 dense 行）。t_r ≥ K2 的行
-        # 越界数为 0（审计验证），不动。
+        # 来自前 K2-1 行）。修复：这些行整行替换为 identity grid。
+        # B02 修复（GPT 审查 2026-10-08）：原 uniform grid 在 K2 不整除 L 时
+        # 前 K2%L 个 token 重复 floor+1 次——重复 m 次等价 softmax logit
+        # +log(m) 偏置（K2=1024/L=1000 反例：前 24 token 权重翻倍，算术
+        # 输出 0.047 vs dense 0.024），并非注释原称的「数学等价 dense」。
+        # 改为每 token 恰一次（j < L → j）+ 尾部哨兵 S（下游
+        # valid = sel < S 屏蔽）——softmax 有效位恰为全部 L 个因果
+        # token，真正 dense 等价。t_r ≥ K2 的行越界数为 0（审计验证），不动。
         early = t_arr < res_all.shape[-1]  # [Nq]
         # #65：t_min_hint ≥ K2（输出宽）时无 early 行——跳过 .any() 同步
         _no_early = (
@@ -1279,23 +1289,21 @@ class TLIIndexer:
         )
         # F5（#129）：残余同步 bool(early.any()) 消除——无条件执行向量
         # 化构造（全部 device op；ne=0 时 nonzero 返回空张量，scatter
-        # no-op，多付 ~5 个微 launch 远小于队列排空）。reps.clamp(min=1)
-        # 防 device 除零（仅影响非 early 行的垃圾 lane，不写回）。语义与
+        # no-op，多付 ~5 个微 launch 远小于队列排空）。语义与
         # if-gated 版逐位一致。
         if not _no_early:
             # #65 向量化：旧版逐行 Python 循环（arange+repeat_interleave+
             # cat+index_put × 每早期行，首 chunk 1024 行 → ~5K launch +
-            # 3K 次 .item() 同步，chunk0 65ms 的主因）。等价构造：
-            # slot j 的位置 = j//reps（j < reps*L）否则 j - reps*L（尾段）
+            # 3K 次 .item() 同步，chunk0 65ms 的主因）。
             K2 = res_all.shape[-1]
             Hkv2 = res_all.shape[1]
             e_idx = early.nonzero().squeeze(-1)  # [ne]
             L = t_arr[e_idx] + 1                 # [ne] 因果位置数
-            reps = (K2 // L).clamp(min=1)        # [ne]（clamp 见上注释）
-            cut = (reps * L).view(-1, 1)         # [ne,1]（early 行 reps≥1，clamp 恒无操作）
             j = torch.arange(K2, device=res_all.device).view(1, -1)
+            # B02：identity grid + 哨兵 S 尾垫（哨兵 ≥ 任意有效位，
+            # 下游 valid = sel < S 屏蔽；行恒含位置 0 → softmax 无 NaN）
             grid = torch.where(
-                j < cut, j // reps.view(-1, 1), j - cut
+                j < L.view(-1, 1), j, S
             )  # [ne, K2]
             res_all[e_idx] = grid.unsqueeze(1).expand(-1, Hkv2, K2)
         return res_all
@@ -1314,10 +1322,14 @@ class TLIIndexer:
         与 _select_taskmd 逐行集合一致（对拍锚：per-row 区域边界 /
         双池分数源 / γ 预算切分全部按 t_r 独立计算）。M7 快路径与
         M10 kernel 旁路（avg 分数源 + sink 正交 + 双池 L1 语义超出
-        出口径）。输出 [Nq, Hkv, K2]，池不足槽位 = 0（下游
-        _sparse_extend_one 无哨兵 valid 约定 → 沿 M10 口径转 sink 位 0，
-        softmax 权重近似）；早期行（t < K2）由尾部 #58 uniform grid
-        修复覆盖（与旧路径同兜底）。
+        出口径）。输出 [Nq, Hkv, K2]。B01 修复（GPT 审查 2026-10-08）：
+        池不足/越界槽位 = 哨兵 S_r（原 M10 口径转 0 会把 token 0 重复
+        计权——槽位重复 m 次等价 softmax logit +log(m) 偏置，S=4096
+        反例实测算术输出 0.376 vs 去重 0.0016）；下游 _sparse_extend_one
+        以 valid = sel < S 逐槽屏蔽（与 decode 侧哨兵协议统一）。
+        早期行（t < K2）由尾部 grid 修复覆盖：每 token 恰一次 + 哨兵
+        尾垫（B02：原 uniform grid 在 K2 不整除 L 时前 K2%L 个 token
+        重复 2 次，非 dense 等价）。
 
         per-row 区域边界（two-level compute_mask 公式的 t_r 化）：
         - near_len_dyn_r = max(bs, α·mid_len_r)，mid_len_r 按因果长度
@@ -1532,7 +1544,11 @@ class TLIIndexer:
                     < k2_far_r.view(-1, 1, 1)
                 )
                 keep_f2 = (sc_f2 > float("-inf")) & rank_f2
-                sel_f2 = torch.where(~keep_f2, torch.zeros_like(i_f2), i_f2)
+                # B01 修复：无效槽位哨兵 S_r（下游 valid = sel < S 屏蔽；
+                # 原转 0 使 token 0 被重复计权）
+                sel_f2 = torch.where(
+                    ~keep_f2, S_r.view(-1, 1, 1), i_f2
+                )
                 # near 池 topk（静态宽 nt_near_cap）
                 in_near_tok = (pos.view(1, S) >= far_hi_t.view(-1, 1)) & (
                     pos.view(1, S) < swa_lo_t.view(-1, 1)
@@ -1549,16 +1565,19 @@ class TLIIndexer:
                     < k2_near_r.view(-1, 1, 1)
                 )
                 keep_n2 = (sc_n2 > float("-inf")) & rank_n2
-                sel_n2 = torch.where(~keep_n2, torch.zeros_like(i_n2), i_n2)
+                # B01 修复：无效槽位哨兵 S_r（同 far 池口径）
+                sel_n2 = torch.where(
+                    ~keep_n2, S_r.view(-1, 1, 1), i_n2
+                )
                 # 正交强制区：sink 头部（宽 sink_tok）+ swa 尾部（宽 swa_tok，
-                # 早行 t_r < swa-1 的越界槽位沿 M10 口径转 0）
+                # 早行 t_r < swa-1 的越界槽位 B01 修复后转哨兵 S_r 而非 0）
                 sink_pos = torch.arange(sink_tok, device=device).view(1, -1)
                 sink_pad = (
                     torch.arange(sink_tok, device=device).view(1, -1)
                     >= S_r.view(-1, 1)
                 )
                 sink_out = torch.where(
-                    sink_pad, torch.zeros_like(sink_pos), sink_pos
+                    sink_pad, S_r.view(-1, 1), sink_pos
                 ).unsqueeze(1).expand(n, Hkv, -1)
                 f_pos = swa_lo_t.view(-1, 1) + torch.arange(
                     swa_tok, device=device
@@ -1569,7 +1588,7 @@ class TLIIndexer:
                     >= F_t.view(-1, 1)
                 )
                 forced_out = torch.where(
-                    f_pad, torch.zeros_like(f_pos), f_pos
+                    f_pad, S_r.view(-1, 1), f_pos
                 ).unsqueeze(1).expand(n, Hkv, -1)
                 res = torch.cat(
                     [sel_f2, sel_n2, sink_out, forced_out], dim=-1
@@ -1586,20 +1605,21 @@ class TLIIndexer:
                 ).indices  # [n, Hkv, K2]
             out.append(res)
         res_all = torch.cat(out, dim=0)  # [Nq, Hkv, K2]
-        # #58 行级因果修复（早期行 t < K2 → uniform grid，dense 等价）：
-        # 沿用 select_batched 尾部既有兜底（口径一致）
+        # #58 行级因果修复 + B02 修复（GPT 审查 2026-10-08）：早期行
+        # t < K2 用 identity grid（每 token 恰一次）+ 哨兵 S 尾垫——
+        # 原 uniform grid 在 K2 不整除 L 时前 K2%L 个 token 重复 2 次
+        # （等价 +log(2) logit 偏置，非 dense 等价）；哨兵槽位由下游
+        # valid = sel < S 屏蔽，与 _select_taskmd 尾部口径一致。
         early = t_arr < res_all.shape[-1]
         if bool(early.any()):
             K2 = res_all.shape[-1]
             Hkv2 = res_all.shape[1]
             e_idx = early.nonzero().squeeze(-1)
             L = t_arr[e_idx] + 1
-            reps = (K2 // L).clamp(min=1)
-            cut = (reps * L).view(-1, 1)
             j = torch.arange(K2, device=res_all.device).view(1, -1)
             grid = torch.where(
-                j < cut, j // reps.view(-1, 1), j - cut
-            )
+                j < L.view(-1, 1), j, S
+            )  # [ne, K2] identity + 哨兵尾垫
             res_all[e_idx] = grid.unsqueeze(1).expand(-1, Hkv2, K2)
         return res_all
 

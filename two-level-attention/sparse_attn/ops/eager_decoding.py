@@ -24,13 +24,17 @@ def eager_decoding_attn(
     # 逐元素对应——每个 q-head 用自己的选择，不做组内广播。
     m0 = mask[0]
     per_qh = m0.shape[0] != k.shape[-2]
+    # B05 修复（GPT 审查 2026-10-08）：原版 [:, :eos_k-bos_k] 切的是 dim1
+    # （per_qh 的 G 轴 / shared 的 Hkv 轴）而非最后一维 token 轴——无 padding
+    # 时恰好是 no-op 故长期未暴露；投影路径 Tpad>T 时会广播失败或掩码不裁。
+    # 改为裁 token 轴；无 padding（tk*bs == eos_k-bos_k）时与原版逐位等价。
     if per_qh:
         g_m = m0.shape[0] // k.shape[-2]
         b_mask = repeat(
             m0, '(h g) tk -> h g (tk bs)', g=g_m, bs=block_size
-        )[:, :eos_k - bos_k]
+        )[..., :eos_k - bos_k]
     else:
-        b_mask = repeat(mask[0], 'h tk -> h (tk bs)', bs=block_size)[:, :eos_k - bos_k]
+        b_mask = repeat(mask[0], 'h tk -> h (tk bs)', bs=block_size)[..., :eos_k - bos_k]
 
     b_q = rearrange(q[0] * softmax_scale, '(h g) d -> h g d', g=G).to(torch.float32)
     b_k = k.to(torch.float32)
