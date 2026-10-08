@@ -143,6 +143,86 @@
    "gov_report": 32.85,
    "repobench-p": 66.3,
    "AVG5": 44.99
+  },
+  "E109_aavg_a0.875_b0.875_g0.125": {
+   "qasper": 41.92,
+   "hotpotqa": 53.23,
+   "musique": 30.17,
+   "gov_report": 32.74,
+   "repobench-p": 65.82,
+   "AVG5": 44.78
+  },
+  "E109_aavg_a0_b0_g0": {
+   "qasper": 44.19,
+   "hotpotqa": 57.26,
+   "musique": 30.52,
+   "gov_report": 33.44,
+   "repobench-p": 63.72,
+   "AVG5": 45.83
+  },
+  "E109_cavgkm_a0_b0_g0": {
+   "qasper": 44.14,
+   "hotpotqa": 56.77,
+   "musique": 29.3,
+   "gov_report": 32.32,
+   "repobench-p": 66.57,
+   "AVG5": 45.82
+  },
+  "E109_cclustersim_a0.125_b0.25_g0.25": {
+   "qasper": 44.12,
+   "hotpotqa": 55.1,
+   "musique": 32.05,
+   "gov_report": 32.89,
+   "repobench-p": 66.76,
+   "AVG5": 46.18
+  },
+  "E109_cclustersim_a0.125_b0.25_g0.75": {
+   "qasper": 18.45,
+   "hotpotqa": 37.65,
+   "musique": 16.81,
+   "gov_report": 24.74,
+   "repobench-p": 61.34,
+   "AVG5": 31.8
+  },
+  "E109_mavg_a0.125_b0.125_g0.625": {
+   "qasper": 44.65,
+   "hotpotqa": 54.37,
+   "musique": 34.3,
+   "gov_report": 33.24,
+   "repobench-p": 67.54,
+   "AVG5": 46.82
+  },
+  "E109_mavg_a0.5_b0.375_g0.625": {
+   "qasper": 31.49,
+   "hotpotqa": 48.46,
+   "musique": 24.92,
+   "gov_report": 31.38,
+   "repobench-p": 65.88,
+   "AVG5": 40.43
+  },
+  "E109_mavg_a0.5_b0.5_g0.625": {
+   "qasper": 31.03,
+   "hotpotqa": 48.37,
+   "musique": 23.47,
+   "gov_report": 31.56,
+   "repobench-p": 65.55,
+   "AVG5": 40.0
+  },
+  "E109_mavg_a0.875_b0.25_g0.625": {
+   "qasper": 42.62,
+   "hotpotqa": 53.04,
+   "musique": 29.7,
+   "gov_report": 33.25,
+   "repobench-p": 66.58,
+   "AVG5": 45.04
+  },
+  "E109_mavg_a0.875_b0.375_g0.625": {
+   "qasper": 42.37,
+   "hotpotqa": 53.87,
+   "musique": 30.03,
+   "gov_report": 33.02,
+   "repobench-p": 66.58,
+   "AVG5": 45.17
   }
  },
  "note": "E109 海选五任务（qasper/hotpotqa/musique/gov_report/repobench-p）增量落袋；YaRN 外推口径待全量 RULER 阶段按 Prism 配置统一"
