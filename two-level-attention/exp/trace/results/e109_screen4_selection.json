@@ -239,6 +239,14 @@
    "gov_report": 33.4,
    "repobench-p": 67.96,
    "AVG5": 46.95
+  },
+  "E109_cclustersim_a0.5_b0.125_g0.75": {
+   "qasper": 32.15,
+   "hotpotqa": 48.32,
+   "musique": 23.62,
+   "gov_report": 31.12,
+   "repobench-p": 65.59,
+   "AVG5": 40.16
   }
  },
  "note": "E109 海选五任务（qasper/hotpotqa/musique/gov_report/repobench-p）增量落袋；YaRN 外推口径待全量 RULER 阶段按 Prism 配置统一"
