@@ -1,0 +1,52 @@
+{
+  "verdict_date": "2026-10-08",
+  "reviewer": "GPT round2 (F01-F07) + Kimi3 (N1/N2/S1-S3/R01/编排F1-F7)，合并去重",
+  "reviewee_commit": "15eea9adc（#154 修复后）",
+  "fix_commit": "e4e005df7（two-level-indexer 已 push）",
+  "verdict_summary": "合并去重后核心 P1 三项（S1/S2/S3）全部属实全部修复；GPT F01 = Kimi3 S1 同源；GPT F07 = Kimi3 R01 同源（缓期）；S2 用户指出第二处位点首修遗漏、本轮补修并红-绿验证。E109 在跑链经架构核对零污染（two-level 权威实现无 pool/哨兵/静态宽结构）。",
+  "fixes": {
+    "S1_batched_prefill_midrow_causality": {
+      "source": "GPT F01 = Kimi3 S1（同源）",
+      "truth": true,
+      "root_cause": "batched prefill 多行 chunk 中间行 t_r 哨兵用逐行 S_r=t_r+1，消费端按全局 valid=sel<S 判有效 → 哨兵值 S_r 恰为未来 token 位置且 <S → 被当有效位读入（未来 K/V 改变过去输出）。GPT 反例：S=4096/t=2047/(α,β,γ)=(.125,.375,.625)→640/1024=0.625 泄漏",
+      "fix": "选择器哨兵全部改全局 S（indexer.py sel_f2/sel_n2/sink_out/forced_out 4 处）+ 消费端纵深防御逐行因果界 valid=sel<S-nq+r+1（backend.py _sparse_extend_one，extend query 行恒为序列尾部）",
+      "verification": "test_s1_causality.py 3/3：①中间行哨兵全为全局 S 无 2048 哨兵 ②逐行因果界下 v[2048]=1 输出恒 0（修复前 0.625 泄漏精确复核）③改未来 value 不改中间行输出（因果性不变量）",
+      "e109_impact": "零——E109 链走 two-level 仓库（PYTHONPATH=two-level-attention）HF dense-prefill 路径，sglang pool/batched 架构不参与"
+    },
+    "S2_sentinel_revival_single_pool": {
+      "source": "Kimi3 S2",
+      "truth": true,
+      "root_cause": "decode 批量单池 skip_far 分支 swa +inf masked_fill 条件 (tok >= swa_lo_t) 对哨兵 lane（tok=S_cap 未 clamp，≥ swa_lo_t 恒真）把刚打的 -inf 复活为 +inf → topk 被 +inf 哨兵挤占（有限分候选整体出局，退化只看滑窗）且输出 tok_c=S_cap-1 垃圾实位置越出因果界、最坏 0 有效 lane → softmax NaN",
+      "fix": "两个位点全部补 & valid：L1975-1978（select_decode_batched skip_far 分支）+ L2424-2427（_select_decode_taskmd 单池分支——首修遗漏，用户指出后补修）。触发面：taskmd 单池臂（α=0/β=0，含计划内 (0,0) 退化点）批量 decode/CUDA graph 每步",
+      "verification": "test_s2_single_pool_sentinel.py：独立 oracle 复刻 L1 per-head 候选，断言有效槽位集合==候选全集/swa 全在场/哨兵数=k−候选/因果界/无重复/softmax 无 NaN；红-绿验证：临时退回第二处修复即 FAIL「行 0 head 0：有效槽位越出因果界」（+inf 哨兵输出 S_cap-1=2047 > t=1023）",
+      "e109_impact": "零——two-level 权威实现为 topk_mask+全长 softmax+p[...,-swa:]=1.0 语义（无候选压实/哨兵/+inf 复活结构），S2 为 sglang 移植版 E112 静态宽架构特有；E112 对拍 59/59 未暴露的原因=对拍有效集合语义而 S2 是池不足/静态宽边界行为"
+    },
+    "S3_per_request_e64_pool_shortfall": {
+      "source": "Kimi3 S3",
+      "truth": true,
+      "root_cause": "decode n==1 路径 far/near 池 topk 池不足时 -inf 槽位是池内真实位置（<S）→ 消费端以真实 logit 计入；批量版有 keep 掩码而 per-request 无 → n==1 与 n≥2 语义不一致",
+      "fix": "per-request e64 far/near topk 加 keep 掩码转哨兵 S（i_f2 = where(sc>-inf, raw+S_lo, S)，near 同款）",
+      "verification": "既有回归全绿（m2b/m5/incremental_prefill 6/6/b01_b02 3/3）；n==1/n≥2 语义一致性由哨兵协议统一",
+      "e109_impact": "零（同上，two-level 路径）"
+    },
+    "N2_tmp_backup": {
+      "truth": true,
+      "status": "已启动：exp/results_longbench_e109_v2_backup/ cp -r /tmp/e109_scan_v2/pred_E109_* 后台进行"
+    },
+    "N1_chain_heredoc_overwrite": {
+      "truth": true,
+      "status": "DEFERRED — 链收官后跑 e109_score_v2.py 自愈重建 selection.json（无 AVG5 臂重打分）；绝不编辑运行中的 /tmp/e109_screen4_chain.sh（bash 按字节偏移读脚本）；.fixed 版原子替换待两链收官"
+    },
+    "F07_R01_first_token_protocol": {
+      "truth": true,
+      "status": "DEFERRED — 全臂同协议（含 FullKV baseline）内部公平；等 E109 海选收官后全量阶段统一修"
+    },
+    "RULER_F02_F05_and_orchestration": {
+      "status": "DEFERRED — RULER 工具链修复（失败 marker 放行/scorer schema/覆盖/AVG 过滤）与编排脚本 .fixed（repobench-p glob 永不匹配/双链 marker 撞车/γ 悬崖名单）委派 agent，链收官后执行"
+    }
+  },
+  "regression": "6/6 全绿：test_s2_single_pool_sentinel、test_s1_causality、test_incremental_prefill 6/6、test_b01_b02_fix 3/3、test_tli_m2b、test_tli_m5（CUDA graph 路径）",
+  "test_artifacts": "python/sglang/srt/layers/attention/tli/test_s1_causality.py + test_s2_single_pool_sentinel.py（红-绿双证）",
+  "note_task_md": "本轮发现 TASK.md 工作树被意外删除（非本会话操作），已从 git 提交 5cd11a696 恢复且逐位一致（md5 8331017308b6cf0eba55469b12954080），无数据丢失；原因待观察",
+  "note_h20_pull": "顺带修复 H20 拉回循环失败（rsync --rsync-path 的 ~ 远端非交互 shell 不展开 → 改绝对路径 /home/wangyuanshuo02/.local/bin/rsync），拉回循环已恢复无报错"
+}
