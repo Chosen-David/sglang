@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""near-SWA 边界修复 + C-1 控制流洞修复验证测试（CPU only）——验证 /tmp/near_fix_v2。
+"""near-SWA 边界修复 + C-1 控制流洞修复验证测试（CPU only）。
+
+【10-09 TL-TEST-TMP-001 修复（GPT 审计）】不再依赖未提交 /tmp 状态：
+  - C-1 已合入主树（bb8c6712c）→ N2 直接对主树断言（干净检出可复现的回归保护）；
+  - near 边界修复仍在 /tmp/near_fix_v2 未合入 → N1/N3/N4/N5 红绿对照在副本
+    存在时执行，缺失时明确 SKIP（合入主树后应改为直接断言）。
 
 缺陷一 N1（用户 2026-10-08 报告，独立核实属实）：
   e64 分区臂 near 左界从序列末尾（kt*bs）往前推 near_len_dyn，而 TASK.md L137
@@ -20,7 +25,7 @@
   （(0,0) 的 far_hi = S - swa_tok 恰为正确单池语义——第一版"统一从 swa_lo 推"
   的公式会破坏单池 far 少 128，本测试 N3 防的就是这个）。
 
-红-绿对照：主树（未修复，红侧）vs /tmp/near_fix_v2（绿侧，含 C-1 修复）。
+红-绿对照：主树（C-1 已修）vs /tmp/near_fix_v2（绿侧，含边界修复；缺失时跳过）。
 用法：python3 test_near_swa_boundary.py
 """
 import importlib
@@ -36,13 +41,26 @@ torch.set_num_threads(1)
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 FIX_ROOT = "/tmp/near_fix_v2"
+# 【10-09 TL-TEST-TMP-001 修复（GPT 审计）】干净检出无 /tmp/near_fix_v2 时：
+# - N2 的 C-1 断言（sink/swa 强制 + mid=768 分区预算）已随 bb8c6712c 合入主树，
+#   直接对主树（IDX_OLD）断言，任何时候都跑 —— 这是 C-1 回归保护。
+# - N1/N3/N4/N5 是 near 边界修复（尚未合入主树）的红绿对照与不变量检查，
+#   /tmp 缺失时明确 SKIP（不 FAIL 不崩），near_fix 合入主树后应改为直接断言。
+HAVE_FIX = os.path.isdir(os.path.join(FIX_ROOT, "sparse_attn"))
 
 RESULTS = []
+SKIPPED = []
 
 
 def report(name, ok, detail=""):
     RESULTS.append((name, ok, detail))
     print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"  -- {detail}" if detail else ""))
+
+
+def report_skip(name, reason):
+    RESULTS.append((name, True, "SKIP"))  # SKIP 不计失败
+    SKIPPED.append(name)
+    print(f"SKIP  {name}  -- {reason}")
 
 
 def load_sparse_attn(name, root):
@@ -52,8 +70,8 @@ def load_sparse_attn(name, root):
     return importlib.import_module(f"{name}.indexer")
 
 
-IDX_OLD = load_sparse_attn("sparse_attn_nb_old", REPO)      # 主树 = 旧口径（红侧）
-IDX_NEW = load_sparse_attn("sparse_attn_nb_new", FIX_ROOT)  # 修复副本（绿侧）
+IDX_OLD = load_sparse_attn("sparse_attn_nb_old", REPO)      # 主树 = C-1 已修（bb8c6712c）
+IDX_NEW = load_sparse_attn("sparse_attn_nb_new", FIX_ROOT) if HAVE_FIX else None  # 修复副本（绿侧）
 
 
 def make_args(**kw):
@@ -95,6 +113,9 @@ CCLUSTER_CFG = dict(
 # ================================================================ N1 红绿对拍：块对齐反例
 def n1_aligned_counterexample():
     name = "N1 红绿对拍（块对齐反例：目标 near=2048，旧实得 1920/新 2048）"
+    if not HAVE_FIX:
+        report_skip(name, f"near_fix 副本 {FIX_ROOT} 不存在（TL-TEST-TMP-001：不依赖未提交 /tmp 状态；合入主树后改直接断言）")
+        return
     try:
         # S = sink(128) + mid(4096) + swa(128)，全 64 块对齐；α=0.5 → near_len_dyn=2048
         S = 128 + 4096 + 128
@@ -122,40 +143,37 @@ def n1_aligned_counterexample():
 
 # ================================================================ N2 α=1 far 区空
 def n2_alpha_one_empty_far():
-    name = "N2 α=1 far 区空：建簇侧 far_hi=192 + C-1 修复后 sink 强制恢复"
-    # 归因更正（pool_starvation_audit_20261008 §3）：此前该测试 FAIL 的真因
-    # 不是建簇侧 far_hi 计算链（那部分 near_fix 一直是对的，fh_new=192），
-    # 而是消费端控制流洞 C-1——far token 池空（near_blks==sink_blocks）时
-    # `if far_tok_hi > far_tok_lo:` 把 near 池选择 + sink/swa 强制 + return
-    # 整体旁路，静默落单池兜底：sink_all=False（靠 p 概率侥幸入选）、
-    # mid=896 > K2_mid=768 预算失守。C-1 修复后本断言（sink 必强制）转绿，
-    # 与 far_hi=192 断言构成完整红绿对。
+    name = "N2 α=1 far 区空：C-1 回归（主树 sink/swa 强制 + mid=768）+ 边界缺陷标记"
+    # 【10-09 重构】C-1 已合入主树（bb8c6712c）→ 本断言直接对主树跑，
+    # 干净检出可复现（TL-TEST-TMP-001 验收要求）。near 边界修复未合入 →
+    # 主树 far_hi 仍 256（α=1 留 128 far，缺陷开放如实标记），修复侧
+    # fh_new=192 断言仅 /tmp 副本存在时执行红绿对照。
     try:
         S = 128 + 4096 + 128
         k, q = gen_kq(S)
         args = make_args(**CCLUSTER_CFG, tli_alpha=1.0, tli_beta=0.25, tli_gamma=0.5)
         idx_old, mask_old = run_mask(IDX_OLD, args, k, q)
-        idx_new, mask_new = run_mask(IDX_NEW, args, k, q)
         fh_old = int(idx_old._km_far_hi_cached)
-        fh_new = int(idx_new._km_far_hi_cached)
-        # 旧：far 区 [128, S-4096=256) 宽 128（α=1 仍留 far，用户报告实锤）
-        assert fh_old == 256, f"旧 far_hi 应 256（far 区 128 = α=1 缺陷），实际 {fh_old}"
-        # 新：near_len_dyn=mid_len=4096 → far_hi_blk=(4352-128-4096)//64=2=sink → far 区空
-        assert fh_new == 192, \
-            f"新 far_hi 建簇侧应 sink+1 块保底 192（far 区空），实际 {fh_new}"
-        # C-1 修复后：far 空不再旁路 near 段与强制区——sink/swa 必强制，
-        # mid 预算走分区路径（far 0 + near 池内截断）而非单池兜底
-        assert mask_new.dtype == torch.bool and mask_new.shape[-1] == S
-        assert bool(mask_new[..., :128].all()) and bool(mask_new[..., S - 128:].all()), \
-            "sink/swa 强制区缺失——C-1 控制流洞未修复（far 空旁路了强制区）"
-        # mid 预算恢复分区语义：mid 选中数 = min(K2_mid, near 区宽)（far 空时
-        # k2_near=K2_mid=768，α=1 near 区宽=4096>768 饱食 → mid==768），
-        # 而非 C-1 洞的单池兜底 896
-        mm = mask_new[0, 0]
+        # 主树边界缺陷开放标记：α=1 仍留 128-token far 区（near 从序列尾而非
+        # swa 起点前推）。合入 near_fix 后此断言应改 192 并转直接断言。
+        assert fh_old == 256, f"主树 far_hi 应 256（边界缺陷开放中），实际 {fh_old}"
+        # C-1 回归（主树直接断言）：far 空不再旁路 near 段与强制区——
+        # sink/swa 必强制、mid 走分区预算 768（非单池兜底 896）
+        assert mask_old.dtype == torch.bool and mask_old.shape[-1] == S
+        assert bool(mask_old[..., :128].all()) and bool(mask_old[..., S - 128:].all()), \
+            "主树 sink/swa 强制区缺失——C-1 回归失败（bb8c6712c 被破坏）"
+        mm = mask_old[0, 0]
         n_mid = int(mm[0, 128:S - 128].sum())
-        assert n_mid == 768, f"α=1 far 空时 mid 应 768（C-1 修复后分区预算），实际 {n_mid}"
-        report(name, True, f"far_hi: old=256(far 留 128) new=192(空,建簇保底)；"
-                           f"sink/swa 强制齐，mid={n_mid}（非洞口径 896）")
+        assert n_mid == 768, f"主树 α=1 mid 应 768（C-1 分区预算），实际 {n_mid}"
+        detail = f"主树 far_hi=256(边界缺陷开放)、sink/swa 强制齐、mid={n_mid}"
+        if HAVE_FIX:
+            idx_new, mask_new = run_mask(IDX_NEW, args, k, q)
+            fh_new = int(idx_new._km_far_hi_cached)
+            # 新：near_len_dyn=mid_len=4096 → far_hi_blk=(4352-128-4096)//64=2=sink → far 区空
+            assert fh_new == 192, \
+                f"新 far_hi 建簇侧应 sink+1 块保底 192（far 区空），实际 {fh_new}"
+            detail += f"；修复侧 far_hi=192(红绿对照成立)"
+        report(name, True, detail)
     except AssertionError as e:
         report(name, False, str(e))
     except Exception as e:
@@ -165,6 +183,9 @@ def n2_alpha_one_empty_far():
 # ================================================================ N3 (0,0) 单池回归逐位不变
 def n3_single_pool_invariant():
     name = "N3 (0,0) 单池点 mask 新旧逐位相同（第一版统一公式会破坏此处）"
+    if not HAVE_FIX:
+        report_skip(name, f"near_fix 副本 {FIX_ROOT} 不存在（near_fix 合入主树后改直接断言）")
+        return
     try:
         S = 4352
         k, q = gen_kq(S)
@@ -183,6 +204,9 @@ def n3_single_pool_invariant():
 # ================================================================ N4 老逻辑（α=0 非 cluster）回归
 def n4_legacy_invariant():
     name = "N4 老逻辑（无 αβ 的默认 flag）mask 新旧逐位相同"
+    if not HAVE_FIX:
+        report_skip(name, f"near_fix 副本 {FIX_ROOT} 不存在（near_fix 合入主树后改直接断言）")
+        return
     try:
         S = 4352
         k, q = gen_kq(S)
@@ -201,6 +225,9 @@ def n4_legacy_invariant():
 # ================================================================ N5 e64 分区臂预算守恒（分段断言）
 def n5_budget_conservation():
     name = "N5 e64 分区臂预算守恒（分段：饱食 mid=K2_mid；饥饿 mid=池内截断）"
+    if not HAVE_FIX:
+        report_skip(name, f"near_fix 副本 {FIX_ROOT} 不存在（near_fix 合入主树后改直接断言）")
+        return
     # 断言口径更正（pool_starvation_audit_20261008 §2.4）：「mid 总选恒 = K2_mid」
     # 只在两池候选 ≥ 各自配额时成立，须改分段断言——
     #   饱食配置 ccluster a.5/b.25/g.5：near 区宽 2048 ≥ k2_near、far 池足
@@ -246,5 +273,7 @@ if __name__ == "__main__":
     n4_legacy_invariant()
     n5_budget_conservation()
     n_fail = sum(1 for _, ok, _ in RESULTS if not ok)
-    print(f"\n===== near-SWA 边界修复验证：{len(RESULTS) - n_fail}/{len(RESULTS)} PASS =====")
+    print(f"\n===== near-SWA 边界修复验证：{len(RESULTS) - n_fail}/{len(RESULTS)} PASS"
+          + (f"（{len(SKIPPED)} SKIP：/tmp/near_fix_v2 缺失，near_fix 合入后转直接断言）" if SKIPPED else "")
+          + " =====")
     sys.exit(1 if n_fail else 0)
