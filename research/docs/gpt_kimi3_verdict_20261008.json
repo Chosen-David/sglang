@@ -33,6 +33,22 @@
       "truth": true,
       "status": "已启动：exp/results_longbench_e109_v2_backup/ cp -r /tmp/e109_scan_v2/pred_E109_* 后台进行"
     },
+    "Bug1_fused_l2_wrong_pool_real_token": {
+      "source": "GPT 复查（用户转发总表 #1）",
+      "truth": true,
+      "root_cause": "kernels.tli_l2_partition_topk（per-request fused L2）：topk 池不足时 -inf 槽位有两类——pad lane（cand_pad[S] 本就哨兵）与池内真实候选位（far_scr 对 near/swa 候选也写 -inf）。后者 gather 出真实 token 位置 → 下游 valid = sel < S 判有效、以真实 logit 计入（错误池 token 混入选中集）——S3 同类漏网（S3 只修了 eager per-request 路径）",
+      "fix": "keep 掩码统一转哨兵 S（sc_f/sc_n gather 后 where(sc > -inf, sel, S)，kernels.py L185-196）",
+      "verification": "test_b1_b2_fix.py 断言 far 段有效槽位 ⊆ far 候选集 + 哨兵数 = k2_far−候选；红-绿验证：退回修复前 head 0 far 段实测混入 near 区真实 token [1536,1536,1539,1542,...]（bug1 症状实锤）",
+      "e109_impact": "零——E109 走 two-level 权威实现（无 per-request fused L2 路径）；该函数属 sglang 非 taskmd 旧 B' 出口径"
+    },
+    "Bug2_q_agg_max_decode_not_effective": {
+      "source": "GPT 复查（用户转发总表 #2）",
+      "truth": true,
+      "root_cause": "q_agg=max（SGLANG_TLI_Q_AGG，#58 30B G=8 投影符号冲突场景）仅 prefill 非 taskmd 路径（L1026/L1065/L1234）有分支；decode 全路径（select L633、_select_taskmd L796、select_decode_batched L2029、_select_decode_taskmd L2375）+ taskmd prefill 批量（_select_batched_taskmd L1521）共 5 位点写死 .sum(2) → decode 静默退化为 sum",
+      "fix": "5 位点全部补 max 分支（逐 q-head 打分取组内 max，einsum 'hgd,thd->hgt'.max(1) 系）+ 3 处 fused kernel 旁路（select 的 use_l2_kernel per-request fused / select_decode_batched 的 M8 use_l2_batched_kernel / kernel 输入即 group-sum q2）——commit 067553e60",
+      "verification": "test_b1_b2_fix.py：①G=1 时 max ≡ sum 逐位相同（单元素 max=本身，接线正确性不变量）②G=2 符号冲突（组内 +w/−w，sum 抵消）时 max 输出 ≠ sum（修复前 max 写死 sum → 相同 → FAIL 检测力成立）③既有回归 6/6 全绿（sum 默认路径零扰动）",
+      "e109_impact": "零——E109 全臂 q_agg=sum 默认（30B 投影场景才用 max），且走 two-level 路径"
+    },
     "N1_chain_heredoc_overwrite": {
       "truth": true,
       "status": "DEFERRED — 链收官后跑 e109_score_v2.py 自愈重建 selection.json（无 AVG5 臂重打分）；绝不编辑运行中的 /tmp/e109_screen4_chain.sh（bash 按字节偏移读脚本）；.fixed 版原子替换待两链收官"
