@@ -996,6 +996,15 @@ class TLIIndexer(TIAIndexer):
             swa_lo_tok = max(0, p.shape[-1] - self.sliding_window_size)
             K2_mid = max(0, K2 - sink_tok - (p.shape[-1] - swa_lo_tok))
             nt_near = 0
+            # 【C-1 修复 2026-10-08（pool_starvation_audit §5-1）】far token 池空
+            # （near_blks==sink_blocks：α=1 / 短序列 mid≤1 块 / α·mid 舍入<bs）时
+            # 旧版把 near 池选择 + sink/swa 强制 + return 整体包在
+            # `if far_tok_hi > far_tok_lo:` 内 → 静默落单池兜底：sink 不保证、
+            # mid 超预算（896>768）、短序列全注意力。修复：guard 只保留 far
+            # 选择段；near 池选择与强制区无条件执行。far 空时初始化空 i_f
+            # （形状对齐 scatter，且下方 `i_n = i_f[..., :0]` 依赖该变量）。
+            k2_far = 0
+            i_f = torch.zeros_like(p[..., :0], dtype=torch.long)
             if far_tok_hi > far_tok_lo:
                 if far_tok_score is not None:
                     # 消融：远端按簇分数 token 级 topk
@@ -1039,45 +1048,49 @@ class TLIIndexer(TIAIndexer):
                               f"far_budget={far_budget} far_lo={far_tok_lo} "
                               f"far_hi={far_tok_hi} k2_far={k2_far} "
                               f"far_p_finite={nfin} pshape={list(p.shape)}", flush=True)
-                # near 池只取 mid-near 区 [far_tok_hi, swa_lo_tok)——
-                # sink/swa 不进 topk 竞争（旧版 near 池=全序列减 far 区，
-                # swa p=1 满分 + sink 残留都会进池占预算）
-                k2_near = max(0, K2_mid - k2_far)
-                if swa_lo_tok > far_tok_hi:
-                    near_p = p[..., far_tok_hi:swa_lo_tok]
-                    if near_tok_score is not None:
-                        # E110 ccluster：near 池换「簇分数（簇覆盖段）+ 细筛原始分
-                        # （未覆盖段）」。两源均为 group-mean 缩放点积分（量纲一致：
-                        # 【C3 修复 2026-10-08】簇分经 _last_q（已乘 softmax_scale）
-                        # 计算，sf_g 来自 score_fine（b_q_full 同乘 scale）；
-                        # _near_token_score 用 mean 聚合对齐 GQA 维）；且都不过 L1 块池
-                        # 门控——簇代表分本身就是粗筛（TASK.md cluster 语义），
-                        # 与 far 簇分路径口径一致。未覆盖段 = 块对齐右缘尾巴 +
-                        # 建簇/消费边界漂移，用细筛分回退（细筛分质量 ≥ 簇代表分，
-                        # 语义无损偏保守）
-                        sf_raw = score_dict["score_fine"][..., : p.shape[-1]].to(torch.float32)
-                        sf_g = rearrange(
-                            sf_raw, "b qt (h g) kt -> b qt h g kt", g=self.group_size
-                        ).mean(dim=-2)
-                        near_sc = sf_g[..., far_tok_hi:swa_lo_tok].clone()
-                        cs_lo = max(self._km_near_lo, far_tok_hi)
-                        cs_hi = min(self._km_near_hi, swa_lo_tok)
-                        if cs_hi > cs_lo:
-                            seg = near_tok_score[..., cs_lo - self._km_near_lo:
-                                                  cs_hi - self._km_near_lo]
-                            near_sc[..., cs_lo - far_tok_hi:cs_hi - far_tok_hi] = \
-                                seg.unsqueeze(0).unsqueeze(0)
-                        near_p = near_sc
-                    i_n = torch.topk(near_p, min(k2_near, near_p.shape[-1]), dim=-1).indices + far_tok_hi
-                else:
-                    i_n = i_f[..., :0]
-                topk_mask = torch.zeros_like(p, dtype=torch.bool)
-                topk_mask.scatter_(-1, i_f, True)
-                topk_mask.scatter_(-1, i_n, True)
-                # 正交强制区直接置位（必选不占预算）：sink 头部 + swa 尾部
-                topk_mask[..., :sink_tok] = True
-                topk_mask[..., swa_lo_tok:] = True
-                return topk_mask
+            # near 池只取 mid-near 区 [far_tok_hi, swa_lo_tok)——
+            # sink/swa 不进 topk 竞争（旧版 near 池=全序列减 far 区，
+            # swa p=1 满分 + sink 残留都会进池占预算）
+            # 【C-1 修复 2026-10-08】本段从 `if far_tok_hi > far_tok_lo:` 内移出：
+            # far 池空时 near 池照常选择、sink/swa 照常强制、K2_mid 预算照常生效
+            # （far 空 ⇒ k2_far=0 ⇒ k2_near=K2_mid 全给 near 池，池内截断 min(k2_near,
+            # near 区宽)——饥饿语义：剩余预算不跨池回补 far）。
+            k2_near = max(0, K2_mid - k2_far)
+            if swa_lo_tok > far_tok_hi:
+                near_p = p[..., far_tok_hi:swa_lo_tok]
+                if near_tok_score is not None:
+                    # E110 ccluster：near 池换「簇分数（簇覆盖段）+ 细筛原始分
+                    # （未覆盖段）」。两源均为 group-mean 缩放点积分（量纲一致：
+                    # 【C3 修复 2026-10-08】簇分经 _last_q（已乘 softmax_scale）
+                    # 计算，sf_g 来自 score_fine（b_q_full 同乘 scale）；
+                    # _near_token_score 用 mean 聚合对齐 GQA 维）；且都不过 L1 块池
+                    # 门控——簇代表分本身就是粗筛（TASK.md cluster 语义），
+                    # 与 far 簇分路径口径一致。未覆盖段 = 块对齐右缘尾巴 +
+                    # 建簇/消费边界漂移，用细筛分回退（细筛分质量 ≥ 簇代表分，
+                    # 语义无损偏保守）
+                    sf_raw = score_dict["score_fine"][..., : p.shape[-1]].to(torch.float32)
+                    sf_g = rearrange(
+                        sf_raw, "b qt (h g) kt -> b qt h g kt", g=self.group_size
+                    ).mean(dim=-2)
+                    near_sc = sf_g[..., far_tok_hi:swa_lo_tok].clone()
+                    cs_lo = max(self._km_near_lo, far_tok_hi)
+                    cs_hi = min(self._km_near_hi, swa_lo_tok)
+                    if cs_hi > cs_lo:
+                        seg = near_tok_score[..., cs_lo - self._km_near_lo:
+                                              cs_hi - self._km_near_lo]
+                        near_sc[..., cs_lo - far_tok_hi:cs_hi - far_tok_hi] = \
+                            seg.unsqueeze(0).unsqueeze(0)
+                    near_p = near_sc
+                i_n = torch.topk(near_p, min(k2_near, near_p.shape[-1]), dim=-1).indices + far_tok_hi
+            else:
+                i_n = i_f[..., :0]
+            topk_mask = torch.zeros_like(p, dtype=torch.bool)
+            topk_mask.scatter_(-1, i_f, True)
+            topk_mask.scatter_(-1, i_n, True)
+            # 正交强制区直接置位（必选不占预算）：sink 头部 + swa 尾部
+            topk_mask[..., :sink_tok] = True
+            topk_mask[..., swa_lo_tok:] = True
+            return topk_mask
         values, indices = torch.topk(p, min(p.shape[-1], self.args.tia_level2_topk), dim=-1)
         topk_mask = (
             torch.zeros_like(p, dtype=torch.bool)
