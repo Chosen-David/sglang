@@ -63,6 +63,14 @@ def parse_args(args=None):
         help="Algorithm config path",
     )
     parser.add_argument('--pred_postfix', type=str, default="")
+    # 稀疏 prefill（用户 2026-10-08 指令，MoBA/NSA/DSA 口径）：设
+    # TLI_SPARSE_PREFILL=1 环境变量（须在模型加载/patch 挂载前；patch 层
+    # 逐 forward 读 env，此处 parse 后立即设置即可）。默认不传 = 0 =
+    # prefill 走原 dense 分支逐位不变（在跑链零扰动）。
+    parser.add_argument(
+        '--tli-sparse-prefill', action='store_true',
+        help='prefill 也走 indexer 稀疏选择（chunk 共享选择，MoBA 口径）',
+    )
 
     add_sparse_attn_args(parser)
 
@@ -332,6 +340,10 @@ def load_model_and_tokenizer(path, model_name, device, args):
 if __name__ == "__main__":
     seed_everything(42)
     args = parse_args()
+    # 稀疏 prefill 门控：在模型加载/patch 挂载前设置环境变量
+    # （qwen3_attn_patch 逐 forward 读取；默认不设 = dense 逐位不变）
+    if args.tli_sparse_prefill:
+        os.environ["TLI_SPARSE_PREFILL"] = "1"
 
     config_path = args.config_path
     model2maxlen = json.load(open(f"{config_path}/model2maxlen.json", "r"))

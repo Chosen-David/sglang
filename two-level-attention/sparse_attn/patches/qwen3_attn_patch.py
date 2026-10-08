@@ -1,3 +1,5 @@
+import os
+
 import torch
 from transformers.cache_utils import Cache
 from transformers.processing_utils import Unpack
@@ -54,17 +56,34 @@ def qwen3_attn_forward(
         # pair 选取（decode 侧 _subspace_indices 消费；非静态 pair 模式为 no-op）
         if hasattr(indexer, "observe_prefill_q"):
             indexer.observe_prefill_q(query_states)
-        attn_output, attn_weights = attention_interface(
-            self,
-            query_states,
-            key_states,
-            value_states,
-            attention_mask,
-            dropout=0.0 if not self.training else self.attention_dropout,
-            scaling=self.scaling,
-            sliding_window=self.sliding_window,  # diff with Llama
-            **kwargs,
-        )
+        # 稀疏 prefill（用户 2026-10-08 指令，TLI_SPARSE_PREFILL=1 门控）：
+        # 默认未设置时走原 dense 分支逐位不变（E109 在跑链零扰动铁律）。
+        # chunk 共享选择语义（MoBA 口径）见 ops/eager_prefill.py 模块注释。
+        # 仅支持 B=1 且 attention_mask 为 None（无 padding）的质量路径口径，
+        # 其余情形（含所有现状链）回退原 dense 分支。
+        if (os.environ.get("TLI_SPARSE_PREFILL", "0") == "1"
+                and attention_mask is None and input_shape[0] == 1):
+            # 惰性 import：默认路径零依赖新增模块
+            from ..ops.eager_prefill import sparse_prefill_attn
+            q_t = query_states.transpose(1, 2)   # [1, L, H, D]
+            k_t = key_states.transpose(1, 2)     # [1, S, Hkv, D]
+            v_t = value_states.transpose(1, 2)
+            attn_output = sparse_prefill_attn(
+                indexer, q_t, k_t, v_t, softmax_scale=self.scaling
+            )
+            attn_weights = None
+        else:
+            attn_output, attn_weights = attention_interface(
+                self,
+                query_states,
+                key_states,
+                value_states,
+                attention_mask,
+                dropout=0.0 if not self.training else self.attention_dropout,
+                scaling=self.scaling,
+                sliding_window=self.sliding_window,  # diff with Llama
+                **kwargs,
+            )
     else:
         indexer: Indexer = self.indexer
         query_states, key_states, value_states = (x.transpose(1, 2) for x in (query_states, key_states, value_states))
