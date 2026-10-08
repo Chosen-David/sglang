@@ -22,10 +22,17 @@
       "method": "far=minmax near=avg",
       "shards": ".187 GPU1/3/5",
       "delta_vs_fullkv": -0.2
+    },
+    "aavg_a0_b0_g0": {
+      "score": 32.6,
+      "method": "far=avg near=avg single-pool",
+      "shards": "H20 GPU6/7 p1/p2 + .187 GPU6 p3",
+      "delta_vs_fullkv": 0.39
     }
   },
   "pending": {
-    "aavg_a0_b0_g0": "3 分片在跑 (H20 GPU6/7 p1/p2 + .187 GPU6 p3)"
+    "aavg": "DONE 三臂齐",
+    "note": "三臂终判: aavg(0,0) 32.60 > FullKV 32.21 > mavg 32.01"
   },
-  "lbv1_side_effect": "mavg 合并目录同含 v1 12/13 任务分数（multi_news 在跑）AVG12=52.85 临时值"
+  "lbv1_side_effect": "双臂 v1 12/13 任务 (multi_news 在跑): mavg AVG12=52.85, aavg AVG12=52.40"
 }
