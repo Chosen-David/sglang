@@ -602,8 +602,16 @@ class TLIIndexer(TIAIndexer):
 
     def compute_score(self, q, q_ids, index_dict, softmax_scale):
         # 缓存 squeeze 后的 q 供远端簇分数使用
+        # 【C3 修复 2026-10-08】缓存时统一乘 softmax_scale——_near_token_score
+        # 的簇分会与已缩放的 score_fine 回退段（b_q_full = q_sq[0]*softmax_scale）
+        # 进同一 near 池 topk 竞争，未缩放会放大量纲 |1/scale| 倍（D=128 时
+        # 11.31×）导致簇段霸榜挤出回退段；far 侧纯簇分 topk 乘正 scale 不变
+        # 排序 → far 行为逐位不变（核验报告 research/docs/gpt_audit_verdict_
+        # 20261008_round2.md C3 节）。
         if q.shape[0] == 1 and q.shape[1] == 1:
-            self._last_q = q.squeeze(0).squeeze(0).to(torch.float32)  # [H, D]
+            self._last_q = (
+                q.squeeze(0).squeeze(0) * softmax_scale
+            ).to(torch.float32)  # [H, D]（已缩放）
         # E109a 修复：full 子空间原来无条件走父类 compute_score（不产
         # score_coarse_avg）→ far/near_method=avg 全部静默退化为 minmax。
         # 现仅在「双池都不用 avg」时才走父类捷径；否则走本类路径
@@ -1039,8 +1047,10 @@ class TLIIndexer(TIAIndexer):
                     near_p = p[..., far_tok_hi:swa_lo_tok]
                     if near_tok_score is not None:
                         # E110 ccluster：near 池换「簇分数（簇覆盖段）+ 细筛原始分
-                        # （未覆盖段）」。两源均为 group-mean 原始点积分（量纲一致，
-                        # _near_token_score 用 mean 聚合即为此）；且都不过 L1 块池
+                        # （未覆盖段）」。两源均为 group-mean 缩放点积分（量纲一致：
+                        # 【C3 修复 2026-10-08】簇分经 _last_q（已乘 softmax_scale）
+                        # 计算，sf_g 来自 score_fine（b_q_full 同乘 scale）；
+                        # _near_token_score 用 mean 聚合对齐 GQA 维）；且都不过 L1 块池
                         # 门控——簇代表分本身就是粗筛（TASK.md cluster 语义），
                         # 与 far 簇分路径口径一致。未覆盖段 = 块对齐右缘尾巴 +
                         # 建簇/消费边界漂移，用细筛分回退（细筛分质量 ≥ 簇代表分，
@@ -1097,6 +1107,10 @@ class TLIIndexer(TIAIndexer):
         # E85f：跨请求必须重置——clear() 在每次 prefill 前调用，随后
         # observe_prefill_q 用本请求的 q 统计重选 pair（否则残留上一请求）
         self._pair_idx = None
+        # 【C3 修复 2026-10-08】_last_q 同样跨请求必须重置——否则任何
+        # 「prefill 期调用 compute_mask 且簇已构建」的路径（TLI_DEBUG 重放类）
+        # 会用上一请求 decode 的 stale q 打 near 簇分
+        self._last_q = None
 
     def get_block_size(self):
         return 1
