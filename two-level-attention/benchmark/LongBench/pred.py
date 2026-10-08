@@ -1,6 +1,7 @@
 # Modified from: https://github.com/mit-han-lab/Quest/blob/main/evaluation/LongBench/pred.py
 
 import os
+import re
 from datasets import load_dataset
 import torch
 import json
@@ -109,6 +110,27 @@ def post_process(response, model_name):
     return response
 
 
+def extract_choice_letter(text):
+    """LongBench-v2 四选一解析（官方口径优先 + 首字母兜底），无匹配返回 None：
+    ① 官方：'The correct answer is (X)'；② 官方：'The correct answer is X'；
+    ③ 兜底：首个独立的 A/B/C/D 字母（大小写兼容）。
+
+    注意：与 eval.py 的 lbv2_choice_score 保持同一逻辑（此处不 import metrics.py，
+    因其顶层 import jieba 等打分依赖，GPU 推理机上未必安装）。两处需保持同步。
+    """
+    if not text:
+        return None
+    t = text.replace("*", "")
+    m = re.search(r"The correct answer is \(([A-D])\)", t, flags=re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    m = re.search(r"The correct answer is ([A-D])", t, flags=re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    m = re.search(r"\b([ABCD])\b", t, flags=re.IGNORECASE)
+    return m.group(1).upper() if m else None
+
+
 def get_pred(
     model,
     tokenizer,
@@ -154,6 +176,9 @@ def get_pred(
         # split the prompt and question (simulate decoding in the question stage)
         if dataset in ["qasper", "hotpotqa"]:
             q_pos = prompt.rfind("Question:")
+        elif dataset == "lbv2":
+            # 官方模板无 "Question:" 锚点；question stage 取选项块起点
+            q_pos = prompt.rfind("Choices:")
         elif dataset in ["multifieldqa_en", "gov_report"]:
             q_pos = prompt.rfind("Now,")
         elif dataset in ["triviaqa"]:
@@ -264,18 +289,21 @@ def get_pred(
         budget = metrics.get_select_tokens()
         metrics.clear()
 
-        preds.append(
-            {
-                "pred": pred,
-                "answers": json_obj["answers"],
-                "all_classes": json_obj["all_classes"],
-                "length": json_obj["length"],
-                "budget": budget,
-                "score_sum": None,
-                # "B0": avg_B0,
-                # "B1": avg_budget,
-            }
-        )
+        record = {
+            "pred": pred,
+            "answers": json_obj["answers"],
+            "all_classes": json_obj["all_classes"],
+            "length": json_obj["length"],
+            "budget": budget,
+            "score_sum": None,
+            # "B0": avg_B0,
+            # "B1": avg_budget,
+        }
+        if dataset == "lbv2":
+            # LongBench-v2：额外落盘解析字母与样本 _id（打分口径 accuracy = pred_choice == answer）
+            record["pred_choice"] = extract_choice_letter(pred)
+            record["_id"] = json_obj["_id"]
+        preds.append(record)
     return preds
 
 
@@ -337,7 +365,32 @@ if __name__ == "__main__":
     local_data_set = args.dataset_path
     has_local_data_set = os.path.exists(local_data_set)
     for dataset in datasets:
-        if args.e:
+        if dataset == "lbv2":
+            # LongBench-v2（全量三件套之一）：503 题四选一 MCQ，单个 data.json
+            # （JSON 数组，非 jsonl）。--dataset-path 可直接给 data.json 文件路径，
+            # 也可给目录（依次找 lbv2.json / data.json）。
+            # 断点续跑/SKIP 与 v1 同口径：由链脚本按输出 jsonl 行数（全集 503）判定。
+            v2_path = local_data_set
+            if os.path.isdir(v2_path):
+                for cand in ("lbv2.json", "data.json"):
+                    if os.path.exists(os.path.join(v2_path, cand)):
+                        v2_path = os.path.join(v2_path, cand)
+                        break
+            if not os.path.isfile(v2_path):
+                raise FileNotFoundError(
+                    f"lbv2 需要 --dataset-path 指向 LongBench-v2 data.json（或含它的目录），当前路径不存在: {v2_path}"
+                )
+            with open(v2_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            # 归一化到 v1 管线字段约定：answers 列表 + all_classes（打分走 eval.py 的 lbv2 scorer）
+            data = []
+            for obj in raw:
+                obj = dict(obj)
+                obj["answers"] = [obj["answer"]]
+                obj["all_classes"] = ["A", "B", "C", "D"]
+                data.append(obj)
+            print(f"lbv2: loaded {len(data)} examples from {v2_path}", flush=True)
+        elif args.e:
             if not has_local_data_set:
                 data = load_dataset("THUDM/LongBench", f"{dataset}_e", split="test")
             else:

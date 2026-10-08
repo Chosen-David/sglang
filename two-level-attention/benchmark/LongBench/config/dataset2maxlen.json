@@ -32,5 +32,6 @@
     "lcc": 64,
     "lcc_e": 64,
     "repobench-p": 64,
-    "repobench-p_e": 64
+    "repobench-p_e": 64,
+    "lbv2": 128
 }
