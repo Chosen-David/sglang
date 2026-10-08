@@ -1,0 +1,156 @@
+{
+  "FullKV": {
+    "avg": 59.38,
+    "n_complete": 11,
+    "per_task": {
+      "niah_single_1": [
+        100.0,
+        100
+      ],
+      "niah_single_2": [
+        100.0,
+        100
+      ],
+      "niah_single_3": [
+        100.0,
+        100
+      ],
+      "niah_multikey_1": [
+        99.0,
+        100
+      ],
+      "niah_multikey_2": [
+        76.0,
+        100
+      ],
+      "niah_multikey_3": [
+        4.0,
+        100
+      ],
+      "niah_multiquery": [
+        24.5,
+        100
+      ],
+      "niah_multivalue": [
+        25.0,
+        100
+      ],
+      "cwe": [
+        83.5,
+        100
+      ],
+      "fwe": [
+        7.0,
+        100
+      ],
+      "vt": [
+        34.2,
+        100
+      ]
+    }
+  },
+  "mavg(.25,.125,.625)": {
+    "avg": 59.99,
+    "n_complete": 11,
+    "per_task": {
+      "niah_single_1": [
+        100.0,
+        100
+      ],
+      "niah_single_2": [
+        100.0,
+        100
+      ],
+      "niah_single_3": [
+        98.0,
+        100
+      ],
+      "niah_multikey_1": [
+        98.0,
+        100
+      ],
+      "niah_multikey_2": [
+        83.0,
+        100
+      ],
+      "niah_multikey_3": [
+        9.0,
+        100
+      ],
+      "niah_multiquery": [
+        24.5,
+        100
+      ],
+      "niah_multivalue": [
+        29.0,
+        100
+      ],
+      "cwe": [
+        70.7,
+        100
+      ],
+      "fwe": [
+        15.33,
+        100
+      ],
+      "vt": [
+        32.4,
+        100
+      ]
+    }
+  },
+  "aavg(0,0)": {
+    "avg": 57.33,
+    "n_complete": 11,
+    "per_task": {
+      "niah_single_1": [
+        93.0,
+        100
+      ],
+      "niah_single_2": [
+        98.0,
+        100
+      ],
+      "niah_single_3": [
+        99.0,
+        100
+      ],
+      "niah_multikey_1": [
+        99.0,
+        100
+      ],
+      "niah_multikey_2": [
+        73.0,
+        100
+      ],
+      "niah_multikey_3": [
+        0.0,
+        100
+      ],
+      "niah_multiquery": [
+        26.25,
+        100
+      ],
+      "niah_multivalue": [
+        25.5,
+        100
+      ],
+      "cwe": [
+        81.9,
+        100
+      ],
+      "fwe": [
+        4.0,
+        100
+      ],
+      "vt": [
+        31.0,
+        100
+      ]
+    }
+  },
+  "delta_vs_fullkv": {
+    "mavg(.25,.125,.625)": 0.61,
+    "aavg(0,0)": -2.05
+  }
+}
