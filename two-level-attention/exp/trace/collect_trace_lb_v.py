@@ -35,7 +35,10 @@ PROMPTS = {
     "hotpotqa": "Answer the question based on the given passages. Only give me the answer and do not output any other words.\n\nThe following are given passages.\n{context}\n\nAnswer the question based on the given passages. Only give me the answer and do not output any other words.\n\nQuestion: {input}\nAnswer:",
     "narrativeqa": "You are given a story, which can be either a novel or a movie script, followed by a question. Answer the question based on your understanding of the story. Only give me the answer and do not output any other words.\n\n{context}\n\nQuestion: {input}\nAnswer:",
     "passage_retrieval_en": "The following are 30 paragraphs from Wikipedia, along with an abstract of another Wikipedia article. Your task is to identify which of the 30 paragraphs the abstract is from. Only give me the answer as the number of the paragraph and do not output any other words.\n\n{context}\n\nQuestion: {input}\nAnswer:",
-    "gov_report": "You are given a report by a government agency. Write a one-page summary of the report.\n\nNow, write a one-page summary of the report.\n\nSummary:",
+    # 【10-09 修复】gov_report 是摘要类任务：官方 LongBench 把 context 前置
+    # 拼接（context + "\n\n" + 模板），不做 {context} 注入——原模板缺占位符
+    # 导致 format 后只剩 32 个模板 token（S=32 坏样本已删除重采）
+    "gov_report": "{context}\n\nYou are given a report by a government agency. Write a one-page summary of the report.\n\nNow, write a one-page summary of the report.\n\nSummary:",
 }
 
 CAPTURE = {"enabled": False, "sink": None}
