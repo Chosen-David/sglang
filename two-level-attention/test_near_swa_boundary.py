@@ -1,32 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""near-SWA 边界修复 + C-1 控制流洞修复验证测试（CPU only）。
+"""near-SWA 边界 + C-1 控制流回归门禁（CPU only，干净检出可复现，0 SKIP）。
 
-【10-09 TL-TEST-TMP-001 修复（GPT 审计）】不再依赖未提交 /tmp 状态：
-  - C-1 已合入主树（bb8c6712c）→ N2 直接对主树断言（干净检出可复现的回归保护）；
-  - near 边界修复仍在 /tmp/near_fix_v2 未合入 → N1/N3/N4/N5 红绿对照在副本
-    存在时执行，缺失时明确 SKIP（合入主树后应改为直接断言）。
+【10-09 复审修复（GPT 复审 2026-10-09_0131，TL-TEST-SKIP-PASS-002 /
+TL-TEST-FAR-EMPTY-COVERAGE-003）】
+  - 门禁不再依赖未提交 /tmp/near_fix_v2：红绿历史对照（N1/N3/N4/N5）拆到
+    非门禁脚本 test_near_swa_redgreen.py；本文件只断言检入主树实现。
+  - 结果状态显式 PASS/FAIL，汇总输出 executed_pass/executed_total；
+    门禁无 SKIP 路径——任何未执行的检查直接计 FAIL（不再假绿）。
+  - N2 更名：它覆盖的是 α=1 near-max 分区回归（C-1 半程 + 边界缺陷
+    哨兵），far 区实为 [128,256) 宽 128 非空——不再声称 far-empty。
+  - 新增 N6：短序列 far-empty 真覆盖（far_tok_hi <= far_tok_lo 路径）。
 
-缺陷一 N1（用户 2026-10-08 报告，独立核实属实）：
-  e64 分区臂 near 左界从序列末尾（kt*bs）往前推 near_len_dyn，而 TASK.md L137
-  权威定义 near_L = α·mid_L 应从 swa 起点（S-swa_tok）往前推 → near 区实际宽
-  = α·mid_len - swa_tok（系统性少 128），far 区多 128；α=1 时 far 区仍留 128。
-  块对齐反例：目标 near=2048，实际 1920。
+背景（两缺陷）：
+  N1（用户 2026-10-08 报告，独立核实属实）：e64 分区臂 near 左界从序列末尾
+  （kt*bs）往前推 near_len_dyn，而 TASK.md L137 权威定义 near_L = α·mid_L
+  应从 swa 起点（S-swa_tok）往前推 → near 区实际宽 = α·mid_len - swa_tok
+  （系统性少 128），far 区多 128；α=1 时 far 区仍留 128（N2 哨兵断言的就是
+  这个开放缺陷）。
 
-缺陷二 C-1（pool_starvation_audit_20261008 §3/§5-1，P1）：
-  far token 池空（near_blks==sink_blocks，α=1/短序列必然触发）时
-  compute_mask 的 `if far_tok_hi > far_tok_lo:` 把 near 池选择 + sink/swa
-  强制 + return 整体旁路 → 静默落单池兜底：sink 不保证、mid 超预算
-  （896>768）、短序列全注意力。修复：guard 只保留 far 选择段，near 段无条件
-  执行 + far 空时初始化空 i_f。
+  C-1（pool_starvation_audit_20261008 §3/§5-1，P1，已修 bb8c6712c）：
+  far token 池空（near_blks==sink_blocks）时 compute_mask 的
+  `if far_tok_hi > far_tok_lo:` 曾把 near 池选择 + sink/swa 强制 + return
+  整体旁路 → 静默落单池兜底。N2（长序列 near-max）与 N6（短序列
+  far-empty）共同回归保护该修复。
 
-修复（分支化，仅动 e64 分区臂）：
-  e64 分支 near_base = S - swa_tok；(0,0) 单池与老逻辑分支保持旧式逐位不变
-  （(0,0) 的 far_hi = S - swa_tok 恰为正确单池语义——第一版"统一从 swa_lo 推"
-  的公式会破坏单池 far 少 128，本测试 N3 防的就是这个）。
-
-红-绿对照：主树（C-1 已修）vs /tmp/near_fix_v2（绿侧，含边界修复；缺失时跳过）。
-用法：python3 test_near_swa_boundary.py
+用法：python3 test_near_swa_boundary.py   （two-level-attention/ 下）
 """
 import importlib
 import os
@@ -40,27 +39,17 @@ import torch
 torch.set_num_threads(1)
 
 REPO = os.path.dirname(os.path.abspath(__file__))
-FIX_ROOT = "/tmp/near_fix_v2"
-# 【10-09 TL-TEST-TMP-001 修复（GPT 审计）】干净检出无 /tmp/near_fix_v2 时：
-# - N2 的 C-1 断言（sink/swa 强制 + mid=768 分区预算）已随 bb8c6712c 合入主树，
-#   直接对主树（IDX_OLD）断言，任何时候都跑 —— 这是 C-1 回归保护。
-# - N1/N3/N4/N5 是 near 边界修复（尚未合入主树）的红绿对照与不变量检查，
-#   /tmp 缺失时明确 SKIP（不 FAIL 不崩），near_fix 合入主树后应改为直接断言。
-HAVE_FIX = os.path.isdir(os.path.join(FIX_ROOT, "sparse_attn"))
 
-RESULTS = []
-SKIPPED = []
+# 状态显式化（TL-TEST-SKIP-PASS-002）：PASS/FAIL 字符串，不再用 ok=bool
+# 把 SKIP 混进 PASS 分子。门禁文件无 SKIP——需要 SKIP 的红绿对照在
+# 非门禁脚本 test_near_swa_redgreen.py 中。
+RESULTS = []   # (name, status, detail)  status ∈ {"PASS", "FAIL"}
 
 
 def report(name, ok, detail=""):
-    RESULTS.append((name, ok, detail))
-    print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"  -- {detail}" if detail else ""))
-
-
-def report_skip(name, reason):
-    RESULTS.append((name, True, "SKIP"))  # SKIP 不计失败
-    SKIPPED.append(name)
-    print(f"SKIP  {name}  -- {reason}")
+    status = "PASS" if ok else "FAIL"
+    RESULTS.append((name, status, detail))
+    print(f"{status}  {name}" + (f"  -- {detail}" if detail else ""))
 
 
 def load_sparse_attn(name, root):
@@ -71,7 +60,6 @@ def load_sparse_attn(name, root):
 
 
 IDX_OLD = load_sparse_attn("sparse_attn_nb_old", REPO)      # 主树 = C-1 已修（bb8c6712c）
-IDX_NEW = load_sparse_attn("sparse_attn_nb_new", FIX_ROOT) if HAVE_FIX else None  # 修复副本（绿侧）
 
 
 def make_args(**kw):
@@ -110,156 +98,80 @@ CCLUSTER_CFG = dict(
 )
 
 
-# ================================================================ N1 红绿对拍：块对齐反例
-def n1_aligned_counterexample():
-    name = "N1 红绿对拍（块对齐反例：目标 near=2048，旧实得 1920/新 2048）"
-    if not HAVE_FIX:
-        report_skip(name, f"near_fix 副本 {FIX_ROOT} 不存在（TL-TEST-TMP-001：不依赖未提交 /tmp 状态；合入主树后改直接断言）")
-        return
-    try:
-        # S = sink(128) + mid(4096) + swa(128)，全 64 块对齐；α=0.5 → near_len_dyn=2048
-        S = 128 + 4096 + 128
-        k, q = gen_kq(S)
-        args = make_args(**CCLUSTER_CFG, tli_alpha=0.5, tli_beta=0.25, tli_gamma=0.5)
-        idx_old, _ = run_mask(IDX_OLD, args, k, q)
-        idx_new, _ = run_mask(IDX_NEW, args, k, q)
-        # 建簇侧 far_hi（= near 左界）：旧 (S-2048)//64*64=2304，新 (S-128-2048)//64*64=2176
-        fh_old = int(idx_old._km_far_hi_cached)
-        fh_new = int(idx_new._km_far_hi_cached)
-        assert fh_old == 2304, f"旧 far_hi 应 2304（near 宽 1920 = 目标-128），实际 {fh_old}"
-        assert fh_new == 2176, f"新 far_hi 应 2176（near 宽 2048 = 目标），实际 {fh_new}"
-        # near 簇覆盖区（消费侧同源）：宽 旧 1920 / 新 2048
-        swa_lo = S - 128
-        nw_old = swa_lo - fh_old
-        nw_new = swa_lo - fh_new
-        assert nw_old == 1920 and nw_new == 2048, \
-            f"near 区宽 old={nw_old}（应 1920，缺陷实锤）new={nw_new}（应 2048）"
-        report(name, True, f"far_hi: old={fh_old}(near 1920) new={fh_new}(near 2048)")
-    except AssertionError as e:
-        report(name, False, str(e))
-    except Exception as e:
-        report(name, False, f"异常: {type(e).__name__}: {e}")
-
-
-# ================================================================ N2 α=1 far 区空
-def n2_alpha_one_empty_far():
-    name = "N2 α=1 far 区空：C-1 回归（主树 sink/swa 强制 + mid=768）+ 边界缺陷标记"
-    # 【10-09 重构】C-1 已合入主树（bb8c6712c）→ 本断言直接对主树跑，
-    # 干净检出可复现（TL-TEST-TMP-001 验收要求）。near 边界修复未合入 →
-    # 主树 far_hi 仍 256（α=1 留 128 far，缺陷开放如实标记），修复侧
-    # fh_new=192 断言仅 /tmp 副本存在时执行红绿对照。
+# ================================================================ N2 α=1 near-max 分区回归
+def n2_alpha_one_near_max():
+    name = "N2 α=1 near-max 分区回归：C-1 半程（主树 sink/swa 强制 + mid=768）+ 边界缺陷哨兵"
+    # 【10-09 更名（GPT 复审 TL-TEST-FAR-EMPTY-COVERAGE-003）】本测试的
+    # far 区实为 [128,256) 宽 128 非空（边界缺陷开放中 near 从序列尾前推
+    # 少 128）——它覆盖的是 far 非空 + near 最大下的分区预算回归，不是
+    # far-empty。far-empty 真覆盖见 N6（短序列）。
     try:
         S = 128 + 4096 + 128
         k, q = gen_kq(S)
         args = make_args(**CCLUSTER_CFG, tli_alpha=1.0, tli_beta=0.25, tli_gamma=0.5)
         idx_old, mask_old = run_mask(IDX_OLD, args, k, q)
         fh_old = int(idx_old._km_far_hi_cached)
-        # 主树边界缺陷开放标记：α=1 仍留 128-token far 区（near 从序列尾而非
-        # swa 起点前推）。合入 near_fix 后此断言应改 192 并转直接断言。
-        assert fh_old == 256, f"主树 far_hi 应 256（边界缺陷开放中），实际 {fh_old}"
-        # C-1 回归（主树直接断言）：far 空不再旁路 near 段与强制区——
-        # sink/swa 必强制、mid 走分区预算 768（非单池兜底 896）
+        # 边界缺陷哨兵：α=1 仍留 128-token far 区。合入 near_fix 后此值
+        # 变 192 且 far 池（消费侧 far_tok_hi=128=far_lo）转空——届时本
+        # 断言翻转，并按复审建议 3 在 N6 补 α=1 长序列的 near 配额深断言。
+        assert fh_old == 256, f"主树 far_hi 应 256（边界缺陷开放中哨兵），实际 {fh_old}"
+        # C-1 回归（主树直接断言）：分区路径下 sink/swa 必强制、mid 走
+        # 分区预算 768（非单池兜底 896）
         assert mask_old.dtype == torch.bool and mask_old.shape[-1] == S
         assert bool(mask_old[..., :128].all()) and bool(mask_old[..., S - 128:].all()), \
             "主树 sink/swa 强制区缺失——C-1 回归失败（bb8c6712c 被破坏）"
         mm = mask_old[0, 0]
         n_mid = int(mm[0, 128:S - 128].sum())
         assert n_mid == 768, f"主树 α=1 mid 应 768（C-1 分区预算），实际 {n_mid}"
-        detail = f"主树 far_hi=256(边界缺陷开放)、sink/swa 强制齐、mid={n_mid}"
-        if HAVE_FIX:
-            idx_new, mask_new = run_mask(IDX_NEW, args, k, q)
-            fh_new = int(idx_new._km_far_hi_cached)
-            # 新：near_len_dyn=mid_len=4096 → far_hi_blk=(4352-128-4096)//64=2=sink → far 区空
-            assert fh_new == 192, \
-                f"新 far_hi 建簇侧应 sink+1 块保底 192（far 区空），实际 {fh_new}"
-            detail += f"；修复侧 far_hi=192(红绿对照成立)"
-        report(name, True, detail)
+        report(name, True, f"far_hi=256(哨兵)、sink/swa 强制齐、mid={n_mid}")
     except AssertionError as e:
         report(name, False, str(e))
     except Exception as e:
         report(name, False, f"异常: {type(e).__name__}: {e}")
 
 
-# ================================================================ N3 (0,0) 单池回归逐位不变
-def n3_single_pool_invariant():
-    name = "N3 (0,0) 单池点 mask 新旧逐位相同（第一版统一公式会破坏此处）"
-    if not HAVE_FIX:
-        report_skip(name, f"near_fix 副本 {FIX_ROOT} 不存在（near_fix 合入主树后改直接断言）")
-        return
+# ================================================================ N6 短序列 far-empty（C-1 空池路径）
+def n6_short_seq_far_empty():
+    name = "N6 短序列 far-empty：far_tok_hi<=far_tok_lo 空池控制流回归（K2<S 判别）"
+    # far-empty 在当前主树（边界缺陷开放中）的自然可达路径 = 短序列：
+    # mid_len < bs 时 near_len_dyn 被 max(bs,·) 下限抬到 64；kt<=3 时
+    # near_blks = max(2, (192-64)//64) = 2 = sink_blocks → far_tok_hi =
+    # 128 = far_tok_lo，far 池真空（sc_far.shape[-1]==0、i_f 空）。
+    # S=192 下 sink[0,128) ∪ swa[64,192) = 全序列。
+    # 判别设计（红绿可分）：tia_level2_topk=100 < S——C-1 修复路径经
+    # 强制区+分区 return 出全 True；若 C-1 guard 回归（整段旁路落
+    # 单池 topk(p, K2)）只出 100 个 True → mask.all() 必失败。
+    # 【near_fix 合入后 TODO（复审建议 3 完整形态）】α=1/S=4352 届时自然
+    # 触达 far-empty（far_tok_hi=128）且 near 选择区 [128,4224) 非空——
+    # 补 near 配额/sink/SWA/总预算深断言（当前缺陷开放中不可达）。
     try:
-        S = 4352
+        S, bs, sink_blocks, swa_tok = 192, 64, 2, 128
+        # 执行前先断言（公式重放，与 compute_mask L784-806 同源）：
+        # 该配置确实落 far-empty
+        kt = S // bs                                      # 3
+        mid_len = max(0, kt * bs - sink_blocks * bs - swa_tok)   # 0
+        near_len_dyn = max(bs, int(1.0 * mid_len))        # 64（max(bs,·) 下限）
+        near_blks = max(sink_blocks, (kt * bs - near_len_dyn) // bs)  # 2
+        far_tok_lo = sink_blocks * bs                     # 128
+        far_tok_hi = min(near_blks * bs, kt * bs)         # 128
+        assert far_tok_hi <= far_tok_lo, \
+            f"公式重放 far 区非空 ({far_tok_lo},{far_tok_hi})——配置未触达 far-empty"
+        far_width = far_tok_hi - far_tok_lo
         k, q = gen_kq(S)
-        args = make_args(**CCLUSTER_CFG, tli_alpha=0.0, tli_beta=0.0)
-        _, m_old = run_mask(IDX_OLD, args, k, q)
-        _, m_new = run_mask(IDX_NEW, args, k, q)
-        assert torch.equal(m_old, m_new), \
-            f"(0,0) 单池 mask 漂移 {int((m_old != m_new).sum())} 位 —— 修复破坏单池语义"
-        report(name, True, "逐位一致（far 区仍 = 全 mid）")
-    except AssertionError as e:
-        report(name, False, str(e))
-    except Exception as e:
-        report(name, False, f"异常: {type(e).__name__}: {e}")
-
-
-# ================================================================ N4 老逻辑（α=0 非 cluster）回归
-def n4_legacy_invariant():
-    name = "N4 老逻辑（无 αβ 的默认 flag）mask 新旧逐位相同"
-    if not HAVE_FIX:
-        report_skip(name, f"near_fix 副本 {FIX_ROOT} 不存在（near_fix 合入主树后改直接断言）")
-        return
-    try:
-        S = 4352
-        k, q = gen_kq(S)
-        args = make_args(tli_enable_layer_skip=False)   # 默认 4bit/4bit，near_len=2048 老语义
-        _, m_old = run_mask(IDX_OLD, args, k, q)
-        _, m_new = run_mask(IDX_NEW, args, k, q)
-        assert torch.equal(m_old, m_new), \
-            f"老逻辑 mask 漂移 {int((m_old != m_new).sum())} 位"
-        report(name, True)
-    except AssertionError as e:
-        report(name, False, str(e))
-    except Exception as e:
-        report(name, False, f"异常: {type(e).__name__}: {e}")
-
-
-# ================================================================ N5 e64 分区臂预算守恒（分段断言）
-def n5_budget_conservation():
-    name = "N5 e64 分区臂预算守恒（分段：饱食 mid=K2_mid；饥饿 mid=池内截断）"
-    if not HAVE_FIX:
-        report_skip(name, f"near_fix 副本 {FIX_ROOT} 不存在（near_fix 合入主树后改直接断言）")
-        return
-    # 断言口径更正（pool_starvation_audit_20261008 §2.4）：「mid 总选恒 = K2_mid」
-    # 只在两池候选 ≥ 各自配额时成立，须改分段断言——
-    #   饱食配置 ccluster a.5/b.25/g.5：near 区宽 2048 ≥ k2_near、far 池足
-    #     → mid == K2_mid == 768；
-    #   饥饿配置 mavg a.125/b.375/g.625：γ 悬崖（γ*=768/(0.375·128·64)≈0.25 <
-    #     0.625）→ far_budget=0（γ 饱和合法坍缩）+ near 池候选 = α·mid_L = 512
-    #     < k2_near=768 → 池内截断 mid == 512；该配置本身违反 TASK.md L145-147
-    #     约束（near_budget_token = 48·64·0.625 = 1920 > near_L = 512），属
-    #     L216-219「没有意义」配置集——饥饿是约束违反的正确语义体现，
-    #     剩余预算不跨池回补 far（L154-155 池独立语义）。
-    try:
-        S = 4352
-        k, q = gen_kq(S)
-        K2_mid = 1024 - 128 - 128
-        for tag, extra, mid_expect in [
-            ("ccluster a.5/b.25/g.5", dict(tli_alpha=0.5, tli_beta=0.25, tli_gamma=0.5), K2_mid),
-            ("mavg a.125/b.375/g.625", dict(tli_far_select="4bit", tli_near_select="4bit",
-                                             tli_enable_kmeans=False, tli_alpha=0.125,
-                                             tli_beta=0.375, tli_gamma=0.625), 512),
-        ]:
-            args = make_args(**CCLUSTER_CFG, **extra) if "ccluster" in tag else \
-                make_args(tli_enable_layer_skip=False, tli_far_method="minmax",
-                          tli_near_method="avg", **extra)
-            _, m = run_mask(IDX_NEW, args, k, q)
-            mm = m[0, 0]
-            n_mid = int(mm[0, 128:S - 128].sum())
-            assert n_mid == mid_expect, \
-                f"{tag}: mid 选中 {n_mid} != {mid_expect}" + \
-                ("（饱食守恒）" if mid_expect == K2_mid else "（饥饿池内截断）")
-            assert bool(mm[..., :128].all()) and bool(mm[..., S - 128:].all()), \
-                f"{tag}: sink/swa 强制区缺失"
-        report(name, True, "ccluster mid=768 守恒；mavg mid=512 饥饿截断；sink/swa 强制齐")
+        args = make_args(tli_enable_layer_skip=False, tli_far_method="minmax",
+                         tli_near_method="avg", tli_alpha=1.0, tli_beta=0.25,
+                         tli_gamma=0.5, tia_level2_topk=100)
+        _, mask = run_mask(IDX_OLD, args, k, q)
+        assert mask.dtype == torch.bool and mask.shape[-1] == S
+        # C-1 修复路径：强制区覆盖全序列 → 全 True（判别：旁路单池只 100 True）
+        n_true = int(mask[0, 0].sum())
+        assert bool(mask.all()), (
+            f"far-empty 路径 mask 非全 True（{n_true}/{S}）——C-1 空池控制流被"
+            f"旁路（单池兜底只给 K2=100）或强制区缺失")
+        assert bool(mask[..., :sink_blocks * bs].all()), "sink 强制区缺失"
+        assert bool(mask[..., max(0, S - swa_tok):].all()), "swa 强制区缺失"
+        report(name, True, f"far 区宽 {far_width}（空）、i_f/sc_near 空池不崩、"
+                           f"强制区全 True（K2=100<S 判别过）")
     except AssertionError as e:
         report(name, False, str(e))
     except Exception as e:
@@ -267,13 +179,11 @@ def n5_budget_conservation():
 
 
 if __name__ == "__main__":
-    n1_aligned_counterexample()
-    n2_alpha_one_empty_far()
-    n3_single_pool_invariant()
-    n4_legacy_invariant()
-    n5_budget_conservation()
-    n_fail = sum(1 for _, ok, _ in RESULTS if not ok)
-    print(f"\n===== near-SWA 边界修复验证：{len(RESULTS) - n_fail}/{len(RESULTS)} PASS"
-          + (f"（{len(SKIPPED)} SKIP：/tmp/near_fix_v2 缺失，near_fix 合入后转直接断言）" if SKIPPED else "")
-          + " =====")
+    n2_alpha_one_near_max()
+    n6_short_seq_far_empty()
+    n_pass = sum(1 for _, s, _ in RESULTS if s == "PASS")
+    n_fail = sum(1 for _, s, _ in RESULTS if s == "FAIL")
+    assert n_pass + n_fail == len(RESULTS) == 2, "门禁不允许 SKIP/漏项"
+    print(f"\n===== near-SWA/C-1 门禁：executed {n_pass}/{n_pass + n_fail} PASS"
+          f"（0 SKIP；红绿对照见非门禁 test_near_swa_redgreen.py）=====")
     sys.exit(1 if n_fail else 0)
