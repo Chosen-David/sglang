@@ -1,0 +1,479 @@
+{
+ "exp": "E117a W_O 投影逐层潜力重判（GPT Standalone 建议修正契约）",
+ "date": "2026-10-10 00:49:38",
+ "objective": "Δo_l(q,c)=W_O,l·concat_h(ŷ_h−y_h)（head 序 j=h_kv·G+g，W 存储转置以框架实际为准）；E_l(c)=task/doc 平衡平均‖Δo‖²/(a_l²+ε)；a_l² 仅校准 dense 输出均值 ‖o‖²（冻结）；ε=1e-9 固定（输出平方量纲，不随候选重估分母）",
+ "verdict_rule": "8 代表层 gap_rel 中位（标准偶数中位）>10% → GO 升级 8 层小试；否则 NO-GO 维持不做",
+ "config": {
+  "trace_dir": "/tmp/e117a_dryrun_trace",
+  "device": "cpu",
+  "dry_run": true,
+  "model_dir": null,
+  "wo_source": "合成随机 W（干跑）",
+  "layers": [
+   4,
+   8
+  ],
+  "samples": [
+   "synth_0",
+   "synth_1"
+  ],
+  "sample_S": {
+   "synth_0": 4096,
+   "synth_1": 4096
+  },
+  "max_queries_per_doc": 6,
+  "split": {
+   "calibration": [
+    "synth_0"
+   ],
+   "confirmation": [
+    "synth_1"
+   ],
+   "rule": "文档级切分冻结：每任务首文档进校准 + gov_report 双文档进校准凑 5；确认 3 文档（hotpot/narr/pr）——非同文档切 query"
+  },
+  "gstar": [
+   0.25,
+   0.125,
+   0.625
+  ],
+  "far_method": "minmax",
+  "near_method": "avg",
+  "champion_ref": [
+   0.25,
+   0.125,
+   0.625
+  ],
+  "epsilon": 1e-09,
+  "tie_rtol_frozen": 1e-12,
+  "tie_rule": "相对容差 1e-12 内平局取 (α,β,γ) 字典序最小（查看确认结果前冻结）",
+  "median_rule": "标准偶数中位（中间两值平均；修正 P0' len//2 约定）",
+  "budgets": {
+   "bs": 64,
+   "K1": 128,
+   "K2": 1024,
+   "cmp_ratio": 4,
+   "sink_blocks": 2,
+   "swa": 128
+  },
+  "tail_window": 256,
+  "seed": 20261009
+ },
+ "wo_weights": {
+  "4": {
+   "shard": "synthetic",
+   "dtype_src": "fp32(synth)",
+   "sha256_fp32": "synthetic",
+   "shape": [
+    4096,
+    4096
+   ]
+  },
+  "8": {
+   "shard": "synthetic",
+   "dtype_src": "fp32(synth)",
+   "sha256_fp32": "synthetic",
+   "shape": [
+    4096,
+    4096
+   ]
+  }
+ },
+ "domain": {
+  "grid_note": "dry-run 12 点缩域",
+  "n_raw": 13,
+  "n_kept": 7,
+  "n_excluded": 6,
+  "exclusion_rules": "复用 P0'：γ 悬崖 far_budget=0 且 far_frac>0.25；nt_near>ℓ_near；任一样本触发即全局剔除；G* 豁免",
+  "gstar_cliff_excluded": false,
+  "n_excluded_detail": 6,
+  "kept_candidates": [
+   "a0.375_b0.25_g0.25",
+   "a0.625_b0.25_g0.25",
+   "a0.875_b0.25_g0.25",
+   "a0.875_b0.75_g0.25",
+   "single_pool(0,0,0)",
+   "a0.125_b0.125_g0.375",
+   "a0.25_b0.125_g0.625"
+  ]
+ },
+ "per_layer": {
+  "4": {
+   "role": "representative",
+   "a_l_sq_cal_frozen": 14458.548828125,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 1.5941178110141436,
+   "c_star": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "c_star_tag": "single_pool(0,0,0)",
+   "E_gstar_cal": 2.1956196978510736,
+   "gap_rel_cal": 0.27395540649668976,
+   "E_cstar_conf": 1.5396595989134723,
+   "E_gstar_conf": 2.1751174367851713,
+   "gap_rel_conf": 0.29214874890199366,
+   "abs_err_cal": {
+    "c_star": 23048.630208333332,
+    "gstar": 31745.474609375
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 1.9847403210982828,
+     "mid": 1.3988065559720742
+    },
+    "gstar": {
+     "tail": 2.2550537453713444,
+     "mid": 2.1659026740909377
+    }
+   },
+   "per_task_cal_cstar": {
+    "synth": 1.5941178110141436
+   },
+   "per_task_cal_gstar": {
+    "synth": 2.1956196978510736
+   },
+   "E_champ_ref_cal": 2.1956196978510736,
+   "top5_cal": [
+    {
+     "cand": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "tag": "single_pool(0,0,0)",
+     "E": 1.5941178110141436
+    },
+    {
+     "cand": [
+      0.625,
+      0.25,
+      0.25
+     ],
+     "tag": "a0.625_b0.25_g0.25",
+     "E": 1.6822218652989915
+    },
+    {
+     "cand": [
+      0.875,
+      0.25,
+      0.25
+     ],
+     "tag": "a0.875_b0.25_g0.25",
+     "E": 1.7019325315350076
+    },
+    {
+     "cand": [
+      0.875,
+      0.75,
+      0.25
+     ],
+     "tag": "a0.875_b0.75_g0.25",
+     "E": 1.7179063568530817
+    },
+    {
+     "cand": [
+      0.375,
+      0.25,
+      0.25
+     ],
+     "tag": "a0.375_b0.25_g0.25",
+     "E": 1.754008124248387
+    }
+   ]
+  },
+  "8": {
+   "role": "representative",
+   "a_l_sq_cal_frozen": 14687.011067708334,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 1.466192159144914,
+   "c_star": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "c_star_tag": "single_pool(0,0,0)",
+   "E_gstar_cal": 2.226946384606889,
+   "gap_rel_cal": 0.3416131752072993,
+   "E_cstar_conf": 1.4818311106011428,
+   "E_gstar_conf": 2.318174066875916,
+   "gap_rel_conf": 0.3607765992317693,
+   "abs_err_cal": {
+    "c_star": 21533.98046875,
+    "gstar": 32707.186197916668
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 1.6176868299116478,
+     "mid": 1.3904448237615472
+    },
+    "gstar": {
+     "tail": 2.0238450313659326,
+     "mid": 2.328497061227367
+    }
+   },
+   "per_task_cal_cstar": {
+    "synth": 1.466192159144914
+   },
+   "per_task_cal_gstar": {
+    "synth": 2.226946384606889
+   },
+   "E_champ_ref_cal": 2.226946384606889,
+   "top5_cal": [
+    {
+     "cand": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "tag": "single_pool(0,0,0)",
+     "E": 1.466192159144914
+    },
+    {
+     "cand": [
+      0.625,
+      0.25,
+      0.25
+     ],
+     "tag": "a0.625_b0.25_g0.25",
+     "E": 1.5757549819144059
+    },
+    {
+     "cand": [
+      0.875,
+      0.75,
+      0.25
+     ],
+     "tag": "a0.875_b0.75_g0.25",
+     "E": 1.5831811156478464
+    },
+    {
+     "cand": [
+      0.875,
+      0.25,
+      0.25
+     ],
+     "tag": "a0.875_b0.25_g0.25",
+     "E": 1.631758530614095
+    },
+    {
+     "cand": [
+      0.375,
+      0.25,
+      0.25
+     ],
+     "tag": "a0.375_b0.25_g0.25",
+     "E": 1.659340787452519
+    }
+   ]
+  }
+ },
+ "zero_scale_layers": [],
+ "global": {
+  "n_rep_layers": 2,
+  "gap_rel_cal_by_layer": [
+   0.273955,
+   0.341613
+  ],
+  "median_gap_rel_cal": 0.307784,
+  "median_gap_rel_conf": 0.326463,
+  "gap_rel_conf_by_layer": [
+   0.292149,
+   0.360777
+  ],
+  "layer_param_discreteness": {
+   "distinct_c_star": 1,
+   "c_star_list": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "verdict": "GO（升级 8 层小试）",
+  "verdict_caveat": "固定 dense trace 的层内代理（W_O 投影输出失真）；NO-GO → 平坦性第五证（E75/E79a/E79b/P0'/E117a）；GO 亦只授权 8 层小试，不等于全模型最优"
+ },
+ "p0p_unprojected_comparison": null,
+ "self_checks": {
+  "identity_random": {
+   "max_residual": 5.960464477539063e-08,
+   "pass": true
+  },
+  "wo_projection_identity": {
+   "bitwise_concat": true,
+   "bitwise_projection": true,
+   "loop_matvec_max_abs_diff": 4.76837158203125e-07,
+   "pass": true
+  },
+  "gqa_concat_permutation": {
+   "objective_correct_order": 6910.57666015625,
+   "objective_kv_g_swapped": 8882.5966796875,
+   "objective_head_blocks_rolled": 8107.4892578125,
+   "changed_on_swap": true,
+   "changed_on_roll": true,
+   "pass": true
+  },
+  "nonfinite_guard": {
+   "picked": "c_best",
+   "failed": [
+    "c_bad",
+    "c_inf"
+   ],
+   "pass": true
+  },
+  "tli_debug_crosscheck": {
+   "dbg_present": true,
+   "code_L1dbg": {
+    "kt": "64",
+    "near_blks": "49",
+    "swa_lo_blk": "62",
+    "nb_far": "112",
+    "nb_near": "16",
+    "i_f_blk_min": "2",
+    "i_f_blk_max": "48",
+    "i_n_blk_min": "49",
+    "i_n_blk_max": "61"
+   },
+   "code_L2dbg": {
+    "K2": "1024",
+    "K2_mid": "768",
+    "sink_tok": "128",
+    "swa_tok": "128",
+    "nt_near": "640",
+    "far_budget": "128",
+    "k2_far": "128"
+   },
+   "closed_form": {
+    "kt": 64,
+    "near_blks": 49,
+    "swa_lo_blk": 62,
+    "nb_near": 16,
+    "nb_far": 112,
+    "K2_eff": 1024,
+    "K2_mid": 768,
+    "nt_near": 640,
+    "far_budget": 128,
+    "k2_far": 128
+   },
+   "checks": {
+    "kt": true,
+    "near_blks": true,
+    "swa_lo_blk": true,
+    "nb_far": true,
+    "nb_near": true,
+    "K2": true,
+    "K2_mid": true,
+    "nt_near": true,
+    "far_budget": true,
+    "k2_far": true,
+    "far_sel_exact_per_kvhead": true,
+    "swa_forced": true,
+    "sink_forced_or_pooled": true
+   },
+   "all_pass": true,
+   "pass": true
+  },
+  "avg_vs_minmax_mask_diff": {
+   "S": 32768,
+   "far/near": [
+    "minmax",
+    "avg"
+   ],
+   "mask_diff_elems": 8200,
+   "found_diff": true,
+   "pass": true,
+   "note": "S=32768 使 L1 双池 binding（S=4096 饱和态下 method 差异合法不可见）；avg mask 须异于 minmax 变体（E109a：avg 分支静默失效时两 mask 逐位相同）"
+  },
+  "wo_layout_validation": {
+   "W_shape": [
+    4096,
+    4096
+   ],
+   "H": 32,
+   "Hkv": 8,
+   "Dv": 128,
+   "hidden": 4096,
+   "concat_dim_match": true,
+   "pass": true
+  },
+  "identity_on_replay": {
+   "max_relative_deviation": 8.46369232476718e-08,
+   "pass": true
+  },
+  "a_l_freeze": {
+   "determinism_bitwise": true,
+   "sensitivity_if_conf_leaked": {
+    "max_rel_change": 0.022603938585029237,
+    "changed": true
+   },
+   "note": "a_l² 只对校准文档求和（查看确认结果前冻结）；若混入确认文档会改变 a_l（敏感性>0 证明冻结有约束力）",
+   "pass": true
+  }
+ },
+ "all_self_checks_pass": true,
+ "wall_time_s": 1.5,
+ "comparison_with_avg_avg_v1": {
+  "note": "v1=e117a_wo_projection.json（avg/avg 代理口径，G*=aavg 领跑臂 (.125,.125,.375)）；v2=本回放（mavg=minmax/avg 同方法口径，G*=CHAMP_REF=(.25,.125,.625)=mavg 已保存最好配置）。两份 gap 分母参照臂不同（E117 判决门语义=逐层表 c_l 比「部署固定臂」好多少——各自口径下取该方法的部署臂），对比须连同口径一起读",
+  "v1": {
+   "exp": "E117a W_O 投影逐层潜力重判（GPT Standalone 建议修正契约）",
+   "far_method": "avg",
+   "near_method": "avg",
+   "gstar": [
+    0.125,
+    0.125,
+    0.375
+   ],
+   "median_gap_rel_cal": 0.08045,
+   "median_gap_rel_conf": 0.052432,
+   "gap_rel_cal_by_layer": [
+    0.295945,
+    0.072274,
+    0.194468,
+    0.110329,
+    0.078662,
+    0.054951,
+    0.082238,
+    0.077256
+   ],
+   "verdict": "NO-GO（计算器维持不做，平坦性第五证）"
+  },
+  "v2": {
+   "exp": "E117a W_O 投影逐层潜力重判（GPT Standalone 建议修正契约）",
+   "far_method": "minmax",
+   "near_method": "avg",
+   "gstar": [
+    0.25,
+    0.125,
+    0.625
+   ],
+   "median_gap_rel_cal": 0.307784,
+   "median_gap_rel_conf": 0.326463,
+   "gap_rel_cal_by_layer": [
+    0.273955,
+    0.341613
+   ],
+   "verdict": "GO（升级 8 层小试）"
+  },
+  "delta_median_gap_cal": 0.227334,
+  "same_direction": false
+ },
+ "replay_harness_patch": {
+  "what": "回放 harness 修复（进程内 monkeypatch，不改生产代码）：eval_layer_sample 逐候选改 α/β/γ 后残留进下一 query 的 prepare_index/compute_score，kept 域含单池臂时 _need_avg_score()=False → avg 分数源缺失 → 分区候选 near=avg 静默退化 minmax。patch 使 far/near 含 avg 时无条件产出分数源（far=minmax 下仅 near 池消费，语义无损）",
+  "patch": "TLIIndexer._need_avg_score → avg method 恒 True（本进程）",
+  "scope": "仅本回放进程；生产固定配置 α,β>0 时原语义恒真，无此缺陷",
+  "selfcheck": {
+   "red_orig_need_avg_false_on_single_pool_residue": true,
+   "green_avg_score_present_under_residue": true,
+   "residue_vs_clean_mask_bitwise_equal": true,
+   "pass": true
+  }
+ }
+}

@@ -1,0 +1,1418 @@
+{
+ "exp": "E117a W_O 投影逐层潜力重判（GPT Standalone 建议修正契约）",
+ "date": "2026-10-10 00:55:40",
+ "objective": "Δo_l(q,c)=W_O,l·concat_h(ŷ_h−y_h)（head 序 j=h_kv·G+g，W 存储转置以框架实际为准）；E_l(c)=task/doc 平衡平均‖Δo‖²/(a_l²+ε)；a_l² 仅校准 dense 输出均值 ‖o‖²（冻结）；ε=1e-9 固定（输出平方量纲，不随候选重估分母）",
+ "verdict_rule": "8 代表层 gap_rel 中位（标准偶数中位）>10% → GO 升级 8 层小试；否则 NO-GO 维持不做",
+ "config": {
+  "trace_dir": "/tmp/trace/qwen3-8b-v",
+  "device": "cpu",
+  "dry_run": false,
+  "model_dir": "/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mlp-ckpt/sunyueqing/Qwen3-8B",
+  "wo_source": "真实 o_proj（/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mlp-ckpt/sunyueqing/Qwen3-8B）",
+  "layers": [
+   1,
+   4,
+   8,
+   12,
+   16,
+   20,
+   24,
+   28,
+   35
+  ],
+  "samples": [
+   "lb_gov_report_0",
+   "lb_gov_report_1",
+   "lb_hotpotqa_0",
+   "lb_hotpotqa_1",
+   "lb_narrativeqa_0",
+   "lb_narrativeqa_1",
+   "lb_passage_retrieval_en_0",
+   "lb_passage_retrieval_en_1"
+  ],
+  "sample_S": {
+   "lb_gov_report_0": 32768,
+   "lb_gov_report_1": 32768,
+   "lb_hotpotqa_0": 16957,
+   "lb_hotpotqa_1": 16735,
+   "lb_narrativeqa_0": 32768,
+   "lb_narrativeqa_1": 32768,
+   "lb_passage_retrieval_en_0": 15635,
+   "lb_passage_retrieval_en_1": 15538
+  },
+  "max_queries_per_doc": 6,
+  "split": {
+   "calibration": [
+    "lb_gov_report_0",
+    "lb_gov_report_1",
+    "lb_hotpotqa_0",
+    "lb_narrativeqa_0",
+    "lb_passage_retrieval_en_0"
+   ],
+   "confirmation": [
+    "lb_hotpotqa_1",
+    "lb_narrativeqa_1",
+    "lb_passage_retrieval_en_1"
+   ],
+   "rule": "文档级切分冻结：每任务首文档进校准 + gov_report 双文档进校准凑 5；确认 3 文档（hotpot/narr/pr）——非同文档切 query"
+  },
+  "gstar": [
+   0.25,
+   0.125,
+   0.625
+  ],
+  "far_method": "minmax",
+  "near_method": "avg",
+  "champion_ref": [
+   0.25,
+   0.125,
+   0.625
+  ],
+  "epsilon": 1e-09,
+  "tie_rtol_frozen": 1e-12,
+  "tie_rule": "相对容差 1e-12 内平局取 (α,β,γ) 字典序最小（查看确认结果前冻结）",
+  "median_rule": "标准偶数中位（中间两值平均；修正 P0' len//2 约定）",
+  "budgets": {
+   "bs": 64,
+   "K1": 128,
+   "K2": 1024,
+   "cmp_ratio": 4,
+   "sink_blocks": 2,
+   "swa": 128
+  },
+  "tail_window": 256,
+  "seed": 20261009
+ },
+ "wo_weights": {
+  "1": {
+   "shard": "model-00001-of-00005.safetensors",
+   "dtype_src": "torch.bfloat16",
+   "sha256_fp32": "e045a2220db7f5bc37e9731e7027228fe46f179d239064d9742bd68f9a1e8dfb",
+   "shape": [
+    4096,
+    4096
+   ]
+  },
+  "4": {
+   "shard": "model-00001-of-00005.safetensors",
+   "dtype_src": "torch.bfloat16",
+   "sha256_fp32": "dcaa629b4b67b012601d3cf448ef058a10a0daded1e848369912f300cf92a060",
+   "shape": [
+    4096,
+    4096
+   ]
+  },
+  "8": {
+   "shard": "model-00002-of-00005.safetensors",
+   "dtype_src": "torch.bfloat16",
+   "sha256_fp32": "1a0e3be4566ce8f6c623c21f612b2ca974eda8fdc9150ca4e989fe6c435deb95",
+   "shape": [
+    4096,
+    4096
+   ]
+  },
+  "12": {
+   "shard": "model-00002-of-00005.safetensors",
+   "dtype_src": "torch.bfloat16",
+   "sha256_fp32": "a524b33f50854fc4c1667176c5c7801e9157551f6ae04d535588d4b197fa3684",
+   "shape": [
+    4096,
+    4096
+   ]
+  },
+  "16": {
+   "shard": "model-00002-of-00005.safetensors",
+   "dtype_src": "torch.bfloat16",
+   "sha256_fp32": "0a50eb45962f2aa16572ad958329c04ed105a797203fab5f131aa8bd61b99ca7",
+   "shape": [
+    4096,
+    4096
+   ]
+  },
+  "20": {
+   "shard": "model-00003-of-00005.safetensors",
+   "dtype_src": "torch.bfloat16",
+   "sha256_fp32": "154b02a4be2436f7b37fd911b68c3ebb78ac80406a2faaff00711f8dfb75b528",
+   "shape": [
+    4096,
+    4096
+   ]
+  },
+  "24": {
+   "shard": "model-00003-of-00005.safetensors",
+   "dtype_src": "torch.bfloat16",
+   "sha256_fp32": "22f61be2c7c661307d08845b64a314187312d6058a0ac54348218aafe6bcd64e",
+   "shape": [
+    4096,
+    4096
+   ]
+  },
+  "28": {
+   "shard": "model-00004-of-00005.safetensors",
+   "dtype_src": "torch.bfloat16",
+   "sha256_fp32": "a127ca6c198724bfb5e668aee80025decc1a66fa2b835048b50ac866e167ce1b",
+   "shape": [
+    4096,
+    4096
+   ]
+  },
+  "35": {
+   "shard": "model-00004-of-00005.safetensors",
+   "dtype_src": "torch.bfloat16",
+   "sha256_fp32": "826236b046bbe87ff6f580dad9f3a906cd2c1ae8e7a0ba43a7a672e1b8c5d362",
+   "shape": [
+    4096,
+    4096
+   ]
+  }
+ },
+ "domain": {
+  "grid_note": "8×7×6=336 网格 + 单池点",
+  "n_raw": 337,
+  "n_kept": 139,
+  "n_excluded": 198,
+  "exclusion_rules": "复用 P0'：γ 悬崖 far_budget=0 且 far_frac>0.25；nt_near>ℓ_near；任一样本触发即全局剔除；G* 豁免",
+  "gstar_cliff_excluded": false,
+  "n_excluded_detail": 198,
+  "kept_candidates": [
+   "a0.0625_b0.125_g0.125",
+   "a0.0625_b0.125_g0.25",
+   "a0.0625_b0.125_g0.5",
+   "a0.0625_b0.125_g0.625",
+   "a0.0625_b0.25_g0.125",
+   "a0.0625_b0.25_g0.25",
+   "a0.0625_b0.375_g0.125",
+   "a0.0625_b0.5_g0.125",
+   "a0.0625_b0.625_g0.125",
+   "a0.125_b0.125_g0.125",
+   "a0.125_b0.125_g0.25",
+   "a0.125_b0.125_g0.5",
+   "a0.125_b0.125_g0.625",
+   "a0.125_b0.25_g0.125",
+   "a0.125_b0.25_g0.25",
+   "a0.125_b0.375_g0.125",
+   "a0.125_b0.5_g0.125",
+   "a0.125_b0.625_g0.125",
+   "a0.25_b0.125_g0.125",
+   "a0.25_b0.125_g0.25",
+   "a0.25_b0.125_g0.5",
+   "a0.25_b0.125_g0.625",
+   "a0.25_b0.25_g0.125",
+   "a0.25_b0.25_g0.25",
+   "a0.25_b0.375_g0.125",
+   "a0.25_b0.5_g0.125",
+   "a0.25_b0.625_g0.125",
+   "a0.375_b0.125_g0.125",
+   "a0.375_b0.125_g0.25",
+   "a0.375_b0.125_g0.5",
+   "a0.375_b0.125_g0.625",
+   "a0.375_b0.25_g0.125",
+   "a0.375_b0.25_g0.25",
+   "a0.375_b0.375_g0.125",
+   "a0.375_b0.5_g0.125",
+   "a0.375_b0.625_g0.125",
+   "a0.5_b0.125_g0.125",
+   "a0.5_b0.125_g0.25",
+   "a0.5_b0.125_g0.5",
+   "a0.5_b0.125_g0.625",
+   "a0.5_b0.25_g0.125",
+   "a0.5_b0.25_g0.25",
+   "a0.5_b0.375_g0.125",
+   "a0.5_b0.5_g0.125",
+   "a0.5_b0.625_g0.125",
+   "a0.625_b0.125_g0.125",
+   "a0.625_b0.125_g0.25",
+   "a0.625_b0.125_g0.5",
+   "a0.625_b0.125_g0.625",
+   "a0.625_b0.25_g0.125",
+   "a0.625_b0.25_g0.25",
+   "a0.625_b0.375_g0.125",
+   "a0.625_b0.5_g0.125",
+   "a0.625_b0.625_g0.125",
+   "a0.75_b0.125_g0.125",
+   "a0.75_b0.125_g0.25",
+   "a0.75_b0.125_g0.5",
+   "a0.75_b0.125_g0.625",
+   "a0.75_b0.125_g0.75",
+   "a0.75_b0.125_g1.0",
+   "a0.75_b0.25_g0.125",
+   "a0.75_b0.25_g0.25",
+   "a0.75_b0.25_g0.5",
+   "a0.75_b0.25_g0.625",
+   "a0.75_b0.25_g0.75",
+   "a0.75_b0.25_g1.0",
+   "a0.75_b0.375_g0.125",
+   "a0.75_b0.375_g0.25",
+   "a0.75_b0.375_g0.5",
+   "a0.75_b0.375_g0.625",
+   "a0.75_b0.375_g0.75",
+   "a0.75_b0.375_g1.0",
+   "a0.75_b0.5_g0.125",
+   "a0.75_b0.5_g0.25",
+   "a0.75_b0.5_g0.5",
+   "a0.75_b0.5_g0.625",
+   "a0.75_b0.5_g0.75",
+   "a0.75_b0.5_g1.0",
+   "a0.75_b0.625_g0.125",
+   "a0.75_b0.625_g0.25",
+   "a0.75_b0.625_g0.5",
+   "a0.75_b0.625_g0.625",
+   "a0.75_b0.625_g0.75",
+   "a0.75_b0.625_g1.0",
+   "a0.75_b0.75_g0.125",
+   "a0.75_b0.75_g0.25",
+   "a0.75_b0.75_g0.5",
+   "a0.75_b0.75_g0.625",
+   "a0.75_b0.75_g0.75",
+   "a0.75_b0.75_g1.0",
+   "a0.75_b0.875_g0.125",
+   "a0.75_b0.875_g0.25",
+   "a0.75_b0.875_g0.5",
+   "a0.75_b0.875_g0.625",
+   "a0.75_b0.875_g0.75",
+   "a0.75_b0.875_g1.0",
+   "a0.875_b0.125_g0.125",
+   "a0.875_b0.125_g0.25",
+   "a0.875_b0.125_g0.5",
+   "a0.875_b0.125_g0.625",
+   "a0.875_b0.125_g0.75",
+   "a0.875_b0.125_g1.0",
+   "a0.875_b0.25_g0.125",
+   "a0.875_b0.25_g0.25",
+   "a0.875_b0.25_g0.5",
+   "a0.875_b0.25_g0.625",
+   "a0.875_b0.25_g0.75",
+   "a0.875_b0.25_g1.0",
+   "a0.875_b0.375_g0.125",
+   "a0.875_b0.375_g0.25",
+   "a0.875_b0.375_g0.5",
+   "a0.875_b0.375_g0.625",
+   "a0.875_b0.375_g0.75",
+   "a0.875_b0.375_g1.0",
+   "a0.875_b0.5_g0.125",
+   "a0.875_b0.5_g0.25",
+   "a0.875_b0.5_g0.5",
+   "a0.875_b0.5_g0.625",
+   "a0.875_b0.5_g0.75",
+   "a0.875_b0.5_g1.0",
+   "a0.875_b0.625_g0.125",
+   "a0.875_b0.625_g0.25",
+   "a0.875_b0.625_g0.5",
+   "a0.875_b0.625_g0.625",
+   "a0.875_b0.625_g0.75",
+   "a0.875_b0.625_g1.0",
+   "a0.875_b0.75_g0.125",
+   "a0.875_b0.75_g0.25",
+   "a0.875_b0.75_g0.5",
+   "a0.875_b0.75_g0.625",
+   "a0.875_b0.75_g0.75",
+   "a0.875_b0.75_g1.0",
+   "a0.875_b0.875_g0.125",
+   "a0.875_b0.875_g0.25",
+   "a0.875_b0.875_g0.5",
+   "a0.875_b0.875_g0.625",
+   "a0.875_b0.875_g0.75",
+   "a0.875_b0.875_g1.0",
+   "single_pool(0,0,0)"
+  ]
+ },
+ "per_layer": {
+  "1": {
+   "role": "control(早期层对照)",
+   "a_l_sq_cal_frozen": 11.23841454188029,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 0.029502517104682373,
+   "c_star": [
+    0.125,
+    0.125,
+    0.5
+   ],
+   "c_star_tag": "a0.125_b0.125_g0.5",
+   "E_gstar_cal": 0.03028406573228845,
+   "gap_rel_cal": 0.02580725568736307,
+   "E_cstar_conf": 0.030922602541079713,
+   "E_gstar_conf": 0.03260293370040435,
+   "gap_rel_conf": 0.051539262532800854,
+   "abs_err_cal": {
+    "c_star": 0.3256596431136131,
+    "gstar": 0.33526701778173446
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 0.028972330366696282,
+     "mid": 0.029002539705843988
+    },
+    "gstar": {
+     "tail": 0.030163341895958505,
+     "mid": 0.0281766973762295
+    }
+   },
+   "per_task_cal_cstar": {
+    "gov_report": 0.026876757864041662,
+    "hotpotqa": 0.029799596638598214,
+    "narrativeqa": 0.02719772308732616,
+    "passage_retrieval_en": 0.03413599082876345
+   },
+   "per_task_cal_gstar": {
+    "gov_report": 0.028024909450864586,
+    "hotpotqa": 0.02951096082323091,
+    "narrativeqa": 0.026498721583688333,
+    "passage_retrieval_en": 0.03710167107136996
+   },
+   "E_champ_ref_cal": 0.03028406573228845,
+   "top5_cal": [
+    {
+     "cand": [
+      0.125,
+      0.125,
+      0.5
+     ],
+     "tag": "a0.125_b0.125_g0.5",
+     "E": 0.029502517104682373
+    },
+    {
+     "cand": [
+      0.125,
+      0.125,
+      0.625
+     ],
+     "tag": "a0.125_b0.125_g0.625",
+     "E": 0.029632920465827058
+    },
+    {
+     "cand": [
+      0.25,
+      0.125,
+      0.625
+     ],
+     "tag": "a0.25_b0.125_g0.625",
+     "E": 0.03028406573228845
+    },
+    {
+     "cand": [
+      0.0625,
+      0.125,
+      0.5
+     ],
+     "tag": "a0.0625_b0.125_g0.5",
+     "E": 0.03045335505881667
+    },
+    {
+     "cand": [
+      0.0625,
+      0.5,
+      0.125
+     ],
+     "tag": "a0.0625_b0.5_g0.125",
+     "E": 0.0308656811372456
+    }
+   ]
+  },
+  "4": {
+   "role": "representative",
+   "a_l_sq_cal_frozen": 29.033563995361327,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 0.014045033216759036,
+   "c_star": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "c_star_tag": "single_pool(0,0,0)",
+   "E_gstar_cal": 0.027927601837200403,
+   "gap_rel_cal": 0.49709132568444775,
+   "E_cstar_conf": 0.010820473918866013,
+   "E_gstar_conf": 0.017942456206044538,
+   "gap_rel_conf": 0.3969346339983953,
+   "abs_err_cal": {
+    "c_star": 0.3849173081417879,
+    "gstar": 0.852394218246142
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 0.013928582391172834,
+     "mid": 0.009903086914276913
+    },
+    "gstar": {
+     "tail": 0.03274823740922946,
+     "mid": 0.012412360968757691
+    }
+   },
+   "per_task_cal_cstar": {
+    "gov_report": 0.01010819952474809,
+    "hotpotqa": 0.01829369016592449,
+    "narrativeqa": 0.019924246441254314,
+    "passage_retrieval_en": 0.007853996735109253
+   },
+   "per_task_cal_gstar": {
+    "gov_report": 0.03508421599695255,
+    "hotpotqa": 0.0315110254835265,
+    "narrativeqa": 0.032368893915189004,
+    "passage_retrieval_en": 0.012746271953133567
+   },
+   "E_champ_ref_cal": 0.027927601837200403,
+   "top5_cal": [
+    {
+     "cand": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "tag": "single_pool(0,0,0)",
+     "E": 0.014045033216759036
+    },
+    {
+     "cand": [
+      0.0625,
+      0.25,
+      0.25
+     ],
+     "tag": "a0.0625_b0.25_g0.25",
+     "E": 0.014433948803458836
+    },
+    {
+     "cand": [
+      0.0625,
+      0.375,
+      0.125
+     ],
+     "tag": "a0.0625_b0.375_g0.125",
+     "E": 0.015172414727873645
+    },
+    {
+     "cand": [
+      0.0625,
+      0.125,
+      0.5
+     ],
+     "tag": "a0.0625_b0.125_g0.5",
+     "E": 0.01521261805893784
+    },
+    {
+     "cand": [
+      0.125,
+      0.25,
+      0.25
+     ],
+     "tag": "a0.125_b0.25_g0.25",
+     "E": 0.015465041119989541
+    }
+   ]
+  },
+  "8": {
+   "role": "representative",
+   "a_l_sq_cal_frozen": 99.20251070658365,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 0.015450526471418641,
+   "c_star": [
+    0.375,
+    0.625,
+    0.125
+   ],
+   "c_star_tag": "a0.375_b0.625_g0.125",
+   "E_gstar_cal": 0.019726591643201237,
+   "gap_rel_cal": 0.2167665478722646,
+   "E_cstar_conf": 0.01565036026810725,
+   "E_gstar_conf": 0.01919261144823522,
+   "gap_rel_conf": 0.1845632726782308,
+   "abs_err_cal": {
+    "c_star": 1.5985925902922948,
+    "gstar": 2.029008776942889
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 0.016325516112781293,
+     "mid": 0.015059040302237908
+    },
+    "gstar": {
+     "tail": 0.02123222641986206,
+     "mid": 0.016558066989737264
+    }
+   },
+   "per_task_cal_cstar": {
+    "gov_report": 0.018770078169445748,
+    "hotpotqa": 0.010923607576319605,
+    "narrativeqa": 0.023099135769160305,
+    "passage_retrieval_en": 0.009009284370748903
+   },
+   "per_task_cal_gstar": {
+    "gov_report": 0.023359632668068026,
+    "hotpotqa": 0.015368624820032512,
+    "narrativeqa": 0.029488471006075642,
+    "passage_retrieval_en": 0.010689638078628778
+   },
+   "E_champ_ref_cal": 0.019726591643201237,
+   "top5_cal": [
+    {
+     "cand": [
+      0.375,
+      0.625,
+      0.125
+     ],
+     "tag": "a0.375_b0.625_g0.125",
+     "E": 0.015450526471418641
+    },
+    {
+     "cand": [
+      0.5,
+      0.625,
+      0.125
+     ],
+     "tag": "a0.5_b0.625_g0.125",
+     "E": 0.0156559989080518
+    },
+    {
+     "cand": [
+      0.875,
+      0.875,
+      0.125
+     ],
+     "tag": "a0.875_b0.875_g0.125",
+     "E": 0.015797411129069933
+    },
+    {
+     "cand": [
+      0.875,
+      0.875,
+      0.25
+     ],
+     "tag": "a0.875_b0.875_g0.25",
+     "E": 0.015797411129069933
+    },
+    {
+     "cand": [
+      0.875,
+      0.875,
+      0.5
+     ],
+     "tag": "a0.875_b0.875_g0.5",
+     "E": 0.015797411129069933
+    }
+   ]
+  },
+  "12": {
+   "role": "representative",
+   "a_l_sq_cal_frozen": 249.54863382975262,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 0.014889345607193369,
+   "c_star": [
+    0.875,
+    0.625,
+    0.125
+   ],
+   "c_star_tag": "a0.875_b0.625_g0.125",
+   "E_gstar_cal": 0.020149591593765552,
+   "gap_rel_cal": 0.2610596826289892,
+   "E_cstar_conf": 0.014076758139855997,
+   "E_gstar_conf": 0.01929035648738851,
+   "gap_rel_conf": 0.27026967339566876,
+   "abs_err_cal": {
+    "c_star": 4.040376922488212,
+    "gstar": 5.268975692987442
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 0.017469539680280678,
+     "mid": 0.009796738587863887
+    },
+    "gstar": {
+     "tail": 0.022576604577215033,
+     "mid": 0.013801117486200368
+    }
+   },
+   "per_task_cal_cstar": {
+    "gov_report": 0.02139631506228258,
+    "hotpotqa": 0.007438267794544262,
+    "narrativeqa": 0.021625283181781467,
+    "passage_retrieval_en": 0.009097516390165164
+   },
+   "per_task_cal_gstar": {
+    "gov_report": 0.024971750601834073,
+    "hotpotqa": 0.010846221327008325,
+    "narrativeqa": 0.028735002985662936,
+    "passage_retrieval_en": 0.016045391460556873
+   },
+   "E_champ_ref_cal": 0.020149591593765552,
+   "top5_cal": [
+    {
+     "cand": [
+      0.875,
+      0.625,
+      0.125
+     ],
+     "tag": "a0.875_b0.625_g0.125",
+     "E": 0.014889345607193369
+    },
+    {
+     "cand": [
+      0.375,
+      0.25,
+      0.25
+     ],
+     "tag": "a0.375_b0.25_g0.25",
+     "E": 0.014897092720814735
+    },
+    {
+     "cand": [
+      0.625,
+      0.5,
+      0.125
+     ],
+     "tag": "a0.625_b0.5_g0.125",
+     "E": 0.015329820322503287
+    },
+    {
+     "cand": [
+      0.75,
+      0.5,
+      0.125
+     ],
+     "tag": "a0.75_b0.5_g0.125",
+     "E": 0.015413073301140577
+    },
+    {
+     "cand": [
+      0.5,
+      0.375,
+      0.125
+     ],
+     "tag": "a0.5_b0.375_g0.125",
+     "E": 0.015485716984050954
+    }
+   ]
+  },
+  "16": {
+   "role": "representative",
+   "a_l_sq_cal_frozen": 227.95776646931967,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 0.020099646378743945,
+   "c_star": [
+    0.625,
+    0.625,
+    0.125
+   ],
+   "c_star_tag": "a0.625_b0.625_g0.125",
+   "E_gstar_cal": 0.029541703087062225,
+   "gap_rel_cal": 0.3196178866361102,
+   "E_cstar_conf": 0.015660286216056873,
+   "E_gstar_conf": 0.025320282825241996,
+   "gap_rel_conf": 0.3815121922554117,
+   "abs_err_cal": {
+    "c_star": 4.893858940651019,
+    "gstar": 6.855216213067373
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 0.022978157080083876,
+     "mid": 0.013918836217492167
+    },
+    "gstar": {
+     "tail": 0.03270139507421973,
+     "mid": 0.016926873912819388
+    }
+   },
+   "per_task_cal_cstar": {
+    "gov_report": 0.026942765833283838,
+    "hotpotqa": 0.013093947979492633,
+    "narrativeqa": 0.029278109120975164,
+    "passage_retrieval_en": 0.011083762581224142
+   },
+   "per_task_cal_gstar": {
+    "gov_report": 0.032194728721682775,
+    "hotpotqa": 0.017438534651519233,
+    "narrativeqa": 0.05008331422718055,
+    "passage_retrieval_en": 0.01845023474786635
+   },
+   "E_champ_ref_cal": 0.029541703087062225,
+   "top5_cal": [
+    {
+     "cand": [
+      0.625,
+      0.625,
+      0.125
+     ],
+     "tag": "a0.625_b0.625_g0.125",
+     "E": 0.020099646378743945
+    },
+    {
+     "cand": [
+      0.75,
+      0.625,
+      0.125
+     ],
+     "tag": "a0.75_b0.625_g0.125",
+     "E": 0.020102568082641124
+    },
+    {
+     "cand": [
+      0.5,
+      0.625,
+      0.125
+     ],
+     "tag": "a0.5_b0.625_g0.125",
+     "E": 0.020927297416288945
+    },
+    {
+     "cand": [
+      0.625,
+      0.5,
+      0.125
+     ],
+     "tag": "a0.625_b0.5_g0.125",
+     "E": 0.020952801755395704
+    },
+    {
+     "cand": [
+      0.5,
+      0.5,
+      0.125
+     ],
+     "tag": "a0.5_b0.5_g0.125",
+     "E": 0.02100517570857499
+    }
+   ]
+  },
+  "20": {
+   "role": "representative",
+   "a_l_sq_cal_frozen": 602.2932200113933,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 0.014369203679182983,
+   "c_star": [
+    0.25,
+    0.375,
+    0.125
+   ],
+   "c_star_tag": "a0.25_b0.375_g0.125",
+   "E_gstar_cal": 0.024143442424974463,
+   "gap_rel_cal": 0.40484031124247677,
+   "E_cstar_conf": 0.012633228531923045,
+   "E_gstar_conf": 0.021597477941038706,
+   "gap_rel_conf": 0.41506000995061254,
+   "abs_err_cal": {
+    "c_star": 8.624280041456222,
+    "gstar": 14.176692314942677
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 0.01608232228608782,
+     "mid": 0.005502821157184226
+    },
+    "gstar": {
+     "tail": 0.025748043642036044,
+     "mid": 0.012486930068038488
+    }
+   },
+   "per_task_cal_cstar": {
+    "gov_report": 0.014118545772954159,
+    "hotpotqa": 0.006199902286630068,
+    "narrativeqa": 0.025863347996648717,
+    "passage_retrieval_en": 0.011295018660498988
+   },
+   "per_task_cal_gstar": {
+    "gov_report": 0.021115520531951072,
+    "hotpotqa": 0.00890072302089813,
+    "narrativeqa": 0.03972071481508722,
+    "passage_retrieval_en": 0.026836811331961436
+   },
+   "E_champ_ref_cal": 0.024143442424974463,
+   "top5_cal": [
+    {
+     "cand": [
+      0.25,
+      0.375,
+      0.125
+     ],
+     "tag": "a0.25_b0.375_g0.125",
+     "E": 0.014369203679182983
+    },
+    {
+     "cand": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "tag": "single_pool(0,0,0)",
+     "E": 0.014376872457739909
+    },
+    {
+     "cand": [
+      0.0625,
+      0.125,
+      0.25
+     ],
+     "tag": "a0.0625_b0.125_g0.25",
+     "E": 0.01455440561983027
+    },
+    {
+     "cand": [
+      0.25,
+      0.25,
+      0.125
+     ],
+     "tag": "a0.25_b0.25_g0.125",
+     "E": 0.01477241762056991
+    },
+    {
+     "cand": [
+      0.125,
+      0.25,
+      0.125
+     ],
+     "tag": "a0.125_b0.25_g0.125",
+     "E": 0.014915927359860729
+    }
+   ]
+  },
+  "24": {
+   "role": "representative",
+   "a_l_sq_cal_frozen": 2712.384798177083,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 0.008541136421918406,
+   "c_star": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "c_star_tag": "single_pool(0,0,0)",
+   "E_gstar_cal": 0.013693297385896072,
+   "gap_rel_cal": 0.37625422268885567,
+   "E_cstar_conf": 0.008344346484491717,
+   "E_gstar_conf": 0.013585925335922561,
+   "gap_rel_conf": 0.38580948458266434,
+   "abs_err_cal": {
+    "c_star": 24.154325381914774,
+    "gstar": 38.06860448122025
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 0.009866352124993158,
+     "mid": 0.004099431139873715
+    },
+    "gstar": {
+     "tail": 0.015320350367682301,
+     "mid": 0.0076088760344280165
+    }
+   },
+   "per_task_cal_cstar": {
+    "gov_report": 0.01036144744969263,
+    "hotpotqa": 0.0044935639188085266,
+    "narrativeqa": 0.014449923942778265,
+    "passage_retrieval_en": 0.0048596103763942
+   },
+   "per_task_cal_gstar": {
+    "gov_report": 0.01540233368378197,
+    "hotpotqa": 0.008852290610673474,
+    "narrativeqa": 0.01672778937271027,
+    "passage_retrieval_en": 0.013790775876418585
+   },
+   "E_champ_ref_cal": 0.013693297385896072,
+   "top5_cal": [
+    {
+     "cand": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "tag": "single_pool(0,0,0)",
+     "E": 0.008541136421918406
+    },
+    {
+     "cand": [
+      0.0625,
+      0.125,
+      0.25
+     ],
+     "tag": "a0.0625_b0.125_g0.25",
+     "E": 0.008549912650190152
+    },
+    {
+     "cand": [
+      0.0625,
+      0.25,
+      0.125
+     ],
+     "tag": "a0.0625_b0.25_g0.125",
+     "E": 0.008662912337596003
+    },
+    {
+     "cand": [
+      0.125,
+      0.25,
+      0.125
+     ],
+     "tag": "a0.125_b0.25_g0.125",
+     "E": 0.008839275267436384
+    },
+    {
+     "cand": [
+      0.125,
+      0.375,
+      0.125
+     ],
+     "tag": "a0.125_b0.375_g0.125",
+     "E": 0.008908294307039646
+    }
+   ]
+  },
+  "28": {
+   "role": "representative",
+   "a_l_sq_cal_frozen": 2862.4120198567707,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 0.006516519417805235,
+   "c_star": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "c_star_tag": "single_pool(0,0,0)",
+   "E_gstar_cal": 0.012169080991402108,
+   "gap_rel_cal": 0.464501927268839,
+   "E_cstar_conf": 0.0042093673059592895,
+   "E_gstar_conf": 0.008964736464067318,
+   "gap_rel_conf": 0.530452755322883,
+   "abs_err_cal": {
+    "c_star": 20.86696012020111,
+    "gstar": 37.013055968284604
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 0.0082884970872026,
+     "mid": 0.0022974652952684332
+    },
+    "gstar": {
+     "tail": 0.014453125518632034,
+     "mid": 0.00531870836862859
+    }
+   },
+   "per_task_cal_cstar": {
+    "gov_report": 0.010383881271513587,
+    "hotpotqa": 0.004433317556150367,
+    "narrativeqa": 0.006250375180064347,
+    "passage_retrieval_en": 0.004998503663492637
+   },
+   "per_task_cal_gstar": {
+    "gov_report": 0.015977289335882196,
+    "hotpotqa": 0.007741572514160155,
+    "narrativeqa": 0.011275911093983697,
+    "passage_retrieval_en": 0.013681551021582389
+   },
+   "E_champ_ref_cal": 0.012169080991402108,
+   "top5_cal": [
+    {
+     "cand": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "tag": "single_pool(0,0,0)",
+     "E": 0.006516519417805235
+    },
+    {
+     "cand": [
+      0.0625,
+      0.125,
+      0.25
+     ],
+     "tag": "a0.0625_b0.125_g0.25",
+     "E": 0.006843765874895658
+    },
+    {
+     "cand": [
+      0.125,
+      0.375,
+      0.125
+     ],
+     "tag": "a0.125_b0.375_g0.125",
+     "E": 0.007072395670225239
+    },
+    {
+     "cand": [
+      0.125,
+      0.25,
+      0.125
+     ],
+     "tag": "a0.125_b0.25_g0.125",
+     "E": 0.0071645425703770575
+    },
+    {
+     "cand": [
+      0.0625,
+      0.25,
+      0.125
+     ],
+     "tag": "a0.0625_b0.25_g0.125",
+     "E": 0.007223686705684284
+    }
+   ]
+  },
+  "35": {
+   "role": "representative",
+   "a_l_sq_cal_frozen": 33984.78756510417,
+   "zero_scale": false,
+   "n_failed_cands": 0,
+   "E_best_cal": 0.010298814023941387,
+   "c_star": [
+    0.0625,
+    0.125,
+    0.5
+   ],
+   "c_star_tag": "a0.0625_b0.125_g0.5",
+   "E_gstar_cal": 0.011129020963922258,
+   "gap_rel_cal": 0.07459838045702422,
+   "E_cstar_conf": 0.011693687437576683,
+   "E_gstar_conf": 0.012491959383311518,
+   "gap_rel_conf": 0.06390286113171945,
+   "abs_err_cal": {
+    "c_star": 350.7066314697266,
+    "gstar": 371.74244689941406
+   },
+   "tail_mid_cal": {
+    "c_star": {
+     "tail": 0.010875095806667063,
+     "mid": 0.007541629755037599
+    },
+    "gstar": {
+     "tail": 0.011604702996402174,
+     "mid": 0.007607458203375955
+    }
+   },
+   "per_task_cal_cstar": {
+    "gov_report": 0.01040233456121188,
+    "hotpotqa": 0.006030811380384463,
+    "narrativeqa": 0.01580178606325474,
+    "passage_retrieval_en": 0.00896032409091446
+   },
+   "per_task_cal_gstar": {
+    "gov_report": 0.010176393798799983,
+    "hotpotqa": 0.007513524911839116,
+    "narrativeqa": 0.016612062909448444,
+    "passage_retrieval_en": 0.010214102235601487
+   },
+   "E_champ_ref_cal": 0.011129020963922258,
+   "top5_cal": [
+    {
+     "cand": [
+      0.0625,
+      0.125,
+      0.5
+     ],
+     "tag": "a0.0625_b0.125_g0.5",
+     "E": 0.010298814023941387
+    },
+    {
+     "cand": [
+      0.125,
+      0.125,
+      0.625
+     ],
+     "tag": "a0.125_b0.125_g0.625",
+     "E": 0.010445989139122862
+    },
+    {
+     "cand": [
+      0.125,
+      0.125,
+      0.5
+     ],
+     "tag": "a0.125_b0.125_g0.5",
+     "E": 0.010518445497488208
+    },
+    {
+     "cand": [
+      0.0625,
+      0.25,
+      0.25
+     ],
+     "tag": "a0.0625_b0.25_g0.25",
+     "E": 0.01054386309032339
+    },
+    {
+     "cand": [
+      0.0625,
+      0.125,
+      0.625
+     ],
+     "tag": "a0.0625_b0.125_g0.625",
+     "E": 0.010640784511780013
+    }
+   ]
+  }
+ },
+ "zero_scale_layers": [],
+ "global": {
+  "n_rep_layers": 8,
+  "gap_rel_cal_by_layer": [
+   0.497091,
+   0.216767,
+   0.26106,
+   0.319618,
+   0.40484,
+   0.376254,
+   0.464502,
+   0.074598
+  ],
+  "median_gap_rel_cal": 0.347936,
+  "median_gap_rel_conf": 0.383661,
+  "gap_rel_conf_by_layer": [
+   0.396935,
+   0.184563,
+   0.27027,
+   0.381512,
+   0.41506,
+   0.385809,
+   0.530453,
+   0.063903
+  ],
+  "layer_param_discreteness": {
+   "distinct_c_star": 6,
+   "c_star_list": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.375,
+     0.625,
+     0.125
+    ],
+    [
+     0.875,
+     0.625,
+     0.125
+    ],
+    [
+     0.625,
+     0.625,
+     0.125
+    ],
+    [
+     0.25,
+     0.375,
+     0.125
+    ],
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0625,
+     0.125,
+     0.5
+    ]
+   ]
+  },
+  "verdict": "GO（升级 8 层小试）",
+  "verdict_caveat": "固定 dense trace 的层内代理（W_O 投影输出失真）；NO-GO → 平坦性第五证（E75/E79a/E79b/P0'/E117a）；GO 亦只授权 8 层小试，不等于全模型最优"
+ },
+ "p0p_unprojected_comparison": {
+  "objective_old": "未投影逐 head MSE 代理（GPT 批评：两 head 误差可经 W_O 抵消或放大，逐头独立最小化 ≠ 全层目标）",
+  "median_gap_rel_old_len2_rule": 0.072393,
+  "per_layer_gap_rel_old": {
+   "1": 0.075597,
+   "4": 0.306242,
+   "8": 0.049823,
+   "12": 0.273856,
+   "16": 0.088681,
+   "20": 0.057871,
+   "24": 0.0,
+   "28": 0.050142,
+   "35": 0.072393
+  },
+  "verdict_old": "potential-low"
+ },
+ "self_checks": {
+  "identity_random": {
+   "max_residual": 5.960464477539063e-08,
+   "pass": true
+  },
+  "wo_projection_identity": {
+   "bitwise_concat": true,
+   "bitwise_projection": true,
+   "loop_matvec_max_abs_diff": 4.76837158203125e-07,
+   "pass": true
+  },
+  "gqa_concat_permutation": {
+   "objective_correct_order": 6910.57666015625,
+   "objective_kv_g_swapped": 8882.5966796875,
+   "objective_head_blocks_rolled": 8107.4892578125,
+   "changed_on_swap": true,
+   "changed_on_roll": true,
+   "pass": true
+  },
+  "nonfinite_guard": {
+   "picked": "c_best",
+   "failed": [
+    "c_bad",
+    "c_inf"
+   ],
+   "pass": true
+  },
+  "tli_debug_crosscheck": {
+   "dbg_present": true,
+   "code_L1dbg": {
+    "kt": "64",
+    "near_blks": "49",
+    "swa_lo_blk": "62",
+    "nb_far": "112",
+    "nb_near": "16",
+    "i_f_blk_min": "2",
+    "i_f_blk_max": "48",
+    "i_n_blk_min": "49",
+    "i_n_blk_max": "61"
+   },
+   "code_L2dbg": {
+    "K2": "1024",
+    "K2_mid": "768",
+    "sink_tok": "128",
+    "swa_tok": "128",
+    "nt_near": "640",
+    "far_budget": "128",
+    "k2_far": "128"
+   },
+   "closed_form": {
+    "kt": 64,
+    "near_blks": 49,
+    "swa_lo_blk": 62,
+    "nb_near": 16,
+    "nb_far": 112,
+    "K2_eff": 1024,
+    "K2_mid": 768,
+    "nt_near": 640,
+    "far_budget": 128,
+    "k2_far": 128
+   },
+   "checks": {
+    "kt": true,
+    "near_blks": true,
+    "swa_lo_blk": true,
+    "nb_far": true,
+    "nb_near": true,
+    "K2": true,
+    "K2_mid": true,
+    "nt_near": true,
+    "far_budget": true,
+    "k2_far": true,
+    "far_sel_exact_per_kvhead": true,
+    "swa_forced": true,
+    "sink_forced_or_pooled": true
+   },
+   "all_pass": true,
+   "pass": true
+  },
+  "avg_vs_minmax_mask_diff": {
+   "S": 32768,
+   "far/near": [
+    "minmax",
+    "avg"
+   ],
+   "mask_diff_elems": 8200,
+   "found_diff": true,
+   "pass": true,
+   "note": "S=32768 使 L1 双池 binding（S=4096 饱和态下 method 差异合法不可见）；avg mask 须异于 minmax 变体（E109a：avg 分支静默失效时两 mask 逐位相同）"
+  },
+  "wo_layout_validation": {
+   "W_shape": [
+    4096,
+    4096
+   ],
+   "H": 32,
+   "Hkv": 8,
+   "Dv": 128,
+   "hidden": 4096,
+   "concat_dim_match": true,
+   "pass": true
+  },
+  "identity_on_replay": {
+   "max_relative_deviation": 1.8316569594389875e-07,
+   "pass": true
+  },
+  "a_l_freeze": {
+   "determinism_bitwise": true,
+   "sensitivity_if_conf_leaked": {
+    "max_rel_change": 0.04419987343730592,
+    "changed": true
+   },
+   "note": "a_l² 只对校准文档求和（查看确认结果前冻结）；若混入确认文档会改变 a_l（敏感性>0 证明冻结有约束力）",
+   "pass": true
+  }
+ },
+ "all_self_checks_pass": true,
+ "wall_time_s": 337.0,
+ "comparison_with_avg_avg_v1": {
+  "note": "v1=e117a_wo_projection.json（avg/avg 代理口径，G*=aavg 领跑臂 (.125,.125,.375)）；v2=本回放（mavg=minmax/avg 同方法口径，G*=CHAMP_REF=(.25,.125,.625)=mavg 已保存最好配置）。两份 gap 分母参照臂不同（E117 判决门语义=逐层表 c_l 比「部署固定臂」好多少——各自口径下取该方法的部署臂），对比须连同口径一起读",
+  "v1": {
+   "exp": "E117a W_O 投影逐层潜力重判（GPT Standalone 建议修正契约）",
+   "far_method": "avg",
+   "near_method": "avg",
+   "gstar": [
+    0.125,
+    0.125,
+    0.375
+   ],
+   "median_gap_rel_cal": 0.08045,
+   "median_gap_rel_conf": 0.052432,
+   "gap_rel_cal_by_layer": [
+    0.295945,
+    0.072274,
+    0.194468,
+    0.110329,
+    0.078662,
+    0.054951,
+    0.082238,
+    0.077256
+   ],
+   "verdict": "NO-GO（计算器维持不做，平坦性第五证）"
+  },
+  "v2": {
+   "exp": "E117a W_O 投影逐层潜力重判（GPT Standalone 建议修正契约）",
+   "far_method": "minmax",
+   "near_method": "avg",
+   "gstar": [
+    0.25,
+    0.125,
+    0.625
+   ],
+   "median_gap_rel_cal": 0.347936,
+   "median_gap_rel_conf": 0.383661,
+   "gap_rel_cal_by_layer": [
+    0.497091,
+    0.216767,
+    0.26106,
+    0.319618,
+    0.40484,
+    0.376254,
+    0.464502,
+    0.074598
+   ],
+   "verdict": "GO（升级 8 层小试）"
+  },
+  "delta_median_gap_cal": 0.267486,
+  "same_direction": false
+ },
+ "replay_harness_patch": {
+  "what": "回放 harness 修复（进程内 monkeypatch，不改生产代码）：eval_layer_sample 逐候选改 α/β/γ 后残留进下一 query 的 prepare_index/compute_score，kept 域含单池臂时 _need_avg_score()=False → avg 分数源缺失 → 分区候选 near=avg 静默退化 minmax。patch 使 far/near 含 avg 时无条件产出分数源（far=minmax 下仅 near 池消费，语义无损）",
+  "patch": "TLIIndexer._need_avg_score → avg method 恒 True（本进程）",
+  "scope": "仅本回放进程；生产固定配置 α,β>0 时原语义恒真，无此缺陷",
+  "selfcheck": {
+   "red_orig_need_avg_false_on_single_pool_residue": true,
+   "green_avg_score_present_under_residue": true,
+   "residue_vs_clean_mask_bitwise_equal": true,
+   "pass": true
+  }
+ }
+}
