@@ -1,0 +1,204 @@
+{
+  "experiment": "E119_ruler128k_formal_closure",
+  "date": "2026-10-10",
+  "entry": "benchmark/RULER/score_ruler_formal.py（E116e 正式入口：min-samples 硬门禁 + staging 原子发布 + 身份扩展 receipt/manifest）",
+  "identity": {
+    "length_tier": "L131072（YaRN factor 2.0，128K 全档）",
+    "model": "Qwen3-8B",
+    "samples_per_task": 100,
+    "tasks": 11
+  },
+  "identity_gate": {
+    "protocol": "e116g-crossarm-identity-v1",
+    "common_identity_digest": "fd5a97c54b2cce8bc15eea0ee5c7f79f490d826e6cb6c1adaed3266a9fb9947d",
+    "compared_fields": [
+      "task_set",
+      "tasks.{ids,answers_sha,lengths}",
+      "source_data_sha256",
+      "expect_tasks",
+      "min_samples",
+      "model_path",
+      "yarn",
+      "yarn_factor",
+      "data_root",
+      "extra_params(白名单外逐键)",
+      "scorer_manifest_digest"
+    ],
+    "treatment_whitelist": [
+      "alpha",
+      "beta",
+      "far_method",
+      "gamma",
+      "method",
+      "near_method"
+    ],
+    "arm_contract": {
+      "mavg": {
+        "method": "tli_64_128_1024_c4_A"
+      },
+      "aavg": {
+        "method": "tli_64_128_1024_c4_A"
+      },
+      "FullKV": {
+        "method": "none"
+      }
+    },
+    "per_arm_treatment": {
+      "mavg": {
+        "method": "tli_64_128_1024_c4_A"
+      },
+      "FullKV": {
+        "method": "none"
+      },
+      "aavg": {
+        "method": "tli_64_128_1024_c4_A"
+      }
+    },
+    "scorer_manifest_digest": "15d05c9767b07aeceba0942f1f31329c627b1232c1d6f42da7fe08454dcf7315",
+    "per_arm_script_sha256": {
+      "mavg": {
+        "formal_script_sha256": "6c1e43c57af5263899bf52ee0b3c542acf5961b002aa659ba63df0fb0a6a7363",
+        "scorer_sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99"
+      },
+      "FullKV": {
+        "formal_script_sha256": "6c1e43c57af5263899bf52ee0b3c542acf5961b002aa659ba63df0fb0a6a7363",
+        "scorer_sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99"
+      },
+      "aavg": {
+        "formal_script_sha256": "6c1e43c57af5263899bf52ee0b3c542acf5961b002aa659ba63df0fb0a6a7363",
+        "scorer_sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99"
+      }
+    },
+    "script_sha_policy": "fail-closed：三臂 formal/scorer 脚本 SHA 必须完全一致才产出排名（评分实现差异可改变得分与排名；旧产物因脚本修复产生 SHA 差异时，须等价迁移证明或同一 scorer 重评）",
+    "script_sha_identical": true,
+    "per_arm_receipt_protocol": {
+      "mavg": {
+        "publish_protocol": "e116f-generation-v2",
+        "legacy_protocol": false,
+        "generation_dir_source": "outputs.derived_dir"
+      },
+      "FullKV": {
+        "publish_protocol": "e116f-generation-v2",
+        "legacy_protocol": false,
+        "generation_dir_source": "outputs.derived_dir"
+      },
+      "aavg": {
+        "publish_protocol": "e116f-generation-v2",
+        "legacy_protocol": false,
+        "generation_dir_source": "outputs.derived_dir"
+      }
+    },
+    "protocol_note": "legacy_protocol=true 表示该臂产物生成于旧发布协议（早于 E116f generation 单指针与 E116g 并发发布锁）；本 summary 声明数据身份门禁已执行并通过，不声称发布锁协议作用于该批数据的生成",
+    "all_arms_data_identity_identical": true
+  },
+  "closure": {
+    "three_arm_receipts_success": true,
+    "receipt_result_sha_matches": true,
+    "receipt_manifest_sha_matches": true,
+    "n_ids_lengths_answers_sha_closure": true,
+    "task_set_closure": true,
+    "min_samples_enforced": true,
+    "arm_contract_enforced": true,
+    "publish_protocol_bound": true,
+    "scorer_script_sha_identical": true,
+    "single_cell_enforced": true,
+    "source_sha_stable": true,
+    "derived_sha_stable": true,
+    "crossarm_identity_gate": true
+  },
+  "arms": {
+    "mavg": {
+      "avg": 47.49,
+      "receipt_run_id": "20261010001240-949233-6982",
+      "result_file": "e119_ruler128k_formal_mavg.json",
+      "per_task": {
+        "niah_single_1": 100.0,
+        "niah_single_2": 100.0,
+        "niah_single_3": 99.0,
+        "niah_multikey_1": 99.0,
+        "niah_multikey_2": 50.0,
+        "niah_multikey_3": 1.0,
+        "niah_multiquery": 21.25,
+        "niah_multivalue": 2.0,
+        "cwe": 0.7,
+        "fwe": 26.67,
+        "vt": 22.8
+      },
+      "delta_vs_fullkv": 1.06,
+      "ruler32_official": 59.99,
+      "ruler64_official": 49.42,
+      "legacy_protocol": false
+    },
+    "FullKV": {
+      "avg": 46.43,
+      "receipt_run_id": "20261010001142-947492-6957",
+      "result_file": "e119_ruler128k_formal_fullkv.json",
+      "per_task": {
+        "niah_single_1": 100.0,
+        "niah_single_2": 100.0,
+        "niah_single_3": 100.0,
+        "niah_multikey_1": 99.0,
+        "niah_multikey_2": 57.0,
+        "niah_multikey_3": 1.0,
+        "niah_multiquery": 12.25,
+        "niah_multivalue": 2.5,
+        "cwe": 3.4,
+        "fwe": 13.0,
+        "vt": 22.6
+      },
+      "delta_vs_fullkv": 0.0,
+      "ruler32_official": 59.38,
+      "ruler64_official": 48.54,
+      "legacy_protocol": false
+    },
+    "aavg": {
+      "avg": 42.56,
+      "receipt_run_id": "20261010001312-949782-2375",
+      "result_file": "e119_ruler128k_formal_aavg.json",
+      "per_task": {
+        "niah_single_1": 100.0,
+        "niah_single_2": 99.0,
+        "niah_single_3": 49.0,
+        "niah_multikey_1": 95.0,
+        "niah_multikey_2": 47.0,
+        "niah_multikey_3": 0.0,
+        "niah_multiquery": 16.25,
+        "niah_multivalue": 14.75,
+        "cwe": 0.3,
+        "fwe": 20.67,
+        "vt": 26.2
+      },
+      "delta_vs_fullkv": -3.87,
+      "ruler32_official": 57.33,
+      "ruler64_official": 47.51,
+      "legacy_protocol": false
+    }
+  },
+  "verdict": {
+    "ruler128k_ranking": "mavg 47.49 > FullKV 46.43 > aavg 42.56",
+    "conclusion": "128K 正式口径下 mavg（vs FullKV +1.06）居首、aavg（-3.87）居末，完整排序 mavg 47.49 > FullKV 46.43 > aavg 42.56；与 32K 正式排序（mavg 59.99 > FullKV 59.38 > aavg 57.33）方向一致、与 64K 正式排序（mavg 49.42 > FullKV 48.54 > aavg 47.51）方向一致——RULER 32K/64K/128K 三档 mavg 冠军稳定（各臂发布协议见 identity_gate.per_arm_receipt_protocol）。"
+  },
+  "inputs": {
+    "mavg": {
+      "result_file": "e119_ruler128k_formal_mavg.json",
+      "result_sha256": "18c2a72645a91f0eaaac5b71e97dd01c34f95e7bd04dea957975c5c3798cf13e",
+      "manifest_sha256": "6f74d9e0e5404121b0c1dcba567f337dd679c9f9c62d6e497c50eb4bae9ff6bf",
+      "receipt_sha256": "435b452785b22727a39f6c8605b7ebbb584599b68b46f8638f2e895be4cc11c8",
+      "receipt_run_id": "20261010001240-949233-6982"
+    },
+    "FullKV": {
+      "result_file": "e119_ruler128k_formal_fullkv.json",
+      "result_sha256": "933ce7a6888d9744b445f52cc0a95abbed8111a3c77fb3a59948d06afd1293f3",
+      "manifest_sha256": "0b7f9a70d76136ec9731af213d989fe7012fcaaf37b71cc74faca0ee75f9187d",
+      "receipt_sha256": "e1baf4969d4f3666b9ccc736b63fc1654d27529dbb0113c086d5f8bae2807a78",
+      "receipt_run_id": "20261010001142-947492-6957"
+    },
+    "aavg": {
+      "result_file": "e119_ruler128k_formal_aavg.json",
+      "result_sha256": "0448b0bc851e76a20f99db7bb95e2a6ae0e8a6ee4962fabded8b33b8cc6ea7fa",
+      "manifest_sha256": "fb90ca8a2db595915c3e121b5cf1edc54fd007e86466b4883fc65f8d316bb889",
+      "receipt_sha256": "2b0f9da8cad880ef1a9f16845f15b946cd2f24d38fce8caf114b03f7ca8a2260",
+      "receipt_run_id": "20261010001312-949782-2375"
+    }
+  }
+}
