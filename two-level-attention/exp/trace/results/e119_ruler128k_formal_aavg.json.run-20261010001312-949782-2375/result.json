@@ -1,0 +1,81 @@
+{
+ "scores": {
+  "L131072/tli_64_128_1024_c4_A": {
+   "niah_single_1": 100.0,
+   "niah_single_2": 99.0,
+   "niah_single_3": 49.0,
+   "niah_multikey_1": 95.0,
+   "niah_multikey_2": 47.0,
+   "niah_multikey_3": 0.0,
+   "niah_multiquery": 16.25,
+   "niah_multivalue": 14.75,
+   "cwe": 0.3,
+   "fwe": 20.67,
+   "vt": 26.2
+  }
+ },
+ "n": {
+  "L131072/tli_64_128_1024_c4_A": {
+   "niah_single_1": 100,
+   "niah_single_2": 100,
+   "niah_single_3": 100,
+   "niah_multikey_1": 100,
+   "niah_multikey_2": 100,
+   "niah_multikey_3": 100,
+   "niah_multiquery": 100,
+   "niah_multivalue": 100,
+   "cwe": 100,
+   "fwe": 100,
+   "vt": 100
+  }
+ },
+ "incomplete_cells": [],
+ "sources": {
+  "L131072/tli_64_128_1024_c4_A": {
+   "niah_single_1": {
+    "file": "niah_single_1-tli_64_128_1024_c4_A-10090704.jsonl",
+    "sha256": "bedda860ba3ca21898c636da5d4d0298f1ca2480ece649555747ff27e0def169"
+   },
+   "niah_single_2": {
+    "file": "niah_single_2-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "b6d138bab72e500befd5c63ee97b9b1da135a92a3f89e62020ce4948041fccf3"
+   },
+   "niah_single_3": {
+    "file": "niah_single_3-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "98d4148ba81e84b1515c04556a05183728c915e985b507367008dfac1784a370"
+   },
+   "niah_multikey_1": {
+    "file": "niah_multikey_1-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "e82b630c5b7e2abf1989c8f42205ff236ff13ef2981a4f516fd9a70e69a867a2"
+   },
+   "niah_multikey_2": {
+    "file": "niah_multikey_2-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "2b0f1c05ebb663a8c676b7f6a7faf9fafa01dbbfb6dbc9f6686b4d286eed9e43"
+   },
+   "niah_multikey_3": {
+    "file": "niah_multikey_3-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "35dc87dc66fdfa3509a4299f841dae802c11a1b1a296c5ecb81ad042f9627e7a"
+   },
+   "niah_multiquery": {
+    "file": "niah_multiquery-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "b827a384703de9da38f988a58ccebbf73e698c355a3624b023014c6b1355376c"
+   },
+   "niah_multivalue": {
+    "file": "niah_multivalue-tli_64_128_1024_c4_A-10091039.jsonl",
+    "sha256": "8f1fced9c4e31fa39072fe2f2de272b7d63f049647334130e14daebdeee0e2f5"
+   },
+   "cwe": {
+    "file": "cwe-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "fa3f44e9b3dd14504dfc9a171ef3362cc9dfd93bbd7e5c1612dfdb9a531a23bb"
+   },
+   "fwe": {
+    "file": "fwe-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "204bdf36829df81f742db2f2e2fd1dce888297fe7f76bfe44786aff0330112e8"
+   },
+   "vt": {
+    "file": "vt-tli_64_128_1024_c4_A-10090808.jsonl",
+    "sha256": "f414a06ebe3fb13696a82c042939ea1ef1e886864dd54ada0445bebad3188104"
+   }
+  }
+ }
+}

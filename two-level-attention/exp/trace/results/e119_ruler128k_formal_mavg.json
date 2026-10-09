@@ -1,0 +1,81 @@
+{
+ "scores": {
+  "L131072/tli_64_128_1024_c4_A": {
+   "niah_single_1": 100.0,
+   "niah_single_2": 100.0,
+   "niah_single_3": 99.0,
+   "niah_multikey_1": 99.0,
+   "niah_multikey_2": 50.0,
+   "niah_multikey_3": 1.0,
+   "niah_multiquery": 21.25,
+   "niah_multivalue": 2.0,
+   "cwe": 0.7,
+   "fwe": 26.67,
+   "vt": 22.8
+  }
+ },
+ "n": {
+  "L131072/tli_64_128_1024_c4_A": {
+   "niah_single_1": 100,
+   "niah_single_2": 100,
+   "niah_single_3": 100,
+   "niah_multikey_1": 100,
+   "niah_multikey_2": 100,
+   "niah_multikey_3": 100,
+   "niah_multiquery": 100,
+   "niah_multivalue": 100,
+   "cwe": 100,
+   "fwe": 100,
+   "vt": 100
+  }
+ },
+ "incomplete_cells": [],
+ "sources": {
+  "L131072/tli_64_128_1024_c4_A": {
+   "niah_single_1": {
+    "file": "niah_single_1-tli_64_128_1024_c4_A-10090643.jsonl",
+    "sha256": "03d0756860be5ffcf2d4222fac75d599ce543a0b3bbcb4f31d4d866c4cdefd35"
+   },
+   "niah_single_2": {
+    "file": "niah_single_2-tli_64_128_1024_c4_A-10090643.jsonl",
+    "sha256": "1d2c26beb004424bf10bc7e5a099c670b7174acc02b4841aabe190e379d9afe6"
+   },
+   "niah_single_3": {
+    "file": "niah_single_3-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "eb964bcf8fb38f9762669e60e81381172d0978ebaf83adca70d3b3f0d677583c"
+   },
+   "niah_multikey_1": {
+    "file": "niah_multikey_1-tli_64_128_1024_c4_A-10090808.jsonl",
+    "sha256": "e7a2c089654d4c376b4a337caf419a5c955e0597be76c2acf5a067069ea58a5c"
+   },
+   "niah_multikey_2": {
+    "file": "niah_multikey_2-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "386fbcd7edf88f1e483273f87e908c9f6531b2001d4a93b54855fdd6d5e7182a"
+   },
+   "niah_multikey_3": {
+    "file": "niah_multikey_3-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "aad260f482e48c242da023b5eaba9b4705b341694f047b1b01b1bb8ce79d87d5"
+   },
+   "niah_multiquery": {
+    "file": "niah_multiquery-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "d9cc876e5d1da5ff69bd4f22cf3711c9e9cc3e31c32fae5c0230fe1a4caf204c"
+   },
+   "niah_multivalue": {
+    "file": "niah_multivalue-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "1affbd9a8ff86371234e42a11144995373b2fd29f59dde2d6cc855ceca65665b"
+   },
+   "cwe": {
+    "file": "cwe-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "2a9fb5db47f772d9ab6fcdc39ad1b0eeec9a4e7d2d1fa4cdc16492456d5a81d9"
+   },
+   "fwe": {
+    "file": "fwe-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "f95a85f8fe05d069a7ae3f5537439254c9b3d288e1ef272247eec372be2a76cf"
+   },
+   "vt": {
+    "file": "vt-tli_64_128_1024_c4_A-10090759.jsonl",
+    "sha256": "0b3f21beb40ce199e9870dd5551f147bdb15b84546f2d4c8939127f82f68fda4"
+   }
+  }
+ }
+}
