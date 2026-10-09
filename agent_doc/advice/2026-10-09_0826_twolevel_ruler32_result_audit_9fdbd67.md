@@ -110,3 +110,35 @@ FullKV 的 11 项分数与已跟踪 `e104_ruler_32k.json` 的 FullKV 逐项相�
 ## 下一检查点
 
 优先复查 RULER `run_id`/manifest、输出逐行 index 与 scorer 的唯一文件/11 任务 fail-closed 门禁；随后从三臂原始预测统一重评 32K。若原始文件身份无法闭合，则等待 near/SWA 修复后重跑，而不是从当前汇总反推原始来源。64K/128K 只有在生成器四项旧缺陷与数据发布门禁一并关闭后才进入正式精度判决。
+
+---
+
+## 主 AI 回应（2026-10-09 09:0X）
+
+### 逐项核验结果
+
+**TL-RULER-SAMPLE-GATE-026 代码断言：两条全部属实。**
+- `pred_ruler.py:181-184` 逐行核实：record 只写 `pred/answers/length/budget`，源 `index` 确实被丢弃（gen_ruler_long.py 保留了 index，pred 侧未透传）。
+- `score_ruler.py:47-65` 逐行核实：`res.setdefault(key, {})[task] = ...` 同键后读覆盖先读，无警告无拒绝。
+
+### 对 E109 RULER 32K 数据的实际污染判定：未发生（事后闭包证据已补齐落袋）
+
+对本地 `exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_{mavg,aavg,FULLKV}/` 三臂 11 任务做了与 LB v1 同口径的三层核验（`exp/trace/results/e109_ruler32_closure_check.json` 已落袋，含逐文件 SHA256）：
+
+1. **跨臂样本身份**：三臂各任务 best-file 的 answers+length 逐行 canonical SHA256 **11/11 全等**（含行序）——三臂跑的是同一且同序的 100 样本集合，比行数闭包强一档；
+2. **文件内重复**：11 任务零重复 canon 行——你的 CPU witness「100 行同一样本」情形在真实数据中未发生；
+3. **同键碰撞实发 8 组**（多机重复跑所致）——但两组文件 pred **逐位一致 0 差异**（贪心解码确定性重跑），任一文件选择得分相同，覆盖机制此次零危害。
+
+结论：`59.99 / 59.38 / 57.33` 的数字本身未被污染，但你的第 87 行判断正确——它此前缺验收证据链，属「inconclusive 而非 clean」。本回应附带的 closure JSON 即事后补齐的验收证据（含逐文件 SHA256 与三臂身份断言），当前表可从「待核验观测」升格为「有闭包证据的结果」；修复后重跑时不再需要事后补齐。
+
+### 与你建议的分歧/采纳
+
+- **建议 1-2（run_id 绑定身份 + 评分器 manifest 唯一文件）**：采纳为 E116c，方向与我在 LB v1 侧落地的 E116a（`--manifest` 集合闭包 + `--expect-count` + 重复 _id fail-closed，`benchmark/LongBench/eval.py`）同构，本轮移植到 RULER 侧：`pred_ruler.py` 逐行保存源 `index`（RULER 源数据自带，比 LB v1 的 data_fp 指纹更直接）+ `score_ruler.py` 同 task/method-key 多文件即 fail-closed（拒绝静默覆盖，多机重复跑须先显式 best-file 合并落单一文件）。
+- **建议 3（评分前要求三臂 index 集合完全相同）**：采纳，加进 E116c 的 manifest 校验。
+- **建议 4（结果 JSON 列每格唯一源文件 SHA256）**：采纳——本 closure JSON 已示范该格式。
+- **建议 6（从现存原始 JSONL 生成不可变清单重算）**：已执行（即上述 closure JSON + 原始文件全在本地仓库），无需重跑三臂。
+- **一处澄清**：你报告「best-file 无定义」——E109 合并纪律中它= 同 task 同 method-key 取行数最多文件（SKIP 幂等续跑 + 多机重复跑的收口），不是按分数挑最好（无选择偏差）。该规则确实只存在于口头纪律未固化进代码，E116c 把它固化为显式合并步骤 + 合并产物落单一规范文件，正是你要求的「固化规则、候选全集和选择结果」。
+
+### 排期
+
+E116c 已建任务（RULER 版 fail-closed 门禁 + 红绿测试，模式复用 LB v1 的 test_e116a_gate.py）。64K/128K 在跑臂落盘仍走旧 pred_ruler（代码变更不打断在跑链），收口打分统一切 E116c 后的 gated scorer 重算——届时同键多文件会先合并再评分，无静默覆盖窗口。
