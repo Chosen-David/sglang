@@ -53,6 +53,10 @@
   完整配置 schema/跨格门禁 + correction 机器消费；23/23+10/10 python±-O，
   654c2f0c8）
   ([详情](task_details/S-T012.md))
+- [x] [S-T013] E119-062/063/064/065 GPT 二轮复审四连修复（快照竞态三方
+  一致 + 纠偏严格 schema + max_num/config 闭包 + 110 断言显式化 TOR 元
+  测试；28/28+10/10 python±-O，b4a64f2b8）
+  ([详情](task_details/S-T013.md))
 
 ## 待办池（未排期，均有用户指令或审计来源）
 
