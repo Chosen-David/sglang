@@ -51,6 +51,23 @@
 #   provenance=operator_declared_not_effective + 纠偏绑定三重哈希；
 #   不一致 → fail-closed（不脑补 2.0 也不脑补 4.0）。
 #
+# ===== #196（GPT 2026-10-10 0635 二轮复审 062/063/064/065）=====
+#   TL-E119-YARN-CORRECTION-SCHEMA-063（P2，本文件）：纠偏 sidecar
+#       schema 太弱——只校验 dict + target SHA + correction_version 任意
+#       非空 str，缺 correction 主体的两字段 sidecar 也被解释成有效纠偏。
+#       修复：correction_version 限已知枚举 {yarn-identity-057-v1}
+#       （未知版本 fail closed）+ original_run_identity.yarn_factor 与
+#       manifest run_identity 声明逐位核对 + correction 主体语义字段
+#       （not_effective/null/closed=false）严格校验（按三份既有 128K
+#       sidecar 实际结构适配）。
+#   TL-E119-YARN-CONFIG-PARTIAL-064②（P2，本文件）：
+#       effective_config_sha256 漏收录 schema 必需键
+#       generation_params.max_num（必需+类型校验但不进指纹）——
+#       max_num=1 与 100 两份合法回执同指纹。修复：max_num 纳入 canon；
+#       「必需但不进指纹」的全部自由字段在 docstring 逐一声明。
+#       064①（model_config_sha256=None 的 config_identity=missing 降级
+#       标注）在消费侧 score_ruler_formal.py 落地。
+#
 # 本模块刻意零重依赖（不 import torch/transformers/sparse_attn）——
 # 生成侧、消费侧与 CPU 红绿测试三方共享同一解析/校验口径，干净检出
 # 恒可单测。
@@ -70,6 +87,14 @@ RECEIPT_SUFFIX = "-yarn_receipt.json"
 # 061：正式 manifest 的旁挂纠偏文件命名（与 #194 已落盘的三份 128K
 # sidecar 命名逐位一致——manifest 路径直接追加后缀）
 CORRECTION_SUFFIX = ".yarn_correction.json"
+# 063（TL-E119-YARN-CORRECTION-SCHEMA）：纠偏 sidecar 的已发布版本枚举。
+# 修复前 resolve_manifest_yarn_identity 只要求 correction_version 是任意
+# 非空 str——缺 correction 主体的两字段 sidecar / 未知版本 / 语义矛盾
+# 字段都会被静默解释成有效纠偏（GPT 审计最小复现：correction_version=
+# "unrecognized-garbage-version" 仍返回 not_effective/null）。未知/缺失
+# 版本 → fail closed（未来协议须先在此登记才可被消费）。
+CORRECTION_VERSION = "yarn-identity-057-v1"
+CORRECTION_VERSIONS = (CORRECTION_VERSION,)
 # 060：yarn_factor_source 合法枚举（与 build_yarn_receipt 三态一致）
 YARN_FACTOR_SOURCES = ("explicit", "auto", "off")
 
@@ -465,9 +490,21 @@ def effective_config_sha256(receipt):
 
     只收录同一 context_length 档内应逐位一致的字段：模型路径/模型
     config hash/完整 rope_scaling/原生 MPE/yarn 开关与 effective
-    factor/source/seed/max_gen/生产脚本（路径+SHA）。task/method/t/
-    pred_postfix 允许逐格变化，不进指纹（formal 的显式分组规则）。
-    同配置必同 hash（canonical json + sort_keys，无环境漂移）。"""
+    factor/source/seed/max_gen/max_num/生产脚本（路径+SHA）。
+    同配置必同 hash（canonical json + sort_keys，无环境漂移）。
+
+    064②（TL-E119-YARN-CONFIG-PARTIAL）：schema 必需键与指纹收录集的
+    差异逐一声明如下——「必需但不进指纹」的全部自由字段：
+      - receipt.task / generation_params.method / t / pred_postfix：
+        逐格变化的派单/命名自由字段（formal 的显式分组规则，S3 正例
+        锁定该语义；跨格漂移由样本 ID 集合门禁承载）；
+      - produced_at：生产时间戳（逐回执自然不同，非配置语义）；
+      - receipt_version / audit_ref：协议层常量（版本混装已被 059 门禁
+        拒绝、audit_ref 由 schema 校验约束非空，均无逐格区分意义）。
+    064② 修复：generation_params.max_num 此前「schema 必需 + 类型校验
+    但不进指纹」——GPT 复现 max_num=1 与 100 两份合法回执同指纹
+    a09b4ef6...，属「必需但不比较」漏洞；现纳入 canon（负例
+    max_num=1 vs 100 必须不同指纹）。"""
     gp = receipt.get("generation_params") or {}
     ps = receipt.get("producer_script") or {}
     canon = {
@@ -482,6 +519,9 @@ def effective_config_sha256(receipt):
         "model_config_sha256": receipt.get("model_config_sha256"),
         "seed": gp.get("seed"),
         "max_gen": gp.get("max_gen"),
+        # 064②：max_num 是 schema 必需键（060 校验非负 int），必须进
+        # 指纹——否则「必需但不比较」形成配置闭包缺口
+        "max_num": gp.get("max_num"),
         "producer_script_path": ps.get("path"),
         "producer_script_sha256": ps.get("sha256"),
     }
@@ -510,6 +550,10 @@ def resolve_manifest_yarn_identity(manifest_path):
       - 存在 → 先 fail-closed 校验 correction.target_manifest_sha256 与
         manifest 当前字节 SHA 一致（纠偏指向的必须是这份 manifest；
         manifest 合法重发布后旧纠偏失配 → loudly 拒绝，须重新落纠偏），
+        再按 063 严格版本化 schema 校验纠偏主体（correction_version ∈
+        CORRECTION_VERSIONS、original_run_identity 与 manifest 实际声明
+        一致、correction 语义字段 not_effective/null/closed=false 齐备
+        自洽——未知版本/缺主体/身份张冠李戴/语义矛盾全部 fail closed），
         然后该 manifest 公开的 yarn_factor 不得再当 effective：
         返回 effective_yarn_factor=None +
         yarn_factor_provenance="operator_declared_not_effective" +
@@ -575,6 +619,73 @@ def resolve_manifest_yarn_identity(manifest_path):
     if not isinstance(cver, str) or not cver:
         raise SystemExit(f"[GATE-FAIL] {correction_path}: correction_version"
                          f" 非非空 str——fail closed（061）")
+    # ---- 063（TL-E119-YARN-CORRECTION-SCHEMA）：严格版本化 schema ----
+    # 修复前任意非空 correction_version 都被接受，且缺 correction 主体、
+    # original 身份与 manifest 不符、语义字段矛盾均零校验——损坏/错误
+    # 生成/未来未知协议的 sidecar 会被静默解释成有效纠偏。以下逐项
+    # fail closed（按三份既有 128K sidecar 实际结构适配字段名）：
+    if cver not in CORRECTION_VERSIONS:
+        raise SystemExit(
+            f"[GATE-FAIL] {correction_path}: correction_version={cver!r} "
+            f"不在已发布纠偏协议枚举 {CORRECTION_VERSIONS}——未知版本"
+            f" fail closed（未来协议须先在 yarn_receipt.CORRECTION_VERSIONS"
+            f" 登记才可被消费，063）")
+    # ① 纠偏声明的历史身份必须与 manifest run_identity 实际声明一致
+    #    （纠偏描述的是「这份 manifest」，张冠李戴的 sidecar 拒收）
+    ori = correction.get("original_run_identity")
+    if not isinstance(ori, dict) or "yarn_factor" not in ori:
+        raise SystemExit(
+            f"[GATE-FAIL] {correction_path}: 缺 original_run_identity."
+            f"yarn_factor（纠偏必须声明其纠正的历史身份，与 manifest "
+            f"run_identity 实际声明核对）——fail closed（063）")
+    if ori["yarn_factor"] != declared:
+        raise SystemExit(
+            f"[GATE-FAIL] {correction_path}: original_run_identity."
+            f"yarn_factor={ori['yarn_factor']!r} 与 manifest "
+            f"run_identity.yarn_factor={declared!r} 不一致——纠偏声明的"
+            f"历史与实际 manifest 不符（sidecar 指向的不是这份 manifest"
+            f"的身份历史），fail closed（063）")
+    if "yarn" in ori and ori["yarn"] != bool(ri.get("yarn")):
+        raise SystemExit(
+            f"[GATE-FAIL] {correction_path}: original_run_identity."
+            f"yarn={ori['yarn']!r} 与 manifest run_identity.yarn="
+            f"{bool(ri.get('yarn'))!r} 不一致——fail closed（063）")
+    # ② 纠偏主体的语义字段必须明确表达 not-effective/null/未闭合
+    #    （字段名按三份既有 128K sidecar 实际结构：yarn_factor_status /
+    #    effective_yarn_factor / effective_factor_closed）
+    body = correction.get("correction")
+    if not isinstance(body, dict):
+        raise SystemExit(
+            f"[GATE-FAIL] {correction_path}: 缺 correction 主体（纠偏语义"
+            f"字段 yarn_factor_status/effective_yarn_factor/"
+            f"effective_factor_closed 必须齐备且语义自洽）——"
+            f"fail closed（063）")
+    if body.get("yarn_factor_status") != "operator_declared_not_effective":
+        raise SystemExit(
+            f"[GATE-FAIL] {correction_path}: correction.yarn_factor_status="
+            f"{body.get('yarn_factor_status')!r} != "
+            f"'operator_declared_not_effective'——{cver} 协议的纠偏语义"
+            f"必须明确声明旧 factor 不再是 effective，fail closed（063）")
+    if body.get("effective_yarn_factor") is not None:
+        raise SystemExit(
+            f"[GATE-FAIL] {correction_path}: correction."
+            f"effective_yarn_factor={body.get('effective_yarn_factor')!r}"
+            f" 非 null——{cver} 协议不脑补实际生效值（佐证≠同代哈希"
+            f"绑定，与 051 同纪律），fail closed（063）")
+    if body.get("effective_factor_closed") is not False:
+        raise SystemExit(
+            f"[GATE-FAIL] {correction_path}: correction."
+            f"effective_factor_closed="
+            f"{body.get('effective_factor_closed')!r} 非 False——"
+            f"factor 身份未闭合正是纠偏存在的前提，声明已闭合则自相"
+            f"矛盾，fail closed（063）")
+    if "operator_declared_yarn_factor" in body and \
+            body["operator_declared_yarn_factor"] != declared:
+        raise SystemExit(
+            f"[GATE-FAIL] {correction_path}: correction."
+            f"operator_declared_yarn_factor="
+            f"{body['operator_declared_yarn_factor']!r} 与 manifest 声明"
+            f"{declared!r} 不一致——fail closed（063）")
     return {
         # 旧 manifest 公开的 yarn_factor 从此不再被当作 effective
         "yarn": bool(ri.get("yarn")),

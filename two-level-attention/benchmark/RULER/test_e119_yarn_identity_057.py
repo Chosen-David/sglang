@@ -71,6 +71,14 @@ NATIVE_MPE = 40960
 PASS = 0
 
 
+def _check(cond, msg=""):
+    """065（TL-E119-YARN-TEST-ORACLE）：显式判定——非 assert 语句，
+    python -O 不删除，验收门禁在 -O 下仍有效。失败 → SystemExit
+    （带 [TEST-FAIL] 前缀），与 059/060/061 套件同款。"""
+    if not cond:
+        raise SystemExit(f"[TEST-FAIL] {msg}")
+
+
 def _sha(path):
     import hashlib
     h = hashlib.sha256()
@@ -160,22 +168,22 @@ def test_U1_auto_tier_resolution():
     f64, rs64 = resolve_yarn_config(True, None, 65536, YARN_AUTO, NATIVE_MPE)
     f128, rs128 = resolve_yarn_config(True, None, 131072, YARN_AUTO,
                                       NATIVE_MPE)
-    assert f64 == 2.0 and f128 == 4.0, (f64, f128)
+    _check(f64 == 2.0 and f128 == 4.0, (f64, f128))
     # rope_scaling 六键完整且 factor=effective
     for f, rs in ((f64, rs64), (f128, rs128)):
-        assert set(rs) == {"rope_type", "type", "factor",
+        _check(set(rs) == {"rope_type", "type", "factor",
                            "original_max_position_embeddings",
-                           "beta_fast", "beta_slow"}
-        assert rs["rope_type"] == "yarn" and rs["type"] == "yarn" and \
+                           "beta_fast", "beta_slow"})
+        _check(rs["rope_type"] == "yarn" and rs["type"] == "yarn" and \
             rs["factor"] == f and \
             rs["original_max_position_embeddings"] == NATIVE_MPE and \
-            rs["beta_fast"] == 32 and rs["beta_slow"] == 1
+            rs["beta_fast"] == 32 and rs["beta_slow"] == 1)
     # 显式覆盖持久化（自动档被覆盖）
     fx, rsx = resolve_yarn_config(True, 3.5, 131072, YARN_AUTO, NATIVE_MPE)
-    assert fx == 3.5 and rsx["factor"] == 3.5
+    _check(fx == 3.5 and rsx["factor"] == 3.5)
     # off
     fo, rso = resolve_yarn_config(False, 3.5, 131072, YARN_AUTO, NATIVE_MPE)
-    assert fo is None and rso is None
+    _check(fo is None and rso is None)
     print("U1 PASS  自动档 65536→2.0 / 131072→4.0；显式 3.5 持久化 3.5；"
           "rope_scaling 六键完整；off → (None, None)")
 
@@ -209,23 +217,23 @@ def test_U2_receipt_roundtrip(base):
         receipt_version=RECEIPT_V1_VERSION)
     path = write_yarn_receipt(pred, rcp)
     # 命名约定：{pred 基名}-yarn_receipt.json；jsonl 字节零改动
-    assert path == pred[:-len(".jsonl")] + RECEIPT_SUFFIX
-    assert producer_receipt_path_for(pred) == path
-    assert _sha(pred) == before, "写 receipt 改动了 jsonl 产物字节"
+    _check(path == pred[:-len(".jsonl")] + RECEIPT_SUFFIX)
+    _check(producer_receipt_path_for(pred) == path)
+    _check(_sha(pred) == before, "写 receipt 改动了 jsonl 产物字节")
     back = json.load(open(path, encoding="utf-8"))
-    assert validate_producer_receipt(back, pred) is None
-    assert back["effective_yarn_factor"] == 4.0 and \
+    _check(validate_producer_receipt(back, pred) is None)
+    _check(back["effective_yarn_factor"] == 4.0 and \
         back["yarn_factor_source"] == "auto" and \
-        back["receipt_version"] == RECEIPT_V1_VERSION
+        back["receipt_version"] == RECEIPT_V1_VERSION)
     # 无 tmp 残留（原子写）
-    assert not glob.glob(path + ".tmp-*")
+    _check(not glob.glob(path + ".tmp-*"))
     # 自相矛盾：rope_scaling.factor 与 effective 不一致 → 校验拒绝
     bad = dict(back)
     bad["rope_scaling"] = dict(back["rope_scaling"], factor=2.0)
-    assert validate_producer_receipt(bad, pred) is not None
+    _check(validate_producer_receipt(bad, pred) is not None)
     # yarn_enabled=False 但 effective 非 None → 拒绝
     bad2 = dict(back, yarn_enabled=False)
-    assert validate_producer_receipt(bad2, pred) is not None
+    _check(validate_producer_receipt(bad2, pred) is not None)
     print("U2 PASS  receipt 原子落盘 + 旁挂命名约定 + jsonl 零改动 + "
           "读回校验通过（v1 兼容面，060 严格 schema 下完整必需键）+ "
           "自相矛盾/状态矛盾 receipt 拒绝")
@@ -247,19 +255,19 @@ def test_U3_producer_wiring():
         acquire_output_lock, commit_yarn_generation, release_output_lock,
         stage_yarn_receipt,
     )
-    assert pr.YARN_FACTOR_AUTO == YARN_AUTO, pr.YARN_FACTOR_AUTO
+    _check(pr.YARN_FACTOR_AUTO == YARN_AUTO, pr.YARN_FACTOR_AUTO)
     f64, _ = pr.resolve_yarn_config(True, None, 65536, pr.YARN_FACTOR_AUTO,
                                     pr.QWEN3_NATIVE_MPE)
     f128, _ = pr.resolve_yarn_config(True, None, 131072, pr.YARN_FACTOR_AUTO,
                                      pr.QWEN3_NATIVE_MPE)
-    assert f64 == 2.0 and f128 == 4.0
+    _check(f64 == 2.0 and f128 == 4.0)
     # 059：生产者消费同一实现（resolve / 临时回执 staging / 单次提交 /
     # 输出路径锁）——resolve 同函数、stage/commit/锁原语同对象
-    assert pr.resolve_yarn_config is resolve_yarn_config
-    assert pr.stage_yarn_receipt is stage_yarn_receipt and \
+    _check(pr.resolve_yarn_config is resolve_yarn_config)
+    _check(pr.stage_yarn_receipt is stage_yarn_receipt and \
         pr.commit_yarn_generation is commit_yarn_generation and \
         pr.acquire_output_lock is acquire_output_lock and \
-        pr.release_output_lock is release_output_lock
+        pr.release_output_lock is release_output_lock)
     print("U3 PASS  pred_ruler.YARN_FACTOR_AUTO={65536: 2.0, 131072: 4.0} "
           "与 resolve/stage/commit/锁 同一实现闭环（131072 → 4.0，"
           "059 两段式提交接线）")
@@ -270,38 +278,36 @@ def test_F1_producer_evidence_positive(base):
     （auto 档 2.0）→ formal 成功，run_identity 消费生产者证据。"""
     root = _copy_fixture(base, "f1_root", native=True)
     n = _write_receipts(root, 32768, 2.0)
-    assert n == 11, n
+    _check(n == 11, n)
     out = os.path.join(base, "f1.json")
     r = _formal(root, out, extra=("--yarn",))
-    assert r.returncode == 0 and "DONE" in r.stdout, \
-        (r.returncode, r.stdout[-3000:], r.stderr[-2000:])
+    _check(r.returncode == 0 and "DONE" in r.stdout, (r.returncode, r.stdout[-3000:], r.stderr[-2000:]))
     mf = json.load(open(out + ".manifest.json"))
     ri = mf["run_identity"]
-    assert ri["yarn"] is True and ri["yarn_factor"] == 2.0 and \
-        ri["yarn_factor_provenance"] == "producer_receipt", ri
+    _check(ri["yarn"] is True and ri["yarn_factor"] == 2.0 and \
+        ri["yarn_factor_provenance"] == "producer_receipt", ri)
     pe = ri["producer_evidence"]
-    assert pe["status"] == "present" and pe["cells_with_receipt"] == 11 \
-        and pe["cells_total"] == 11 and pe["effective_yarn_factor"] == 2.0
+    _check(pe["status"] == "present" and pe["cells_with_receipt"] == 11 \
+        and pe["cells_total"] == 11 and pe["effective_yarn_factor"] == 2.0)
     # 逐格 receipt 字节绑定（path+sha 与磁盘一致）
     for cell in mf["cells"].values():
         for t, ti in cell["tasks"].items():
             rc = ti["producer_yarn_receipt"]
-            assert rc is not None and _sha(rc["path"]) == rc["sha256"], \
-                (t, rc)
-            assert rc["effective_yarn_factor"] == 2.0
+            _check(rc is not None and _sha(rc["path"]) == rc["sha256"], (t, rc))
+            _check(rc["effective_yarn_factor"] == 2.0)
     # formal receipt 的 inputs.run_identity 同值（下游消费者单指针可恢复）
     frc = json.load(open(out + ".receipt.json"))
     fri = frc["inputs"]["run_identity"]
-    assert fri["yarn_factor"] == 2.0 and \
-        fri["yarn_factor_provenance"] == "producer_receipt"
+    _check(fri["yarn_factor"] == 2.0 and \
+        fri["yarn_factor_provenance"] == "producer_receipt")
     # CLI 声明与生产者证据一致时也通过（operator declared 保留记录）
     out2 = os.path.join(base, "f1b.json")
     r2 = _formal(root, out2, extra=("--yarn", "--yarn-factor", "2.0"))
-    assert r2.returncode == 0, (r2.returncode, r2.stdout[-2000:])
+    _check(r2.returncode == 0, (r2.returncode, r2.stdout[-2000:]))
     ri2 = json.load(open(out2 + ".manifest.json"))["run_identity"]
-    assert ri2["yarn_factor"] == 2.0 and \
+    _check(ri2["yarn_factor"] == 2.0 and \
         ri2["yarn_factor_provenance"] == "producer_receipt" and \
-        ri2["yarn_factor_operator_declared"] == 2.0
+        ri2["yarn_factor_operator_declared"] == 2.0)
     print("F1 PASS  11 格生产者 receipt → formal 证实 effective=2.0"
           "（producer_receipt，cells/path+sha 逐格冻结）；CLI 声明一致时"
           "通过且 operator_declared 字段保留")
@@ -316,14 +322,12 @@ def test_F2_factor_conflict_fail_closed(base):
     for optimized in (False, True):
         r = _formal(root, out, extra=("--yarn", "--yarn-factor", "4.0"),
                     optimized=optimized)
-        assert r.returncode != 0, \
-            (optimized, r.returncode, r.stdout[-2000:])
-        assert "factor 声明冲突" in (r.stdout + r.stderr) and \
-            "fail closed" in (r.stdout + r.stderr)
-        assert not any(os.path.exists(p) for p in _products(out)), \
-            "冲突仍发布了产物"
-        assert not glob.glob(out + ".staging-*")
-        assert glob.glob(out + ".failure-*.json")
+        _check(r.returncode != 0, (optimized, r.returncode, r.stdout[-2000:]))
+        _check("factor 声明冲突" in (r.stdout + r.stderr) and \
+            "fail closed" in (r.stdout + r.stderr))
+        _check(not any(os.path.exists(p) for p in _products(out)), "冲突仍发布了产物")
+        _check(not glob.glob(out + ".staging-*"))
+        _check(glob.glob(out + ".failure-*.json"))
     print("F2 PASS  CLI 声明 4.0 vs 生产者证据 2.0 → 非零退出不发布"
           "（python 与 -O 双跑，_fail 非 assert）")
 
@@ -334,9 +338,8 @@ def test_F3_yarn_flag_conflict(base):
     _write_receipts(root, 32768, 2.0)
     out = os.path.join(base, "f3.json")
     r = _formal(root, out, extra=())
-    assert r.returncode != 0 and "yarn 声明冲突" in (r.stdout + r.stderr), \
-        (r.returncode, r.stdout[-2000:])
-    assert not any(os.path.exists(p) for p in _products(out))
+    _check(r.returncode != 0 and "yarn 声明冲突" in (r.stdout + r.stderr), (r.returncode, r.stdout[-2000:]))
+    _check(not any(os.path.exists(p) for p in _products(out)))
     print("F3 PASS  生产者证据 yarn_enabled=True vs CLI 未声明 --yarn → "
           "fail-closed（事后声明不得与实际值矛盾）")
 
@@ -347,19 +350,18 @@ def test_F4_legacy_operator_declared(base):
     root = _copy_fixture(base, "f4_root")          # legacy fixture，无 receipt
     out = os.path.join(base, "f4.json")
     r = _formal(root, out, extra=("--yarn", "--yarn-factor", "2.0"))
-    assert r.returncode == 0 and "operator_declared" in r.stdout, \
-        (r.returncode, r.stdout[-3000:], r.stderr[-2000:])
+    _check(r.returncode == 0 and "operator_declared" in r.stdout, (r.returncode, r.stdout[-3000:], r.stderr[-2000:]))
     ri = json.load(open(out + ".manifest.json"))["run_identity"]
-    assert ri["yarn_factor"] == 2.0 and \
+    _check(ri["yarn_factor"] == 2.0 and \
         ri["yarn_factor_provenance"] == "operator_declared" and \
-        ri["yarn_factor_operator_declared"] == 2.0
+        ri["yarn_factor_operator_declared"] == 2.0)
     pe = ri["producer_evidence"]
-    assert pe["status"] == "missing" and pe["cells_with_receipt"] == 0 and \
-        "未闭合" in pe["note"]
+    _check(pe["status"] == "missing" and pe["cells_with_receipt"] == 0 and \
+        "未闭合" in pe["note"])
     mf = json.load(open(out + ".manifest.json"))
     for cell in mf["cells"].values():
         for ti in cell["tasks"].values():
-            assert ti["producer_yarn_receipt"] is None
+            _check(ti["producer_yarn_receipt"] is None)
     print("F4 PASS  legacy 无 receipt → yarn_factor=2.0 标注 "
           "operator_declared + producer_evidence missing + 逐格 "
           "receipt=null（不再冒充实际生效值）")
@@ -369,14 +371,13 @@ def test_F5_partial_coverage_fail_closed(base):
     """F5：10/11 格有 receipt → 混合口径 fail-closed（python 与 -O 双跑）。"""
     root = _copy_fixture(base, "f5_root", native=True)
     n = _write_receipts(root, 32768, 2.0, tasks=set(TASKS) - {"vt"})
-    assert n == 10, n
+    _check(n == 10, n)
     out = os.path.join(base, "f5.json")
     for optimized in (False, True):
         r = _formal(root, out, extra=("--yarn",), optimized=optimized)
-        assert r.returncode != 0 and "覆盖不全" in (r.stdout + r.stderr), \
-            (optimized, r.returncode, r.stdout[-2000:])
-        assert not any(os.path.exists(p) for p in _products(out))
-        assert glob.glob(out + ".failure-*.json")
+        _check(r.returncode != 0 and "覆盖不全" in (r.stdout + r.stderr), (optimized, r.returncode, r.stdout[-2000:]))
+        _check(not any(os.path.exists(p) for p in _products(out)))
+        _check(glob.glob(out + ".failure-*.json"))
     print("F5 PASS  10/11 格证据 → run_identity 不得混合『生产者证实』与"
           "『操作者声明』→ fail-closed（python 与 -O 双跑）")
 
@@ -392,9 +393,8 @@ def test_F6_corrupt_receipt_fail_closed(base):
     open(rcp_path, "w", encoding="utf-8").write('{"partial":')
     out = os.path.join(base, "f6a.json")
     r = _formal(root, out, extra=("--yarn",))
-    assert r.returncode != 0 and "解析失败" in (r.stdout + r.stderr), \
-        (r.returncode, r.stdout[-2000:])
-    assert not any(os.path.exists(p) for p in _products(out))
+    _check(r.returncode != 0 and "解析失败" in (r.stdout + r.stderr), (r.returncode, r.stdout[-2000:]))
+    _check(not any(os.path.exists(p) for p in _products(out)))
     # ② 自相矛盾（rope_scaling.factor 与 effective 不一致）
     root = _copy_fixture(base, "f6b_root", native=True)
     _write_receipts(root, 32768, 2.0)
@@ -406,9 +406,8 @@ def test_F6_corrupt_receipt_fail_closed(base):
     json.dump(rcp, open(rcp_path, "w", encoding="utf-8"))
     out = os.path.join(base, "f6b.json")
     r = _formal(root, out, extra=("--yarn",))
-    assert r.returncode != 0 and "自相矛盾" in (r.stdout + r.stderr), \
-        (r.returncode, r.stdout[-2000:])
-    assert not any(os.path.exists(p) for p in _products(out))
+    _check(r.returncode != 0 and "自相矛盾" in (r.stdout + r.stderr), (r.returncode, r.stdout[-2000:]))
+    _check(not any(os.path.exists(p) for p in _products(out)))
     print("F6 PASS  ①截断 JSON ②自相矛盾 receipt → 均非零退出不发布"
           "（存在即证据：半写/篡改比缺失更危险）")
 
@@ -430,14 +429,13 @@ def test_F7_auto_tier_end_to_end(base):
         _write_receipts(root, L, factor)
         out = os.path.join(base, f"f7_{L}.json")
         r = _formal(root, out, data_root=data_root, extra=("--yarn",))
-        assert r.returncode == 0 and "DONE" in r.stdout, \
-            (L, r.returncode, r.stdout[-3000:], r.stderr[-2000:])
+        _check(r.returncode == 0 and "DONE" in r.stdout, (L, r.returncode, r.stdout[-3000:], r.stderr[-2000:]))
         ri = json.load(open(out + ".manifest.json"))["run_identity"]
-        assert ri["yarn_factor"] == factor and \
-            ri["yarn_factor_provenance"] == "producer_receipt", (L, ri)
+        _check(ri["yarn_factor"] == factor and \
+            ri["yarn_factor_provenance"] == "producer_receipt", (L, ri))
         pe = ri["producer_evidence"]
-        assert pe["cells_with_receipt"] == 11 and \
-            pe["effective_yarn_factor"] == factor
+        _check(pe["cells_with_receipt"] == 11 and \
+            pe["effective_yarn_factor"] == factor)
     print("F7 PASS  L65536 → producer 证实 2.0；L131072 → producer 证实"
           " 4.0（自动档两端点 formal 端到端闭合）")
 

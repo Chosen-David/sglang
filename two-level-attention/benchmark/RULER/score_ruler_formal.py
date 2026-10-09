@@ -114,6 +114,34 @@
 #   不自哈希（避免自引用）：entry receipt 与 generation 内 receipt.json
 #   是两个不同文件，前者哈希后者。既有 64K/128K 生产 receipt（v2/legacy）
 #   一律不动，消费者按协议版本分流（见两个 analyzer 的 ⑨c）。
+# ===== #196（GPT 2026-10-10 0635 二轮复审 062/063/064/065）=====
+#   TL-E119-YARN-SNAPSHOT-RACE-062（P1）：staging 快照与源目录验证的
+#       时序竞态——freeze_and_stage 先把源预测复制到 staging 派生副本
+#       （best-file 仲裁用 staging），之后 _load_producer_yarn_receipt
+#       才重新打开【源路径】验证当前源文件与回执，且无「staging SHA ==
+#       receipt.prediction_sha256」断言。生产者在复制后、验证前原子提交
+#       B 代 → formal 评 staging A、manifest 标 B 的 source SHA 与回执
+#       verified_same_generation=true（GPT CPU 复现实锤）。修复（GPT 方案
+#       2，无锁 bytes 快照语义重排，选择见 _load_producer_yarn_receipt
+#       docstring）：①回执读成单一 bytes 快照（解析与 receipt SHA 同源，
+#       防读-算之间被替换）；②以 staging 副本（评分对象）的 SHA/行数对
+#       回执 prediction_sha256/prediction_lines 校验（失配 fail-closed）；
+#       ③三方一致（staging == receipt == 源当前字节，源失配重读一次仍
+#       失配则 fail-closed 拒绝并重试）才 verified_same_generation=true；
+#       ④源路径之后被生产者推进不改变已冻结 generation 的身份——身份
+#       断言绑定 staging bytes，manifest 的 source_sha256 取冻结窗口内
+#       三方一致时刻的值，不再事后重算（事后重算会捡到新一代造成
+#       manifest 自相矛盾）。
+#   TL-E119-YARN-CONFIG-PARTIAL-064①（P2）：v2 schema 允许
+#       model_config_sha256=None（远端模型 ID / config.json 不在
+#       model_path 时生产者写 None）→「完整模型配置闭包」不成立。
+#       修复：config_fingerprint 如实标注 config_identity=missing +
+#       producer_evidence.model_config_closure 降级标注（不强行做
+#       config.to_dict() 哈希——引入 transformers 违反 yarn_receipt
+#       零重依赖设计原则，选诚实降级方案）。064②（max_num 入指纹）在
+#       yarn_receipt.effective_config_sha256 落地。
+#   063（纠偏 sidecar 严格 schema）与 065（测试 oracle 显式化）分别在
+#       yarn_receipt.py 与测试套件落地。
 # ===== #195（GPT 2026-10-10 0428 审计 059/060/061）=====
 #   TL-E119-YARN-RECEIPT-BINDING-059（P1）：_load_producer_yarn_receipt
 #       此前按 basename 找同名回执、分别记 SHA，不做同代交叉验证——
@@ -155,6 +183,7 @@
 import argparse
 import fcntl
 import glob
+import hashlib
 import json
 import os
 import random
@@ -440,41 +469,84 @@ def _stamp_or_copy(src, dst, task, stamp):
     return True, out_rows
 
 
-def _load_producer_yarn_receipt(pred_dir, best_basename, task, Lnum):
-    """057+059/060：探查 best-file 旁挂生产者 receipt，做自洽 + 同代
-    绑定 + 严格 schema 校验。
+def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum):
+    """057+059/060/062：探查 best-file 旁挂生产者 receipt，做自洽 +
+    同代绑定 + 严格 schema + staging 快照三方一致校验。
+
+    参数（062 重排）：staged_pred = staging 派生副本路径（评分对象，
+    freeze_and_stage 已复制完成）；source_pred = 原始源路径（回执在其
+    旁挂探查，basename 与 staging 副本相同）。
 
     返回 receipt 摘要 dict；文件不存在 → None（legacy，如实标 missing）。
     存在但损坏/自相矛盾/协议不符/档位不符 → _fail（存在即证据：半写或
     被篡改的 receipt 比缺失更危险，fail-closed 拒收整次发布）。
 
-    059 新增（producer-yarn-config-v2）同代绑定校验——修复前 formal
-    分别冻结「当前预测 SHA」与「当前回执 SHA」却不验证二者同代，「A
-    进程的预测配 B 进程的回执」可达（同名重跑/中断重跑/并发/事后改
-    写，GPT 审计 059 已复现：改预测+改回执仍 exit 0 标 producer_receipt）：
+    059（producer-yarn-config-v2）同代绑定校验——修复前 formal 分别
+    冻结「当前预测 SHA」与「当前回执 SHA」却不验证二者同代，「A 进程
+    的预测配 B 进程的回执」可达：
       - v2：status 必须 complete（无完成标记=中断代际拒收）；
-        prediction_sha256 / prediction_lines 与 best-file 当前字节现算
-        逐位比对（不一致 → fail closed——预测与回执不同代）；
+        prediction_sha256 / prediction_lines 与预测字节逐位比对
+        （不一致 → fail closed——预测与回执不同代）；
       - v1（057 时代协议）无绑定字段 → 摘要 prediction_binding=None，
         provenance 降级 producer_receipt_v1_partial（只证 factor 口径
         不证同代），不冒充完整绑定证据。
 
+    062（TL-E119-YARN-SNAPSHOT-RACE，GPT 方案 2 无锁 bytes 快照）：
+    修复前先把源预测复制到 staging、best-file 仲裁用 staging 副本，
+    本函数却重新打开【源路径】验证当前源文件与回执，且 manifest 分别
+    现算 source/staging SHA 互不比对——生产者在复制后、验证前原子提交
+    B 代 → formal 评 staging A、manifest 标 B 的 source SHA 与回执
+    verified=true（GPT CPU 复现：staged_derived_sha256 !=
+    receipt_prediction_sha256 但 freeze 成功返回）。修复语义重排：
+      ① 回执读成单一 bytes 快照——解析与 receipt SHA 都基于同一 bytes
+         （防「读-算之间被生产者 os.replace 推进」造成内容 A 配
+         SHA B 的混合态回执摘要）；
+      ② 同代绑定比对对象改为 staging 副本（评分对象）——staged SHA/
+         行数 对回执 prediction_sha256/prediction_lines 校验，失配
+         fail-closed（覆盖「复制完成后、回执读取前生产者提交 B 代」
+         的 barrier 窗口：staging=A、receipt=B → 拒绝）；
+      ③ 三方一致才 verified_same_generation=true：staging SHA ==
+         回执 SHA == 源当前字节 SHA；源失配重读一次仍失配 →
+         fail-closed（源在冻结窗口内被推进到新一代，拒绝并重试——
+         不发布 staging=A/receipt=B 的混合代际，也不发布自洽但
+         source_sha256 指向新一代的 manifest）；
+      ④ 冻结完成后源路径再被生产者推进不改变已冻结 generation 的
+         身份——身份断言绑定 staging bytes；manifest 的 source_sha256
+         取本函数三方一致时刻的值（调用方不得事后重算源 SHA，事后
+         重算会捡到新一代造成 manifest 自相矛盾）。
+    快照顺序的设计选择：保留「先复制（freeze_and_stage 候选循环）→
+    后读回执」的既有流程（不重排为先读回执再复制）——两种顺序下所有
+    混合代际态都会被 ②/③ 拒收，区别仅在「提交落在回执读取之前还是
+    之后」各对应 ② 或 ③ 触发；保留既有流程使改动面最小、且 staging
+    复制循环无需感知回执。
+
     060 新增：摘要保留完整配置指纹（model_path/model_config_sha256/
-    完整 rope_scaling/native_mpe/seed/max_gen/生产脚本/effective_
-    config_sha256），供 _check_producer_config_consistency 跨格门禁
-    比较（修复前只比较开关与 factor，beta_fast/seed/模型与脚本 hash
-    改 999/假值均可通过）。"""
-    src_pred = os.path.join(pred_dir, best_basename)
-    rcp_path = producer_receipt_path_for(src_pred)
+    完整 rope_scaling/native_mpe/seed/max_gen/max_num/生产脚本/
+    effective_config_sha256），供 _check_producer_config_consistency
+    跨格门禁比较。
+
+    064① 新增：model_config_sha256=None（远端模型 ID / config.json
+    不在 model_path）→ config_fingerprint.config_identity=missing 如实
+    降级——「完整模型配置闭包」不成立，不冒充（producer_evidence.
+    model_config_closure 由 _resolve_yarn_identity 汇总降级标注）。"""
+    best_basename = os.path.basename(source_pred)
+    rcp_path = producer_receipt_path_for(source_pred)
     if not os.path.isfile(rcp_path):
         return None
+    # ---- 062①：回执单一 bytes 快照（解析与 SHA 同源）----
     try:
-        with open(rcp_path, encoding="utf-8") as f:
-            rcp = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
+        with open(rcp_path, "rb") as f:
+            rcp_raw = f.read()
+    except OSError as e:
+        _fail(f"{rcp_path}: 生产者 yarn receipt 读取失败（{e}）——"
+              f"存在即证据，半写/损坏 fail closed（057）")
+    try:
+        rcp = json.loads(rcp_raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         _fail(f"{rcp_path}: 生产者 yarn receipt 解析失败（{e}）——"
               f"存在即证据，半写/损坏 fail closed（057）")
-    err = validate_producer_receipt(rcp, src_pred)
+    rcp_sha = hashlib.sha256(rcp_raw).hexdigest()
+    err = validate_producer_receipt(rcp, source_pred)
     if err:
         _fail(err)
     if rcp["context_length"] != Lnum:
@@ -483,33 +555,58 @@ def _load_producer_yarn_receipt(pred_dir, best_basename, task, Lnum):
               f"冲突，fail closed（057）")
     version = rcp["receipt_version"]
     binding = None
+    # 062③：source_sha256 在三方一致窗口内取值（调用方复用，不重算）
+    source_sha = None
     if version == RECEIPT_VERSION:
-        # ---- 059 同代绑定：回执声明值 vs best-file 当前字节现算比对 ----
-        actual_sha = _file_sha256(src_pred)
-        actual_lines = _nlines(src_pred)
-        if actual_sha != rcp["prediction_sha256"]:
+        # ---- 062②：同代绑定以 staging 副本（评分对象）比对 ----
+        staged_sha = _file_sha256(staged_pred)
+        staged_lines = _nlines(staged_pred)
+        if staged_sha != rcp["prediction_sha256"]:
             _fail(f"{rcp_path}: 回执声明 prediction_sha256="
-                  f"{rcp['prediction_sha256']} 与 best-file {best_basename} "
-                  f"当前字节 SHA256={actual_sha} 不一致——预测与回执不同"
-                  f"代（同名重跑/中断重跑/并发/事后改写），fail closed"
-                  f"（059）")
-        if actual_lines != rcp["prediction_lines"]:
+                  f"{rcp['prediction_sha256']} 与 staging 评分副本 "
+                  f"{best_basename} 字节 SHA256={staged_sha} 不一致——"
+                  f"预测与回执不同代（同名重跑/中断重跑/并发/事后改写，"
+                  f"或生产者在复制与验证之间提交了新一代），fail closed"
+                  f"（059+062）")
+        if staged_lines != rcp["prediction_lines"]:
             _fail(f"{rcp_path}: 回执声明 prediction_lines="
-                  f"{rcp['prediction_lines']} 与 best-file {best_basename} "
-                  f"实际行数 {actual_lines} 不一致——fail closed（059）")
+                  f"{rcp['prediction_lines']} 与 staging 评分副本 "
+                  f"{best_basename} 实际行数 {staged_lines} 不一致——"
+                  f"fail closed（059）")
+        # ---- 062③：三方一致（staging == 回执 == 源当前字节）----
+        # 源失配重读一次（防瞬时读异常误杀）；仍失配 = 源在冻结窗口内
+        # 被推进到新一代 → fail-closed 拒绝并重试，不发布混合代际
+        source_sha = _file_sha256(source_pred)
+        if source_sha != staged_sha:
+            source_sha = _file_sha256(source_pred)
+            if source_sha != staged_sha:
+                _fail(f"{rcp_path}: 源预测 {source_pred} 当前字节 SHA256="
+                      f"{source_sha} 与已冻结 staging 评分副本 SHA256="
+                      f"{staged_sha}（=回执声明）不一致——源在冻结窗口内"
+                      f"被生产者推进到新一代（062 快照竞态），拒绝本次"
+                      f"发布并重试；已冻结 generation 的身份绑定 staging"
+                      f" bytes，不得用新一代源 SHA 发布旧一代评分，"
+                      f"fail closed（062）")
         binding = {
             "status": rcp["status"],
             "run_id": rcp["run_id"],
             "prediction_basename": rcp["prediction_basename"],
             "prediction_sha256": rcp["prediction_sha256"],
             "prediction_lines": rcp["prediction_lines"],
+            # 062：verified 只在 staging == 回执 == 源 三方一致时为真
             "verified_same_generation": True,
+            "staged_sha256": staged_sha,
+            "source_sha256_at_freeze": source_sha,
         }
+    else:
+        # v1 无绑定字段：source SHA 仍按当前字节记录（无三方断言语义）
+        source_sha = _file_sha256(source_pred)
     # v1：binding 保持 None（provenance 由 _resolve_yarn_identity 降级标注）
     gp = rcp["generation_params"]
     return {
         "path": os.path.abspath(rcp_path),
-        "sha256": _file_sha256(rcp_path),
+        # 062①：receipt SHA 与解析同源（同一 bytes 快照）
+        "sha256": rcp_sha,
         "receipt_version": version,
         "yarn_enabled": rcp["yarn_enabled"],
         "effective_yarn_factor": rcp["effective_yarn_factor"],
@@ -518,6 +615,8 @@ def _load_producer_yarn_receipt(pred_dir, best_basename, task, Lnum):
         "task": task,
         # 059：None = v1 回执无同代绑定（只证 factor 口径不证同代）
         "prediction_binding": binding,
+        # 062③：冻结窗口内的源 SHA（三方一致；调用方复用，不重算）
+        "source_sha256": source_sha,
         # 060：配置指纹（跨格一致性门禁输入；task/method/t/pred_postfix
         # 为分组自由字段，不进指纹——见 effective_config_sha256）
         "config_fingerprint": {
@@ -528,8 +627,17 @@ def _load_producer_yarn_receipt(pred_dir, best_basename, task, Lnum):
                 rcp["native_max_position_embeddings"],
             "seed": gp["seed"],
             "max_gen": gp["max_gen"],
+            # 064②：max_num 入指纹（yarn_receipt.effective_config_sha256
+            # 同步收录；此前「必需+类型校验但不进指纹」形成闭包缺口）
+            "max_num": gp["max_num"],
             "producer_script": rcp["producer_script"],
             "effective_config_sha256": effective_config_sha256(rcp),
+            # 064①：model_config_sha256=None（远端模型 ID / config.json
+            # 不在 model_path）→ 如实标注 missing，不得称完整配置闭包；
+            # 有值 = config.json 字节已 SHA 绑定
+            "config_identity": ("config_json_sha256_bound"
+                                if rcp["model_config_sha256"] is not None
+                                else "missing"),
         },
     }
 
@@ -650,13 +758,26 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
                 # best 是 staging 派生副本（与原始文件同名）；receipt 在
                 # 原始 pred_dir 探查。缺 receipt = legacy（missing 如实
                 # 记录，由 _resolve_yarn_identity 裁决 provenance）。
+                # 062：staged=评分对象、source=回执旁挂探查对象——同代
+                # 绑定与三方一致校验在 _load_producer_yarn_receipt 内
+                # 以 staging bytes 为锚完成。
+                src_best = os.path.join(pred_dir, os.path.basename(best))
                 cell_rcp = _load_producer_yarn_receipt(
-                    pred_dir, os.path.basename(best), task, Lnum)
+                    best, src_best, task, Lnum)
                 cell_key = f"{key}/{task}"
                 if cell_rcp is None:
                     producer_yarn["missing"].append(cell_key)
                 else:
                     producer_yarn["cells"][cell_key] = cell_rcp
+                # 062③：source_sha256 复用冻结窗口内的三方一致值
+                # （v2 时 = staging SHA = 回执 SHA；v1/legacy 无绑定语义
+                # 则为当前字节现算）——不得事后重算源 SHA：生产者在
+                # 冻结后推进源路径不改变已冻结 generation 的身份，
+                # 事后重算会捡到新一代造成 manifest 自相矛盾
+                if cell_rcp is not None:
+                    cell_source_sha = cell_rcp["source_sha256"]
+                else:
+                    cell_source_sha = _file_sha256(src_best)
                 cells_info.setdefault(key, {
                     "length_dir": Lnum,
                     "identity_mode": identity_mode,
@@ -666,9 +787,9 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
                     "best_file": os.path.basename(best),
                     "source_path": os.path.abspath(
                         # best 与 staged 同名，映射回原始源文件
-                        os.path.join(pred_dir, os.path.basename(best))),
-                    "source_sha256": _file_sha256(os.path.join(
-                        pred_dir, os.path.basename(best))),
+                        src_best),
+                    "source_sha256": cell_source_sha,
+                    # v2 时三者已断言一致（staged == receipt == source）
                     "derived_sha256": _file_sha256(best),
                     # 057：生产者证据按格绑定（null=missing，legacy）；
                     # path+sha256 把 receipt 字节冻结进 manifest
@@ -716,9 +837,12 @@ def _check_producer_config_consistency(found):
         ref = cells[ref_key]["config_fingerprint"]
         # 先报具体字段（seed/model/rope/脚本 hash 等，诊断价值高），
         # effective_config_sha256 是派生摘要留作兜底——按字母序先撞 SHA
-        # 会把「seed=42 vs 999」这类可定位漂移吞成不可读的 hex 失配
+        # 会把「seed=42 vs 999」这类可定位漂移吞成不可读的 hex 失配；
+        # config_identity（064①）同为派生标注（由 model_config_sha256
+        # 是否为 None 派生），一并排除，漂移仍落在源字段上
         concrete = [f for f in sorted(ref)
-                    if f != "effective_config_sha256"]
+                    if f not in ("effective_config_sha256",
+                                 "config_identity")]
         for k in sorted(cells):
             cur = cells[k]["config_fingerprint"]
             for field in concrete:
@@ -808,6 +932,15 @@ def _resolve_yarn_identity(args, producer_yarn):
               f"{enabled}）——生产者证据优先，fail closed（057）")
     provenance = ("producer_receipt" if version == RECEIPT_VERSION
                   else "producer_receipt_v1_partial")
+    # 064①：模型配置闭包状态如实汇总——任一格 model_config_sha256=None
+    # （远端模型 ID / config.json 不在 model_path）→ 闭包不完整，降级
+    # 标注；不得称「完整模型配置闭包」（不强行做 config.to_dict() 哈希
+    # ——引入 transformers 违反 yarn_receipt 零重依赖设计原则，选诚实
+    # 降级；逐格 config_identity 见 manifest cells 的 config_fingerprint）
+    config_missing_cells = sorted(
+        k for k, c in found.items()
+        if c["config_fingerprint"]["model_config_sha256"] is None)
+    model_config_closure = not config_missing_cells
     evidence = {
         "status": "present",
         "protocol": version,
@@ -816,6 +949,9 @@ def _resolve_yarn_identity(args, producer_yarn):
         "same_generation_bound": version == RECEIPT_VERSION,
         # 060：完整配置跨格一致性门禁已执行（此前只比开关+factor）
         "config_consistency_enforced": True,
+        # 064①：True = 全部格 config.json 字节已 SHA 绑定；False = 存在
+        # missing 格（model_config_sha256=None），完整模型配置闭包不成立
+        "model_config_closure": model_config_closure,
         "cells_with_receipt": len(found),
         "cells_total": n_total,
         "yarn_enabled": enabled,
@@ -823,6 +959,15 @@ def _resolve_yarn_identity(args, producer_yarn):
         "receipts": {k: {"path": v["path"], "sha256": v["sha256"]}
                     for k, v in sorted(found.items())},
     }
+    if not model_config_closure:
+        evidence["model_config_closure_note"] = (
+            f"以下 {len(config_missing_cells)} 格生产者回执的 "
+            f"model_config_sha256=None（远端模型 ID / config.json 不在 "
+            f"model_path，生产侧 pred_ruler 无法本地取 config.json 字节）："
+            f"{config_missing_cells}——模型配置身份未逐位闭合，"
+            f"config_identity=missing（逐格见 cells[].tasks[]."
+            f"producer_yarn_receipt.config_fingerprint），不得宣称"
+            f"「完整模型配置闭包」（064 降级标注）")
     if version == RECEIPT_V1_VERSION:
         evidence["note"] = ("v1 回执（057 时代协议）只证 factor 口径，"
                             "不证回执与预测同代（无 prediction SHA/行数"
