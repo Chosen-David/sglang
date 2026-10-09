@@ -300,6 +300,54 @@ def test_T6_kill_while_locked(base):
           " .bak/generation 残留属预期，不构成混合代际）")
 
 
+def test_T7_post_publish_io_error(base):
+    """T7（kimi3 1404）：发布事务成功提交后、报告阶段发生 OSError
+    （stdout broken pipe 等）→ 不得回滚已发布产物、不得删除 generation
+    目录；rc=0（发布有效性不受报告型错误影响）；failure receipt 如实
+    记录 publish_committed=True。注入方式：monkeypatch _locked_publish
+    包装器——真实发布事务完成后立刻抛 OSError，等价于成功路径 print
+    遇 broken pipe。"""
+    root = _copy_fixture(base, "t7_root")
+    out = os.path.join(base, "t7.json")
+    formal_argv = ["--root", root, "--pred-postfix", "_fx",
+                   "--data-root", os.path.join(TESTDATA, "data_root"),
+                   "--out", out, "--min-samples", "2"]
+    code = (
+        "import os, sys\n"
+        "sys.argv = ['score_ruler_formal'] + " + repr(formal_argv) + "\n"
+        "import benchmark.RULER.score_ruler_formal as m\n"
+        "_lp = m._locked_publish\n"
+        "def _lp_raise(*a, **k):\n"
+        "    _lp(*a, **k)\n"
+        "    raise OSError('INJECTED post-publish broken pipe')\n"
+        "m._locked_publish = _lp_raise\n"
+        "m.main()\n"
+    )
+    r = subprocess.run([sys.executable, "-c", code],
+                       capture_output=True, text=True, cwd=REPO,
+                       env={**os.environ, "PYTHONPATH": REPO})
+    # 发布已成功提交 → rc=0（报告型错误不否定发布有效性）
+    assert r.returncode == 0, \
+        (r.returncode, r.stdout[-1500:], r.stderr[-1500:])
+    # 四个公开产物完整在位且同代际闭合
+    assert all(os.path.isfile(p) for p in _products(out)), \
+        "发布成功后的报告型错误把公开产物删了（kimi3 1404 复发）"
+    assert _aliases_closed(out), \
+        "发布成功后的报告型错误破坏了代际闭合（kimi3 1404 复发）"
+    # generation 目录保留（receipt 的 derived_dir 单指针目标）
+    rc = json.load(open(out + ".receipt.json"))
+    assert os.path.isdir(rc["outputs"]["derived_dir"]), \
+        "generation 目录被 post-publish 错误误删（derived_dir 单指针断裂）"
+    # failure receipt 如实记录 committed 语义
+    fail = json.load(open(out + ".failure-" + rc["run_id"] + ".json"))
+    assert fail["publish_committed"] is True, fail
+    assert fail["generation_cleaned"] is False, fail
+    assert fail["rollback"]["attempted"] is False, fail
+    print("T7 PASS  发布成功后报告阶段 OSError（broken pipe 语义）→ "
+          "不回滚公开产物、不删 generation、rc=0；failure receipt 记录 "
+          "publish_committed=True（kimi3 1404 修复）")
+
+
 def _tamper_vt_pred(root, tag):
     """篡改 vt 行 0 的 pred（_id/answers 身份不变）→ 重跑结果可辨。"""
     tgt = os.path.join(root, "L32768", "pred_fx", "vt-fxm-01010000.jsonl")
@@ -498,11 +546,13 @@ def main():
         PASS += 1
         test_T6_kill_while_locked(base)
         PASS += 1
+        test_T7_post_publish_io_error(base)
+        PASS += 1
         test_D1_no_regression()
         PASS += 1
     finally:
         shutil.rmtree(base, ignore_errors=True)
-    total = 7 if t3 else 6
+    total = 8 if t3 else 7
     skip = "" if t3 else "，T3 SKIP（无第二设备）"
     print(f"\nE116f ALL PASS ({PASS}/{total}{skip})")
 

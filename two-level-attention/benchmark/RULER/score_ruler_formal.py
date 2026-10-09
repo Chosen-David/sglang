@@ -249,6 +249,10 @@ def _locked_publish(mirrors, run_id, out_path, backups, published,
                     os.remove(bak)
                 except FileNotFoundError:
                     pass
+        # ---- 事务已提交（kimi3 1404）：置 committed 标记，使锁释放后
+        #      main() 的报告型 I/O 失败（stdout broken pipe 等）不会被
+        #      误判为发布阶段失败而回滚/删除已发布产物与 generation ----
+        rollback_state["committed"] = True
     finally:
         try:
             fcntl.flock(fd, fcntl.LOCK_UN)
@@ -497,7 +501,11 @@ def main():
     # E116g（040）：锁内回滚状态（_locked_publish 在锁内完成回滚后置
     # done=True，外层 except 据此跳过重复回滚——锁释放后的二次回滚会
     # 与下一个发布者交错，正是 040 要消除的窗口）
-    rollback_state = {"done": False, "n_restored": 0, "errors": []}
+    # committed（kimi3 1404 审查）：发布事务成功提交后置 True——锁释放
+    # 后的 print 等报告型 I/O 失败（如 stdout broken pipe）不得回滚已
+    # 发布产物、不得删除 generation 目录
+    rollback_state = {"done": False, "committed": False,
+                      "n_restored": 0, "errors": []}
 
     extra_params = {}
     for kv in args.extra_param:
@@ -713,7 +721,12 @@ def main():
         # 发布者交错（正是 040 的竞态窗口），此处跳过；未进锁即失败的
         # 路径（staging/scorer/generation rename）published 为空，回滚
         # 天然为 no-op
-        if rollback_state["done"]:
+        # kimi3（1404）：发布事务已成功提交（committed）后发生的报告型
+        # I/O 错误（stdout broken pipe 等）不是发布失败——不回滚、不删
+        # generation，failure receipt 如实记录 publish_committed
+        if rollback_state.get("committed"):
+            rollback_errors = []
+        elif rollback_state["done"]:
             rollback_errors = rollback_state["errors"]
         else:
             rollback_errors = []
@@ -756,10 +769,16 @@ def main():
                 "error": msg,
                 "argv": sys.argv[1:],
                 "publish_protocol": "e116f-generation-v2",
+                # kimi3（1404）：committed=True 表示发布事务已原子完成，
+                # 本 failure receipt 记录的是发布后的报告型错误而非发布
+                # 失败——产物与 generation 均已保留，消费以 receipt 为准
+                "publish_committed": bool(rollback_state.get("committed")),
                 "rollback": {
-                    "attempted": bool(published),
+                    "attempted": bool(published) and
+                    not rollback_state.get("committed"),
                     "n_restored": (
-                        rollback_state["n_restored"]
+                        0 if rollback_state.get("committed")
+                        else rollback_state["n_restored"]
                         if rollback_state["done"]
                         else len(published) - len(rollback_errors)),
                     "errors": rollback_errors,
@@ -767,18 +786,32 @@ def main():
                     # 安装段失败）；False = 未进锁即失败（无镜像被触碰）
                     "in_publish_lock": rollback_state["done"],
                 },
-                "note": ("本轮失败，未发布任何产物（发布阶段失败时已回滚"
-                         "全部已替换的公开镜像至旧代际）；输出路径下既有"
-                         "产物（如有）属于上一轮成功运行，请以最新 "
-                         "*.receipt.json 为准"),
+                "note": (
+                    "发布事务已原子提交（generation + 四兼容镜像在位），"
+                    "本 failure 记录的是发布后的报告阶段错误（如 stdout "
+                    "broken pipe）——产物已保留，请以最新 *.receipt.json "
+                    "为准"
+                    if rollback_state.get("committed") else
+                    "本轮失败，未发布任何产物（发布阶段失败时已回滚"
+                    "全部已替换的公开镜像至旧代际）；输出路径下既有"
+                    "产物（如有）属于上一轮成功运行，请以最新 "
+                    "*.receipt.json 为准"),
                 "staging_cleaned": True,
-                "generation_cleaned": True,
+                "generation_cleaned": not bool(
+                    rollback_state.get("committed")),
             }, open(fpath, "w"), indent=1, ensure_ascii=False)
             print(f"[formal] failure receipt 落盘: {fpath}", file=sys.stderr)
         except OSError:
             pass
         shutil.rmtree(staging, ignore_errors=True)
-        shutil.rmtree(run_dir, ignore_errors=True)   # 未提交 generation 清理
+        # kimi3（1404）：committed 后 run_dir 是 receipt 的 derived_dir
+        # 单指针目标（补刻副本/scorer manifest），不得删除
+        if not rollback_state.get("committed"):
+            shutil.rmtree(run_dir, ignore_errors=True)
+        if rollback_state.get("committed"):
+            # 发布已成功，报告型错误不影响发布有效性——rc=0（failure
+            # receipt 仍落盘备查）
+            sys.exit(0)
         if isinstance(e, SystemExit):
             code = e.code if isinstance(e.code, int) and e.code != 0 else 1
         else:
