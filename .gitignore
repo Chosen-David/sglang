@@ -176,8 +176,6 @@ benchmark/llava_bench/mme_pack
 !two-level-attention/benchmark/RULER/testdata/**/*.jsonl
 # E116h：E119 跨臂测试最小 fixture（全合成数据，4 任务×3 行，048① 干净检出可跑）
 !two-level-attention/exp/trace/testdata/e119_min/**/*.jsonl
-# E116h 049：E119 summary 发布锁文件（运行时产物，不入库）
-two-level-attention/exp/trace/results/*.lock
 tmp*.txt
 /tmp/
 

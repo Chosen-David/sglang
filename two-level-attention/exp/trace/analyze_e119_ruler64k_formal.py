@@ -56,12 +56,12 @@ E116h（GPT 1429 审计 045/046/047）消费者闭包修复：
 E116h（GPT 1531 审计 TL-E119-SUMMARY-ATOMICITY-049）summary 原子发布：
   ⑫ summary 写入不再直接 `open(p_out, "w")` 截断——同目录临时文件完整
      序列化 + flush/fsync + 落盘后重新解析校验必要字段，全部通过才
-     os.replace 原子替换公开路径；发布锁（锁键与 042 同口径
-     realpath(parent)+lexical basename）串行化并发汇总器。任何写入异常
-     （进程被杀/磁盘写满/写中断）只遗留或清理临时文件，上一份
-     last-known-good summary 字节不变；summary 同时保留三臂不可变输入
-     引用（result/manifest/receipt 逐臂 SHA），使 last-writer-wins 的
-     输入代际可审计。
+     os.replace 原子替换公开路径。任何写入异常（进程被杀/磁盘写满/写
+     中断）只遗留或清理临时文件，上一份 last-known-good summary 字节
+     不变；并发执行经 os.replace 保证最终公开文件只能是某一完整代际
+     （last-writer-wins，按 1531 主 AI 判决不另建发布锁），summary 同时
+     保留三臂不可变输入引用（result/manifest/receipt 逐臂 SHA），使
+     后写者的输入代际可审计。
 
 产物：exp/trace/results/e119_ruler64k_formal_summary.json
 用法： python3 exp/trace/analyze_e119_ruler64k_formal.py \
@@ -71,7 +71,6 @@ E116h（GPT 1531 审计 TL-E119-SUMMARY-ATOMICITY-049）summary 原子发布：
      检出可用已入库 fixture 的 pred_root 替代——048① 的路径参数化）。
 """
 import argparse
-import fcntl
 import hashlib
 import json
 import os
@@ -244,21 +243,15 @@ def _bind_generation(arm, p, receipt, results_dir):
 def _publish_summary(p_out, out):
     """⑫（049）：summary 原子发布——同目录临时文件完整序列化 + fsync +
     落盘后重新解析校验必要字段，全部通过才 os.replace 原子替换公开
-    路径；发布锁（锁键与 042 同口径 realpath(parent)+lexical basename）
-    串行化并发汇总器。任何写入异常只遗留或清理临时文件，公开 summary
-    （last-known-good）字节不变。"""
-    lock_path = os.path.join(
-        os.path.dirname(os.path.realpath(p_out)),
-        os.path.basename(p_out) + ".lock")
-    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    路径。任何写入异常（进程被杀/磁盘写满/写中断）只遗留或清理临时
+    文件，公开 summary（last-known-good）字节不变。并发执行经 os.replace
+    保证最终公开文件只能是某一完整代际（last-writer-wins，输入代际经
+    summary.inputs 逐臂 SHA 可审计）——按 1531 主 AI 判决不另建发布锁。"""
+    if os.path.islink(p_out):
+        _fail(f"summary 目标 {p_out} 是符号链接——fail closed"
+              f"（049：发布路径不接受 symlink 别名）")
     p_tmp = None
     try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
-        # 042 同款教训：获锁后复核公开路径非 symlink——锁键 canonicalization
-        # 与安装目标必须同一口径，否则首替换后锁键漂移
-        if os.path.islink(p_out):
-            _fail(f"summary 目标 {p_out} 是符号链接——fail closed"
-                  f"（049：锁键与安装路径须同一 canonicalization）")
         p_tmp = f"{p_out}.tmp-{os.getpid()}"
         with open(p_tmp, "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
@@ -289,10 +282,6 @@ def _publish_summary(p_out, out):
                 os.remove(p_tmp)
             except OSError:
                 pass
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        finally:
-            os.close(lock_fd)
 
 
 def main():

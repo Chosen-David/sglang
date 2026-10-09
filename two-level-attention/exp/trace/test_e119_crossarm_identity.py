@@ -38,9 +38,9 @@ E116h 049（GPT 1531 审计 TL-E119-SUMMARY-ATOMICITY-049）summary 原子发布
   N9a 写中断   注入 json.dump 写出 '{"partial":' 前缀后抛 OSError →
                非零退出、旧 summary SHA 逐位不变且仍可解析、无 .tmp
                残留（修复前 open(p_out,"w") 直接截断毁掉 last-known-good）；
-  N9b 并发发布 双汇总器（一慢速持锁写、一正常）并发写同一 summary →
+  N9b 并发发布 双汇总器（一慢速写、一正常）并发写同一 summary →
                两进程均成功，最终文件为某一完整代际（与单跑逐字节
-               一致），无混写/截断/临时残留；
+               一致，last-writer-wins），无混写/截断/临时残留；
   O2 python -O N9a 同款写中断在 python -O 下重跑 → 仍非零退出且旧
                summary 逐位不变（原子发布不依赖 assert）。
 
@@ -454,7 +454,7 @@ def test_N9_summary_atomic(base):
     assert open(sp, "rb").read() == expected, \
         "N9b: 并发发布后 summary 不是任一完整代际（混写/截断）"
     _assert_no_tmp(base)
-    print("  N9b(并发发布) PASS  双汇总器并发（4s/0.5s 持锁写）均成功，"
+    print("  N9b(并发发布) PASS  双汇总器并发（4s/0.5s 慢写）均成功，"
           "最终文件与单跑逐字节一致，无混写/截断/临时残留")
 
 
