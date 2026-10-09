@@ -27,6 +27,29 @@
 #       副本（成功后保留在 {out}.run-{run_id}/ 版本化派生目录）；receipt 记录
 #       source_sha256 → derived_sha256 与逐字段不变量断言（pred/answers/
 #       length/budget 逐位不变）；失败保留源文件原样。
+# ===== E116f（GPT 1228 审计 038/039 两项 P1 修复，发布事务重构）=====
+#   TL-RULER-PUBLISH-ATOMICITY-038（四个公开文件逐个 os.replace 不是跨
+#       文件事务 + except 只捕 SystemExit，中途失败留下混合代际）→
+#       重构为「generation 目录 + 单指针提交」协议：result/md/manifest/
+#       receipt 四个规范文件连同派生副本全部留在同一不可变 generation
+#       （{out}.run-{run_id}/，即原 staging 整目录）内，fsync 后用一次
+#       原子 os.rename 落位；四个公开固定路径（{out}/{out 去后缀}.md/
+#       {out}.manifest.json/{out}.receipt.json）降级为兼容镜像，逐个经
+#       「在目标文件系统写临时文件 + 原子替换」安装（临时文件与目标同
+#       目录必然同设备，跨设备 --manifest-out 的 EXDEV 路径天然不可达，
+#       且安装前做 st_dev 防御断言）；receipt 镜像最后落盘 = 唯一提交
+#       信号；发布段任一步 OSError → 从备份回滚已替换镜像（旧产物逐位
+#       还原；首轮无旧产物则删除新镜像）+ failure receipt + 清理
+#       generation——「旧 receipt 配新结果」的混合代际状态不可达；
+#   TL-RULER-DERIVED-COMMIT-039（success receipt 公开早于 derived_dir
+#       存在）→ generation rename 前置于一切公开发布，receipt 声明的
+#       derived_dir 在 receipt 发布前必须已存在并通过四规范文件 SHA
+#       与 receipt 声明值的逐位校验；
+#   except 范围扩大为 (SystemExit, OSError)；
+#   receipt 新增 publish_protocol="e116f-generation-v2" 版本字段与
+#   outputs.generation_files（消费者可从 receipt 单指针解析同一
+#   generation 内的全部文件）；旧格式四件套（32K/64K 已发布产物）仍
+#   按原路径直接可读，读取兼容不受影响。
 # 用法（单臂单 root）：
 #   python -u benchmark/RULER/score_ruler_formal.py \
 #     --root exp/results_ruler/e109_full_Qwen3-8B/L32768 \
@@ -70,6 +93,75 @@ INVARIANT_FIELDS = ("pred", "answers", "length", "budget")
 
 def _fail(msg):
     raise SystemExit(f"[GATE-FAIL] {msg}")
+
+
+# ---- E116f：generation + 单指针发布协议辅助 ----
+
+def _fsync_file(path):
+    """best-effort 文件落盘（发布协议的持久化边界；平台不支持时静默）"""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def _fsync_dir(path):
+    """best-effort 目录项落盘（保证 rename/replace 后目录项可见）"""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def _backup_public(dst, run_id):
+    """E116f（038）：替换公开镜像前先备份旧代际。
+    优先硬链接（同目录必然同设备、零拷贝、保旧 inode），不支持时回退
+    拷贝。旧产物不存在（首轮）→ 返回 None（回滚语义=删除新镜像）。
+    备份路径 {dst}.bak-{run_id} 与目标同目录 → 回滚 os.replace 原子。"""
+    if not os.path.exists(dst):
+        return None
+    bak = f"{dst}.bak-{run_id}"
+    try:
+        os.link(dst, bak)
+    except OSError:
+        shutil.copyfile(dst, bak)
+    return bak
+
+
+def _atomic_install(src, dst, run_id):
+    """E116f（038）：把 generation 内规范文件安装到公开固定路径。
+    直接 os.replace(src→dst) 在 --manifest-out 指向另一挂载点时抛
+    EXDEV（审计 038 的复现路径）——统一改为「在目标文件系统写临时
+    文件 + 原子替换」：临时文件与目标同目录（必然同设备），安装前做
+    st_dev 防御断言（fail-closed），替换瞬间原子。失败时自清理临时
+    文件后向上抛 OSError（由发布段统一回滚）。"""
+    d = os.path.dirname(dst)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    tmp = f"{dst}.tmp-{run_id}"
+    try:
+        shutil.copyfile(src, tmp)
+        _fsync_file(tmp)
+        # st_dev 防御校验（审计建议 2：跨设备须走目标文件系统临时文件；
+        # tmp 与 dst 同目录理论上必同设备——不等则 fail closed 不安装）
+        if os.stat(tmp).st_dev != os.stat(d or ".").st_dev:
+            raise OSError(f"临时文件 {tmp} 与目标 {dst} 跨设备"
+                          f"（st_dev 不等，理论不可达）——fail closed")
+        os.replace(tmp, dst)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _stamp_or_copy(src, dst, task, stamp):
@@ -303,7 +395,13 @@ def main():
     # staging/run_dir 绝对化：scorer 子进程以 cwd=REPO 运行，相对路径会
     # 相对 REPO 解析而非调用者 cwd——统一用绝对路径消除歧义
     staging = os.path.abspath(f"{args.out}.staging-{run_id}")
-    run_dir = os.path.abspath(f"{args.out}.run-{run_id}")   # 成功后改名
+    # E116f：run_dir 即不可变 generation 目录（四规范文件 + 派生副本 +
+    # merged 文件同目录共存），staging 校验完成后一次原子 rename 落位
+    run_dir = os.path.abspath(f"{args.out}.run-{run_id}")
+
+    # E116f（038）发布事务状态：在 try 之前定义，失败路径据此回滚
+    backups = {}    # 公开路径 → 备份路径（None = 旧产物不存在/首轮）
+    published = []  # 已成功替换的公开镜像（回滚清单，按替换顺序）
 
     extra_params = {}
     for kv in args.extra_param:
@@ -395,6 +493,9 @@ def main():
             "run_id": run_id,
             "status": "success",
             "generated": datetime.now().isoformat(),
+            # E116f：发布协议版本字段（旧格式 receipt 缺该键 = E116e
+            # 及之前的多文件逐个替换协议）
+            "publish_protocol": "e116f-generation-v2",
             "formal": {"script": "benchmark/RULER/score_ruler_formal.py",
                        "sha256": _file_sha256(FORMAL_PATH)},
             "scorer": {"script": "benchmark/RULER/score_ruler.py",
@@ -410,7 +511,14 @@ def main():
             "outputs": {"json": os.path.abspath(args.out),
                         "md": os.path.abspath(md_path),
                         "manifest": os.path.abspath(manifest_path),
-                        "derived_dir": os.path.abspath(run_dir)},
+                        "derived_dir": os.path.abspath(run_dir),
+                        # 消费者可从 receipt 单指针解析同一 generation
+                        # 内的全部规范文件（不跨固定别名拼装）
+                        "generation_files": {
+                            "json": "result.json",
+                            "md": "result.md",
+                            "manifest": "manifest.json",
+                            "receipt": "receipt.json"}},
             "manifest_sha256": _file_sha256(staged_manifest),
             "result_sha256": _file_sha256(staged_result),
             "source_data_sha256": src_data_sha,
@@ -431,26 +539,115 @@ def main():
         json.dump(receipt, open(staged_receipt, "w"), indent=1,
                   ensure_ascii=False)
 
-        # ---- 031：原子发布（逐文件 os.replace；receipt 最后=提交信号）----
-        for p in (args.out, md_path, manifest_path):
+        # ==== E116f：generation 目录 + 单指针提交发布协议 ====
+        # （修复审计 038/039；CLI 与产物路径完全不变，仅事务语义重构）
+        # ① 预建四个公开目标的父目录（此时尚未触碰任何旧产物）；
+        for p in (args.out, md_path, manifest_path, receipt_path):
             d = os.path.dirname(p)
             if d:
                 os.makedirs(d, exist_ok=True)
-        os.replace(staged_result, args.out)
-        os.replace(staged_md, md_path)
-        os.replace(staged_manifest, manifest_path)
-        os.replace(staged_receipt, receipt_path)
-        os.rename(staging, run_dir)   # 版本化派生目录（补刻副本+merged）
-        print(f"[formal] 发布成功（原子）：{args.out} / {md_path} / "
-              f"{manifest_path} / {receipt_path}")
-        print(f"[formal] 派生目录（含补刻副本+merged 规范文件）: {run_dir}")
+        # ② st_dev 校验：generation rename 的源（staging）与目标
+        #    （run_dir）同父目录必然同设备——防御性 fail-closed（审计
+        #    建议 2 的 rename 对校验；公开镜像的跨设备安全由
+        #    _atomic_install 的目标文件系统临时文件保证）
+        _parent = os.path.dirname(staging) or "."
+        if os.stat(staging).st_dev != os.stat(_parent).st_dev:
+            _fail(f"staging {staging} 与其父目录跨设备（理论不可达）"
+                  f"——generation rename 无法原子，fail closed")
+        # ③ 整个 staging（result/md/manifest/receipt 四规范文件 +
+        #    pred_root 派生副本 + merged 规范文件）fsync 后一次原子
+        #    rename 成不可变 generation——receipt 声明的 derived_dir
+        #    在任何公开文件发布前已存在（修复 039）
+        for p in (staged_result, staged_md, staged_manifest,
+                  staged_receipt):
+            _fsync_file(p)
+        _fsync_dir(staging)
+        os.rename(staging, run_dir)   # 唯一的 rename：generation 提交
+        _fsync_dir(_parent)
+        # ④ generation 完整性校验（receipt 的 derived_dir 必须已存在且
+        #    四规范文件 SHA 与 receipt 声明逐位一致，否则不发布）
+        if not os.path.isdir(run_dir):
+            _fail(f"receipt 声明的 derived_dir 尚不存在: {run_dir}"
+                  f"——不允许发布（039）")
+        gen = {
+            "json": os.path.join(run_dir, "result.json"),
+            "md": os.path.join(run_dir, "result.md"),
+            "manifest": os.path.join(run_dir, "manifest.json"),
+            "receipt": os.path.join(run_dir, "receipt.json"),
+        }
+        for name, p in gen.items():
+            if not os.path.isfile(p):
+                _fail(f"generation 目录缺规范文件 {name}: {p}——不发布")
+        if _file_sha256(gen["manifest"]) != receipt["manifest_sha256"] or \
+                _file_sha256(gen["json"]) != receipt["result_sha256"]:
+            _fail("generation 规范文件 SHA 与 receipt 声明不一致——不发布")
+        # ⑤ 公开固定路径作为兼容镜像逐个安装（JSON → MD → manifest →
+        #    receipt；receipt 镜像最后落盘 = 唯一提交信号）。任一步
+        #    OSError 由 except 统一回滚，混合代际不可达（修复 038）
+        mirrors = [
+            (gen["json"], args.out),
+            (gen["md"], md_path),
+            (gen["manifest"], manifest_path),
+            (gen["receipt"], receipt_path),
+        ]
+        for _, dst in mirrors:
+            backups[dst] = _backup_public(dst, run_id)
+        for src, dst in mirrors:
+            _atomic_install(src, dst, run_id)
+            published.append(dst)
+        # 全部镜像安装成功 → 提交完成，清理备份
+        for dst, bak in backups.items():
+            if bak is not None:
+                try:
+                    os.remove(bak)
+                except FileNotFoundError:
+                    pass
+        print(f"[formal] 发布成功（generation 原子提交 + 兼容镜像）："
+              f"{args.out} / {md_path} / {manifest_path} / {receipt_path}")
+        print(f"[formal] 派生目录（generation，含四规范文件+补刻副本"
+              f"+merged 规范文件）: {run_dir}")
         print(f"DONE {args.out}")
-    except SystemExit as e:
-        # ---- 031/030/036：失败路径——独立 failure receipt + 清理 staging，
-        # 不触碰旧成功产物与源文件 ----
-        msg = str(e.code) if e.code is not None and str(e.code) else \
-            f"exit({e.code})"
+    except (SystemExit, OSError) as e:
+        # ---- 031/030/036/E116f：失败路径——回滚已替换镜像 + 独立 failure
+        # receipt + 清理 staging/generation，不触碰（或逐位还原）旧成功
+        # 产物与源文件 ----
+        if isinstance(e, SystemExit):
+            msg = str(e.code) if e.code is not None and str(e.code) else \
+                f"exit({e.code})"
+        else:
+            msg = f"{type(e).__name__}: {e}"
         print(msg, file=sys.stderr)   # 拒绝原因同时输出到 stderr（可观测）
+        # E116f（038）回滚：published 中的公开镜像已换成新代际 → 从备份
+        # 逐位还原（os.replace，与备份同目录必同设备、原子）；旧产物原本
+        # 不存在（首轮）→ 删除新镜像。回滚后不存在「旧 receipt 配新结果」
+        rollback_errors = []
+        for dst in published:
+            bak = backups.get(dst)
+            try:
+                if bak is None:
+                    try:
+                        os.remove(dst)
+                    except FileNotFoundError:
+                        pass
+                else:
+                    os.replace(bak, dst)
+            except OSError as oe:
+                rollback_errors.append(f"{dst}: {oe}")
+        # 残留备份/临时文件清理（_atomic_install 失败时已自清理 tmp，
+        # 这里对全部公开路径兜底）
+        for dst in backups:
+            bak = backups[dst]
+            if bak is not None and os.path.exists(bak):
+                try:
+                    os.remove(bak)
+                except OSError:
+                    pass
+            tmp = f"{dst}.tmp-{run_id}"
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
         fpath = f"{args.out}.failure-{run_id}.json"
         try:
             d = os.path.dirname(fpath)
@@ -462,16 +659,28 @@ def main():
                 "generated": datetime.now().isoformat(),
                 "error": msg,
                 "argv": sys.argv[1:],
-                "note": ("本轮失败，未发布任何产物；输出路径下既有产物"
-                         "（如有）属于上一轮成功运行，请以最新 "
+                "publish_protocol": "e116f-generation-v2",
+                "rollback": {
+                    "attempted": bool(published),
+                    "n_restored": len(published) - len(rollback_errors),
+                    "errors": rollback_errors,
+                },
+                "note": ("本轮失败，未发布任何产物（发布阶段失败时已回滚"
+                         "全部已替换的公开镜像至旧代际）；输出路径下既有"
+                         "产物（如有）属于上一轮成功运行，请以最新 "
                          "*.receipt.json 为准"),
                 "staging_cleaned": True,
+                "generation_cleaned": True,
             }, open(fpath, "w"), indent=1, ensure_ascii=False)
             print(f"[formal] failure receipt 落盘: {fpath}", file=sys.stderr)
         except OSError:
             pass
         shutil.rmtree(staging, ignore_errors=True)
-        code = e.code if isinstance(e.code, int) and e.code != 0 else 1
+        shutil.rmtree(run_dir, ignore_errors=True)   # 未提交 generation 清理
+        if isinstance(e, SystemExit):
+            code = e.code if isinstance(e.code, int) and e.code != 0 else 1
+        else:
+            code = 1
         sys.exit(code)
 
 

@@ -441,13 +441,28 @@ def run_d9():
             rc = json.load(open(out + ".receipt.json"))
             assert rc["status"] == "success" and len(rc["run_id"]) > 8
             assert len(rc["source_data_sha256"]) == 11
+            # E116f（审计建议 5）：真实数据只读重跑的 generation 闭合——
+            # receipt 声明 SHA ↔ 公开镜像 ↔ generation 目录规范文件三方
+            # 逐位一致 + 发布协议版本字段
+            assert rc["publish_protocol"] == "e116f-generation-v2", \
+                (tag, rc.get("publish_protocol"))
+            assert rc["result_sha256"] == _sha(out) and \
+                rc["manifest_sha256"] == _sha(out + ".manifest.json")
+            g = rc["outputs"]["derived_dir"]
+            assert os.path.isdir(g)
+            assert _sha(os.path.join(g, "result.json")) == _sha(out) and \
+                _sha(os.path.join(g, "manifest.json")) == \
+                _sha(out + ".manifest.json") and \
+                _sha(os.path.join(g, "receipt.json")) == \
+                _sha(out + ".receipt.json"), (tag, "generation 不闭合")
         assert avgs == {"FULLKV": 59.38, "mavg": 59.99, "aavg": 57.33}, avgs
         after = {f: _sha(f) for f in prod_files}
         assert before == after, "生产 pred 文件哈希前后不一致（036 回归）"
         print(f"D9 PASS  三臂真实 32K 生产数据直接走新正式入口（只读）："
               f"AVG FULLKV={avgs['FULLKV']} / mavg={avgs['mavg']} / "
               f"aavg={avgs['aavg']}（与历史逐位一致）；生产 pred 文件哈希"
-              f"前后不变（{len(prod_files)} 个文件）")
+              f"前后不变（{len(prod_files)} 个文件）；receipt↔镜像↔"
+              f"generation 三方 SHA 闭合 + publish_protocol=e116f")
         return 0
     finally:
         shutil.rmtree(base, ignore_errors=True)
