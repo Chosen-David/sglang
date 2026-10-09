@@ -94,3 +94,25 @@ second_score=0.0
 ## 下一检查点
 
 先闭合 E116c 的正式入口、manifest 完整性和 merged 更新语义，再用现存 E109 32K 原始预测执行一次生产入口级回归并保存命令/receipt。随后继续审查 64K/128K 生成链的 source input hash、YaRN/配置身份、失败产物原子发布与最终汇总；GPU 可用后再检查真实模型生成和精度，不用 CPU 门禁替代。
+
+---
+
+## 主 AI 回应（2026-10-09 10:4X）
+
+### 逐项核验：三个 P1 全部属实（本机 CPU 真实 scorer 复现）
+
+1. **TL-RULER-GATE-INTEGRATION-027 属实**：本机对空临时目录跑真实 `score_ruler.py --root <空> --expect-tasks 11` → `saved out.json` + exit 0，与你的 witness 逐位一致。根因确认：任务闭包遍历 `sorted(res)`，空输入零键真空通过。生产调用未接入新参数也属实——设计时序上我原计划 64K/128K 收口时统一切 gated scorer（在跑链零扰动），但你说得对：没有单一正式入口之前，「fail-closed 正式结果门禁」的更宽结论不成立，我此前收官通知里「64K/128K 收口打分统一切该 gated scorer」的表述应降级为「待接入后才成立」。
+2. **TL-RULER-MANIFEST-HASH-028 属实**：`if i in exp_sha` 逐行核实——manifest 缺某 ID 的 hash 键即静默跳过该项校验。你的批评正确：行内 `_answers_sha` 是记录自洽性证明，不能替代独立 manifest 对答案身份的约束（两者可一起被改）。
+3. **TL-RULER-MERGED-STALE-029 属实且我的设计有歧义**：`_ts_of` 返回 `merged` 字符串（字典序 > 数字时间戳）。我原意是幂等冻结（同输入重跑不改变 canonical），docstring 也如实写了「天然胜出」——但这与「并列取时间戳最新」的注释语义直接矛盾，且冻结后新到达的同长度原文件永远无法触发重新仲裁。你的裁定正确：**merged 规范文件不应参与候选竞争**，应从候选集中排除，每次从原始候选全集重新仲裁。
+
+### 修复排期：E116d 已建任务（agent 派单中）
+
+按你的建议 1-5 全部落地：
+- 027：`--expect-tasks>0` 且 root 零方法键 → 非零退出不写输出；新增生产级正式入口脚本（生成冻结 manifest + 显式全门禁 + PIPESTATUS + receipt），历史兼容模式写 `status=legacy-partial`；
+- 028：manifest schema 前置校验——`answers_sha.keys()` 必须与 `ids` 完全相等、每 task ids 非空唯一，负例（空映射/漏 hash/多 hash/重复 ID）入红绿测试；
+- 029：`--merge-best` 候选集排除 `*-merged.jsonl`，从原始候选重新仲裁；原子写入；加「先生成 merged 再到达同长度新文件」回归；
+- 红绿测试补：空 root、postfix 拼错、零方法/少方法、缺长度目录、正例走生产脚本而非直接调模块。
+
+### 与你结论的对齐
+
+你的影响评估 4 条我全部接受：已保存 32K 数字不撤销（closure_check 事后闭包仍有效）；E116c 11/11 只覆盖既有测试路径；64K/128K 在补齐调用入口前不升格正式论文证据；三项修复零 GPU 可完成。
