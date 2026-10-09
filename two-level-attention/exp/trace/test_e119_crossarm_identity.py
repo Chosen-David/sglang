@@ -65,6 +65,23 @@ v2 必需角色未强制 + 读值与核验哈希未绑定同一快照）：
                新哈希）；post_swap 控制组（完整切换先于消费）必须以
                新值+新哈希一致通过（拒收只针对交错，不拒绝合法更新）。
 
+E116j 052（GPT 2026-10-10 0125 审计 TL-E119-GEN-BINDING-052：
+generation md/receipt 内容未哈希绑定——v2 对 md/receipt 只做存在性
+检查，注释却宣称「四规范文件 SHA 逐位闭合」）：
+  P4 v3 正例   三臂 receipt 升级为 e116i-generation-v3（entry receipt
+               绑 gen_md_sha256/gen_receipt_sha256）→ 汇总通过且数值
+               不变，closure.gen_content_bound 四角色全 true；
+  N12 v3 md    v3 篡改 generation 内 result.md 内容 → fail-closed
+               拒收（052 内容绑定），旧 summary 逐位不变（修复前
+               exit=0 假闭合）；子例 b python -O 重跑；
+  N13 v3 rcpt  v3 篡改 generation 内 receipt.json 内容 → fail-closed
+               拒收，旧 summary 逐位不变；子例 b python -O 重跑；
+  P5 v2 部分   v2（当前生产协议）篡改 generation 内 result.md /
+               receipt.json → 汇总通过（v2 存在性检查确实抓不到，
+               属协议能力边界），但 summary 必须如实标注
+               closure.gen_content_bound 的 md/receipt=false——不得
+               冒充四角色全绑定（修复前注释过度宣称）。
+
 所有负例还断言「不覆盖旧 summary」：失败运行前放置哨兵 summary 文件，
 失败后内容逐位不变。
 
@@ -366,6 +383,11 @@ def test_P1_positive(base):
     assert "mavg（vs FullKV +5.00）居首" in s["verdict"]["conclusion"]
     assert "aavg（-5.00）居末" in s["verdict"]["conclusion"]
     assert "方向一致" in s["verdict"]["conclusion"]
+    # 052（E116j）：legacy 协议 generation 内容绑定如实标注——md/receipt
+    # 在 legacy 下完全未检查，不得冒充四角色全绑定
+    assert s["closure"]["gen_content_bound"] == \
+        {"json": True, "manifest": True, "md": False, "receipt": False}, \
+        s["closure"]
     print("P1 PASS  fixture 三臂 → 汇总通过；arms 40.0/35.0/30.0；"
           "arm 契约逐臂记录且与 treatment 相等；三臂 legacy_protocol "
           "如实标注；结论从结构化 ranking 动态生成")
@@ -652,6 +674,11 @@ def test_P3_v2_positive(base):
             (arm, proto)
         assert s["arms"][arm]["legacy_protocol"] is False, s["arms"]
     assert s["closure"]["publish_protocol_bound"] is True
+    # 052（E116j）：v2 只内容绑定 json/manifest，md/receipt 仅存在性
+    # 检查——summary 如实标注，不得冒充四角色全绑定
+    assert s["closure"]["gen_content_bound"] == \
+        {"json": True, "manifest": True, "md": False, "receipt": False}, \
+        s["closure"]
     print("P3 PASS  v2 协议三臂 → 单指针解析全过，数值 40.0/35.0/30.0 "
           "不变；publish_protocol/derived_dir 逐臂闭合，legacy 标注为 "
           "false")
@@ -731,6 +758,139 @@ def test_N11_read_swap(base):
           "一致通过——拒收只针对交错，不拒绝合法代际更新")
 
 
+# ==== E116j 052 红绿用例（generation md/receipt 内容哈希绑定） ====
+
+def _to_v3(base):
+    """三臂 receipt 升级为 e116i-generation-v3（E116j 052）：在 v2 结构上，
+    entry receipt（公开 {out}.receipt.json）追加绑定 generation 的
+    result.md/receipt.json 内容哈希（gen_md_sha256/gen_receipt_sha256）。
+    gen receipt 先落盘（不含 entry-only 字段），entry receipt 再对其取
+    哈希写公开 receipt——两文件互异、无自哈希，与生产 v3 产物同构。"""
+    for arm in ("mavg", "FullKV", "aavg"):
+        p = _result_path(base, arm)
+        rp = p + ".receipt.json"
+        r = json.load(open(rp))
+        gen = p + ".run-" + r["run_id"]
+        shutil.copyfile(p, os.path.join(gen, "result.json"))
+        shutil.copyfile(p + ".manifest.json",
+                        os.path.join(gen, "manifest.json"))
+        with open(os.path.join(gen, "result.md"), "w") as f:
+            f.write("synthetic v3 generation\n")
+        r["publish_protocol"] = "e116i-generation-v3"
+        r["outputs"]["derived_dir"] = gen
+        r["outputs"]["generation_files"] = {
+            "json": "result.json", "md": "result.md",
+            "manifest": "manifest.json", "receipt": "receipt.json"}
+        json.dump(r, open(os.path.join(gen, "receipt.json"), "w"),
+                  indent=1, ensure_ascii=False)
+        r["gen_md_sha256"] = _sha(os.path.join(gen, "result.md"))
+        r["gen_receipt_sha256"] = _sha(os.path.join(gen, "receipt.json"))
+        json.dump(r, open(rp, "w"), indent=1, ensure_ascii=False)
+
+
+def test_P4_v3_positive(base):
+    """P4（052 绿）：三臂升级为 e116i-generation-v3 → v3 消费路径全过：
+    数值与 P1 相同，closure.gen_content_bound 四角色全 true（md/receipt
+    由 entry receipt 内容绑定，不再是仅存在性检查）。"""
+    _to_v3(base)
+    r = _run(base)
+    assert r.returncode == 0, (r.returncode, r.stdout[-1200:],
+                               r.stderr[-800:])
+    s = json.load(open(os.path.join(base, "results", SUMMARY)))
+    assert {a: v["avg"] for a, v in s["arms"].items()} == FIXTURE_AVG, \
+        s["arms"]
+    ig = s["identity_gate"]
+    for arm in ("mavg", "FullKV", "aavg"):
+        proto = ig["per_arm_receipt_protocol"][arm]
+        assert proto["publish_protocol"] == "e116i-generation-v3", \
+            (arm, proto)
+        assert proto["legacy_protocol"] is False, (arm, proto)
+    assert s["closure"]["gen_content_bound"] == \
+        {"json": True, "manifest": True, "md": True, "receipt": True}, \
+        s["closure"]
+    print("P4 PASS  v3 协议三臂 → entry receipt 内容绑定（gen_md/"
+          "gen_receipt SHA256）全过，数值 40.0/35.0/30.0 不变；"
+          "gen_content_bound 四角色全 true")
+
+
+def test_N12_v3_tamper_gen_md(base):
+    """N12（052 红）：v3 篡改 generation 内 result.md 内容 → fail-closed
+    拒收，旧 summary 逐位不变。修复前 md 只有存在性检查——篡改后 exit=0
+    照常汇总，注释宣称的「四规范文件 SHA 逐位闭合」是假闭合。
+    a=常解释器拒收；b=python -O 拒收（052 门禁为显式条件 + _fail）。"""
+    _to_v3(base)
+    r = json.load(open(_receipt_path(base, "mavg")))
+    gen = r["outputs"]["derived_dir"]
+    with open(os.path.join(gen, "result.md"), "a") as f:
+        f.write("tampered-after-bind\n")
+    _expect_reject(base, "N12a(v3 篡改 gen result.md)",
+                   needle="052 内容绑定")
+    # 子例 b：python -O 重跑（门禁不依赖 assert）
+    base_b = os.path.join(os.path.dirname(base), "fx_N12b")
+    os.makedirs(base_b)
+    _copy_fixture(base_b, _FIXTURE)
+    _to_v3(base_b)
+    r = json.load(open(_receipt_path(base_b, "mavg")))
+    gen = r["outputs"]["derived_dir"]
+    with open(os.path.join(gen, "result.md"), "a") as f:
+        f.write("tampered-after-bind\n")
+    _expect_reject(base_b, "N12b(python -O v3 篡改 gen result.md)",
+                   opt_o=True, needle="052 内容绑定")
+
+
+def test_N13_v3_tamper_gen_receipt(base):
+    """N13（052 红）：v3 篡改 generation 内 receipt.json 内容 →
+    fail-closed 拒收（gen_receipt_sha256 内容绑定），旧 summary 逐位
+    不变。a=常解释器拒收；b=python -O 拒收。"""
+    _to_v3(base)
+    r = json.load(open(_receipt_path(base, "mavg")))
+    gen = r["outputs"]["derived_dir"]
+    with open(os.path.join(gen, "receipt.json"), "a") as f:
+        f.write("\n")
+    _expect_reject(base, "N13a(v3 篡改 gen receipt.json)",
+                   needle="052 内容绑定")
+    # 子例 b：python -O 重跑（门禁不依赖 assert）
+    base_b = os.path.join(os.path.dirname(base), "fx_N13b")
+    os.makedirs(base_b)
+    _copy_fixture(base_b, _FIXTURE)
+    _to_v3(base_b)
+    r = json.load(open(_receipt_path(base_b, "mavg")))
+    gen = r["outputs"]["derived_dir"]
+    with open(os.path.join(gen, "receipt.json"), "a") as f:
+        f.write("\n")
+    _expect_reject(base_b, "N13b(python -O v3 篡改 gen receipt.json)",
+                   opt_o=True, needle="052 内容绑定")
+
+
+def test_P5_v2_tamper_md_partial_binding(base):
+    """P5（052 如实标注）：v2（当前生产协议）篡改 generation 内
+    result.md / receipt.json → 汇总通过（v2 对 md/receipt 确实只有
+    存在性检查，篡改抓不到属协议能力边界、非本修复可在消费侧弥补），
+    但 summary 必须如实标注 closure.gen_content_bound 的 md/receipt
+    =false——不得冒充「四角色内容全绑定」（修复前注释过度宣称）。"""
+    _to_v2(base)
+    r = json.load(open(_receipt_path(base, "mavg")))
+    gen = r["outputs"]["derived_dir"]
+    with open(os.path.join(gen, "result.md"), "a") as f:
+        f.write("v2-tamper-existence-only\n")
+    with open(os.path.join(gen, "receipt.json"), "a") as f:
+        f.write("\n")
+    rr = _run(base)
+    assert rr.returncode == 0, ("P5: v2 篡改 md/receipt 被拒（应通过并"
+                               "如实标注部分绑定）", rr.stderr[-800:])
+    s = json.load(open(os.path.join(base, "results", SUMMARY)))
+    cb = s["closure"]["gen_content_bound"]
+    assert cb == {"json": True, "manifest": True, "md": False,
+                  "receipt": False}, cb
+    # 篡改内容确实留在盘上（证明 v2 确实没有 md 内容绑定，而非被
+    # 某条未预期路径改回/重生成）
+    assert "v2-tamper-existence-only" in \
+        open(os.path.join(gen, "result.md")).read()
+    print("P5 PASS  v2 篡改 gen md/receipt → 汇总照常通过（存在性检查"
+          "抓不到，协议能力边界），但 summary 如实标注 "
+          "gen_content_bound.md/receipt=false，不冒充全绑定")
+
+
 def main():
     global PASS, _FIXTURE
     root_tmp = tempfile.mkdtemp(prefix="e119_ident_")
@@ -756,6 +916,10 @@ def main():
             ("P3", test_P3_v2_positive),
             ("N10", test_N10_v2_missing_roles),
             ("N11", test_N11_read_swap),
+            ("P4", test_P4_v3_positive),
+            ("N12", test_N12_v3_tamper_gen_md),
+            ("N13", test_N13_v3_tamper_gen_receipt),
+            ("P5", test_P5_v2_tamper_md_partial_binding),
         ]
         for tag, fn in cases:
             base = os.path.join(root_tmp, f"fx_{tag}")
@@ -765,7 +929,7 @@ def main():
             PASS += 1
     finally:
         shutil.rmtree(root_tmp, ignore_errors=True)
-    print(f"\nE119 crossarm identity ALL PASS ({PASS}/16) [tier={TIER}]")
+    print(f"\nE119 crossarm identity ALL PASS ({PASS}/20) [tier={TIER}]")
 
 
 if __name__ == "__main__":

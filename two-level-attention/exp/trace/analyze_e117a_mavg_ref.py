@@ -24,8 +24,16 @@
 #   「CHAMP_REF 三元组不变——这次它才真正是 mavg 参照」，此时 G* 与
 #   CHAMP_REF 重合，E_champ_ref_cal == E_gstar_cal，符合「相同则合并」）。
 #
-# 运行后自动读 v1（avg/avg）结果做新旧口径对比，注入
-#   e117a_mavg_ref.json 的 "comparison_with_avg_avg_v1" 字段。
+# 运行后自动读 v1（avg/avg）结果做新旧口径对比，注入本次输出 JSON 的
+#   "comparison_with_avg_avg_v1" 字段。
+#
+# 053（GPT 2026-10-10 0125 审计 TL-E117A-OUT-BINDING-053）：显式输出与
+#   后处理目标分叉——修复前 main() 用 out_default(argv)（只区分
+#   --dry-run）定位注入目标，丢弃用户显式 --out PATH / --out=PATH，
+#   comparison 元数据注入默认路径而用户输出无注入。修复：从
+#   inject_defaults 返回后的 argv 解析出唯一 resolved output path
+#   （注入后必含 --out，两种形式都解析），base.main() 写盘与
+#   attach_comparison 注入用同一值（见 resolve_out_path）。
 #
 # 纯 CPU 零 GPU（与 GPU 主链零冲突）。
 #
@@ -148,6 +156,30 @@ def inject_defaults(argv):
     return out
 
 
+def resolve_out_path(argv):
+    """053：解析（注入默认后的）argv 的唯一 resolved 输出路径。
+
+    --out PATH 与 --out=PATH 两种形式都解析；多次出现取最后一个（与
+    argparse 后值覆盖语义一致）。inject_defaults 返回后 argv 必含
+    --out——base.main() 的写盘目标与 attach_comparison 的注入目标必须
+    取同一值。修复前 main() 用 out_default(argv) 重新推导（只区分
+    --dry-run），用户显式 --out 被丢弃 → comparison 注入错文件
+    （默认路径有旧文件时被误改）或静默丢失（默认路径不存在时
+    attach_comparison 直接 return）。"""
+    out = None
+    for i, a in enumerate(argv):
+        if a == "--out":
+            if i + 1 >= len(argv):
+                raise SystemExit("resolve_out_path: --out 位于 argv 末尾缺值")
+            out = argv[i + 1]
+        elif a.startswith("--out="):
+            out = a[len("--out="):]
+    if out is None:
+        raise SystemExit("resolve_out_path: argv 缺 --out"
+                         "（inject_defaults 注入后不可达）")
+    return out
+
+
 def attach_comparison(out_path):
     """读 v1（avg/avg）与本次 mavg 回放，生成新旧口径对比注入结果 JSON。"""
     if not os.path.isfile(V1_PATH):
@@ -219,6 +251,10 @@ def attach_comparison(out_path):
 def main():
     argv = inject_defaults(sys.argv[1:])
     sys.argv = [sys.argv[0]] + argv
+    # 053：显式 --out / 默认注入走同一解析——base.main() 写盘目标与
+    # attach_comparison 注入目标必须是同一个文件（修复前 attach 用
+    # out_default(argv) 丢弃用户显式 --out，注入错文件或静默丢失）
+    out_path = resolve_out_path(argv)
     # patch 红绿自检先行（失败即退出，不进入长跑）
     global PATCH_SELFCHECK
     PATCH_SELFCHECK = patch_selfcheck()
@@ -232,7 +268,7 @@ def main():
     except SystemExit as e:
         rc = e.code if isinstance(e.code, int) else 0
     # 无论判决如何都注入对比（自检失败 rc≠0 也保留现场供审计）
-    attach_comparison(out_default(argv))
+    attach_comparison(out_path)
     if rc:
         sys.exit(rc)
 

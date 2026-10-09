@@ -441,10 +441,14 @@ def run_d9():
             rc = json.load(open(out + ".receipt.json"))
             assert rc["status"] == "success" and len(rc["run_id"]) > 8
             assert len(rc["source_data_sha256"]) == 11
-            # E116f（审计建议 5）：真实数据只读重跑的 generation 闭合——
-            # receipt 声明 SHA ↔ 公开镜像 ↔ generation 目录规范文件三方
-            # 逐位一致 + 发布协议版本字段
-            assert rc["publish_protocol"] == "e116f-generation-v2", \
+            # E116f（审计建议 5）+ E116j（052）：真实数据只读重跑的
+            # generation 闭合——receipt 声明 SHA ↔ 公开镜像 ↔ generation
+            # 目录规范文件三方逐位一致 + 发布协议版本字段。v3（E116j）：
+            # 公开 receipt = entry receipt（含 gen_md_sha256/
+            # gen_receipt_sha256），与 generation 内 receipt.json 是两个
+            # 不同文件——公开 receipt 逐位等于 generation 的
+            # entry_receipt.json，且两内容哈希与 generation 实际文件闭合
+            assert rc["publish_protocol"] == "e116i-generation-v3", \
                 (tag, rc.get("publish_protocol"))
             assert rc["result_sha256"] == _sha(out) and \
                 rc["manifest_sha256"] == _sha(out + ".manifest.json")
@@ -453,8 +457,13 @@ def run_d9():
             assert _sha(os.path.join(g, "result.json")) == _sha(out) and \
                 _sha(os.path.join(g, "manifest.json")) == \
                 _sha(out + ".manifest.json") and \
-                _sha(os.path.join(g, "receipt.json")) == \
+                _sha(os.path.join(g, "entry_receipt.json")) == \
                 _sha(out + ".receipt.json"), (tag, "generation 不闭合")
+            assert rc["gen_md_sha256"] == \
+                _sha(os.path.join(g, "result.md")) and \
+                rc["gen_receipt_sha256"] == \
+                _sha(os.path.join(g, "receipt.json")), \
+                (tag, "052 内容绑定不闭合")
         assert avgs == {"FULLKV": 59.38, "mavg": 59.99, "aavg": 57.33}, avgs
         after = {f: _sha(f) for f in prod_files}
         assert before == after, "生产 pred 文件哈希前后不一致（036 回归）"
@@ -462,7 +471,8 @@ def run_d9():
               f"AVG FULLKV={avgs['FULLKV']} / mavg={avgs['mavg']} / "
               f"aavg={avgs['aavg']}（与历史逐位一致）；生产 pred 文件哈希"
               f"前后不变（{len(prod_files)} 个文件）；receipt↔镜像↔"
-              f"generation 三方 SHA 闭合 + publish_protocol=e116f")
+              f"generation 三方 SHA 闭合 + 052 内容绑定（publish_protocol="
+              f"e116i-generation-v3）")
         return 0
     finally:
         shutil.rmtree(base, ignore_errors=True)

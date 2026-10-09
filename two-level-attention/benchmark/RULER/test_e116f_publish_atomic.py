@@ -716,8 +716,20 @@ def test_T1_replace_injection(base):
     old_rc = json.load(open(out + ".receipt.json"))
     old_runs = glob.glob(out + ".run-*")
     assert len(old_runs) == 1, old_runs
-    assert old_rc["publish_protocol"] == "e116f-generation-v2"
-    assert os.path.isdir(old_rc["outputs"]["derived_dir"])
+    # E116j（052）：生产协议已升 e116i-generation-v3——公开 receipt 为
+    # entry receipt（含 gen_md_sha256/gen_receipt_sha256 两内容绑定字段，
+    # 与 generation 内 receipt.json 是两个不同文件），且与 generation 内
+    # entry_receipt.json 逐位一致
+    assert old_rc["publish_protocol"] == "e116i-generation-v3", old_rc
+    _g0 = old_rc["outputs"]["derived_dir"]
+    assert os.path.isdir(_g0)
+    assert old_rc["gen_md_sha256"] == \
+        _sha(os.path.join(_g0, "result.md")) and \
+        old_rc["gen_receipt_sha256"] == \
+        _sha(os.path.join(_g0, "receipt.json")), \
+        "052 generation 内容绑定声明与实际文件不闭合"
+    assert _sha(os.path.join(_g0, "entry_receipt.json")) == \
+        _sha(out + ".receipt.json"), "公开 receipt ≠ generation entry receipt"
     # 篡改 vt 行 0 pred → 新旧代际可辨（保证断言「旧 receipt 配新结果」
     # 若发生必被 SHA 比对抓到）
     _tamper_vt_pred(root, "T1")

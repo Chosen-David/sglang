@@ -82,6 +82,16 @@
 #       再做备份清理；清理降级为提交后 best-effort GC（失败只记
 #       rollback_state["gc_pending"] + stderr warning，不回滚、不影响
 #       提交语义；进程后续若落 failure receipt 则 gc_pending 一并记录）。
+# ===== E116j（GPT 2026-10-10 0125 审计 TL-E119-GEN-CONTENT-BINDING-052）=====
+#   generation 的 md 与 generation receipt 此前只被消费者做「存在性检查」
+#   （v2 receipt 只声明 result/manifest 的 SHA）→ 两者发布后被篡改不可
+#   检出。修复：协议升级为 e116i-generation-v3——generation rename 冻结
+#   后、任何公开镜像安装前，对 generation 内 result.md 与 receipt.json
+#   计算 SHA256，写入「entry receipt」（gen_md_sha256 / gen_receipt_sha256）
+#   并以 entry receipt 作为公开 {out}.receipt.json 镜像的安装源。receipt
+#   不自哈希（避免自引用）：entry receipt 与 generation 内 receipt.json
+#   是两个不同文件，前者哈希后者。既有 64K/128K 生产 receipt（v2/legacy）
+#   一律不动，消费者按协议版本分流（见两个 analyzer 的 ⑨c）。
 # 用法（单臂单 root）：
 #   python -u benchmark/RULER/score_ruler_formal.py \
 #     --root exp/results_ruler/e109_full_Qwen3-8B/L32768 \
@@ -93,9 +103,10 @@
 # 三臂各跑一次（postfix 分别为 _E109_mavg_a0.25_b0.125_g0.625 /
 #   _E109_aavg_a0_b0_g0 / _E109_FULLKV）。
 # 发布产物（成功时）：{out}（结果 JSON）、{out 去后缀}.md（表格）、
-#   {out}.manifest.json（冻结身份 manifest）、{out}.receipt.json（运行
-#   receipt=提交信号）、{out}.run-{run_id}/（版本化派生目录：补刻副本 +
-#   merged 规范文件 + scorer manifest）。
+#   {out}.manifest.json（冻结身份 manifest）、{out}.receipt.json（entry
+#   receipt=提交信号，含 gen_md_sha256/gen_receipt_sha256 内容绑定）、
+#   {out}.run-{run_id}/（版本化派生目录：补刻副本 + merged 规范文件 +
+#   scorer manifest + generation receipt.json + entry_receipt.json）。
 # 失败产物：{out}.failure-{run_id}.json（独立 failure receipt，不动旧产物）。
 import argparse
 import fcntl
@@ -673,9 +684,11 @@ def main():
             "run_id": run_id,
             "status": "success",
             "generated": datetime.now().isoformat(),
-            # E116f：发布协议版本字段（旧格式 receipt 缺该键 = E116e
-            # 及之前的多文件逐个替换协议）
-            "publish_protocol": "e116f-generation-v2",
+            # E116f/E116j：发布协议版本字段（旧格式 receipt 缺该键 =
+            # E116e 及之前的多文件逐个替换协议；e116f-generation-v2 =
+            # generation 单指针 + 四角色存在性；e116i-generation-v3 =
+            # v2 + entry receipt 对 generation md/receipt 的内容绑定）
+            "publish_protocol": "e116i-generation-v3",
             "formal": {"script": "benchmark/RULER/score_ruler_formal.py",
                        "sha256": _file_sha256(FORMAL_PATH)},
             "scorer": {"script": "benchmark/RULER/score_ruler.py",
@@ -761,8 +774,34 @@ def main():
         if _file_sha256(gen["manifest"]) != receipt["manifest_sha256"] or \
                 _file_sha256(gen["json"]) != receipt["result_sha256"]:
             _fail("generation 规范文件 SHA 与 receipt 声明不一致——不发布")
+        # ==== E116j（052）：entry receipt——generation 内容哈希绑定 ====
+        # 对已冻结 generation 目录内的 result.md 与 receipt.json 计算
+        # SHA256，作为 gen_md_sha256 / gen_receipt_sha256 写入 entry
+        # receipt。receipt 不自哈希（避免自引用）：entry receipt（安装
+        # 到公开 {out}.receipt.json）与 generation 内 receipt.json 是两个
+        # 不同文件，前者哈希后者。entry receipt 落在 generation 内
+        # （entry_receipt.json），作为公开 receipt 镜像的安装源——锁内
+        # SHA 终验保证公开 receipt 与 generation 副本逐位一致。
+        gen_md_sha = _file_sha256(gen["md"])
+        gen_rc_sha = _file_sha256(gen["receipt"])
+        entry_receipt = dict(receipt)
+        entry_receipt["gen_md_sha256"] = gen_md_sha
+        entry_receipt["gen_receipt_sha256"] = gen_rc_sha
+        entry_p = os.path.join(run_dir, "entry_receipt.json")
+        json.dump(entry_receipt, open(entry_p, "w"), indent=1,
+                  ensure_ascii=False)
+        _fsync_file(entry_p)
+        _fsync_dir(run_dir)
+        # 写后重读自校验：绑定字段必须与 generation 当前内容逐位一致
+        # （防序列化异常悄悄破坏内容绑定声明）
+        _chk = json.load(open(entry_p))
+        if (_chk.get("gen_md_sha256") != _file_sha256(gen["md"]) or
+                _chk.get("gen_receipt_sha256") != _file_sha256(
+                    gen["receipt"])):
+            _fail("entry receipt 落盘重读的 gen_*_sha256 与 generation "
+                  "实际内容不一致——内容绑定声明不可信，不发布（052）")
         # ⑤ 公开固定路径作为兼容镜像逐个安装（JSON → MD → manifest →
-        #    receipt；receipt 镜像最后落盘 = 唯一提交信号）。E116g
+        #    entry receipt；receipt 镜像最后落盘 = 唯一提交信号）。E116g
         #    （040）：整个安装事务在进程间独占锁内执行——「备份建立 →
         #    四镜像安装 → SHA 终验 → 备份清理或锁内回滚」，同一 --out
         #    的并发发布者串行化，混合代际不可达
@@ -770,7 +809,7 @@ def main():
             (gen["json"], args.out),
             (gen["md"], md_path),
             (gen["manifest"], manifest_path),
-            (gen["receipt"], receipt_path),
+            (entry_p, receipt_path),
         ]
         _locked_publish(mirrors, run_id, args.out, backups, published,
                         rollback_state)
@@ -851,7 +890,7 @@ def main():
                 "generated": datetime.now().isoformat(),
                 "error": msg,
                 "argv": sys.argv[1:],
-                "publish_protocol": "e116f-generation-v2",
+                "publish_protocol": "e116i-generation-v3",
                 # kimi3（1404）：committed=True 表示发布事务已原子完成，
                 # 本 failure receipt 记录的是发布后的报告型错误而非发布
                 # 失败——产物与 generation 均已保留，消费以 receipt 为准

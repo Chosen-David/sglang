@@ -48,8 +48,9 @@ E116h（GPT 1429 审计 045/046/047）消费者闭包修复：
      generation_files 必需角色集合 {json, manifest, md, receipt} 全部
      在位（缺任一角色 fail-closed——GPT 1633 复查残留 A：修复前仅判
      映射真值并遍历声明键，单角色映射可绕过四规范文件检查），并复核
-     generation 四规范文件 SHA 与 receipt 声明逐位一致；其他
-     未知协议值 → fail-closed；
+     generation 规范文件与 receipt 声明逐位一致——v2 只内容绑定
+     json/manifest 两角色（md/receipt 仅存在性检查），v3（⑨c）四角色
+     全部内容绑定；其他未知协议值 → fail-closed；
   ⑨b 消费者 bytes 快照绑定（GPT 1633 复查残留 B）：result/receipt/
      manifest 及 generation 规范文件均单次 read() 取 bytes，SHA256 与
      JSON 解析从同一份 bytes 派生——「读值」与「核验哈希」之间不存在
@@ -70,6 +71,24 @@ E116h（GPT 1531 审计 TL-E119-SUMMARY-ATOMICITY-049）summary 原子发布：
      （last-writer-wins，按 1531 主 AI 判决不另建发布锁），summary 同时
      保留三臂不可变输入引用（result/manifest/receipt 逐臂 SHA），使
      后写者的输入代际可审计。
+
+E116j（GPT 2026-10-10 0125 审计 TL-E119-GEN-CONTENT-BINDING-052 +
+TL-E119-128K-ARM-CONTRACT-051）：
+  ⑨c 按 receipt.publish_protocol 分流的 generation 内容绑定——
+     e116i-generation-v3：entry receipt（公开 {out}.receipt.json）在
+     发布前对已冻结 generation 内 result.md 与 receipt.json 计算了
+     SHA256（gen_md_sha256 / gen_receipt_sha256；receipt 不自哈希——
+     entry receipt 与 generation 内 receipt.json 是两个不同文件），
+     消费者据此把 md/receipt 从「存在性检查」升格为「内容绑定」，
+     四角色 {json, manifest, md, receipt} 篡改一律 fail-closed；
+     e116f-generation-v2 / legacy：无这两字段，md/receipt 保持存在性
+     检查（v2）或完全不检查（legacy）——不冒充内容绑定，summary 的
+     closure.gen_content_bound 逐角色如实标注。
+  ⑬（051）128K 批次 ARM_CONTRACT 诚实标注：本批 TLI 臂 treatment 编码
+     相同（identity_mode=legacy-partial，far/near/αβγ 明细未随批次
+     落盘），mavg/aavg 不可由 treatment 区分——显式校验 + summary 标注
+     identity_mode/tli_arm_treatment_indistinguishable；未来批次落盘
+     明细后契约校验失败强制更新。
 
 产物：exp/trace/results/e119_ruler128k_formal_summary.json
 用法： python3 exp/trace/analyze_e119_ruler128k_formal.py \
@@ -119,9 +138,27 @@ ARM_CONTRACT = {
     "FullKV": {"method": "none"},
 }
 
+# 051（GPT 2026-10-10 0125 审计 TL-E119-128K-ARM-CONTRACT-051）：显式
+# 校验 mavg/aavg 契约编码相同——这是 128K 批次源数据的既有事实
+# （identity_mode=legacy-partial，TLI 臂预测落盘时 far/near/αβγ 明细
+# 未随批次落盘），不得无证据强造区分；两 TLI 臂 treatment 编码不可
+# 区分，归因以逐臂源目录 + 源/派生 SHA 闭包承载，属 provisional。
+# 未来批次若落盘 far/near/αβγ 明细，此校验失败强制更新契约（恢复
+# 64K 式可区分编码）并同步修正 summary 的 identity_mode /
+# tli_arm_treatment_indistinguishable 标注。显式条件 + SystemExit，
+# 不使用 assert（045：python -O 免疫）。
+if ARM_CONTRACT["mavg"] != ARM_CONTRACT["aavg"]:
+    raise SystemExit(
+        "[E119-GATE-FAIL] 128K ARM_CONTRACT 的 mavg/aavg 编码不再相同——"
+        "未来批次落盘 far/near/αβγ 明细后必须同步更新契约、identity_mode "
+        "标注与 tli_arm_treatment_indistinguishable 字段（051 强制更新门）")
+
 # ⑨ 已知发布协议（receipt.publish_protocol）：缺失 = E116e 及更早的
 # 逐文件替换协议（legacy）；e116f-generation-v2 = generation 单指针协议
-KNOWN_PROTOCOLS = {None, "e116f-generation-v2"}
+# （md/receipt 仅存在性检查）；e116i-generation-v3（E116j 052）= v2 +
+# entry receipt 对 generation md/receipt 的内容绑定（gen_md_sha256/
+# gen_receipt_sha256，四角色全部内容绑定）
+KNOWN_PROTOCOLS = {None, "e116f-generation-v2", "e116i-generation-v3"}
 
 # ⑨（046③ 残留 A，GPT 1633 复查）：e116f-generation-v2 的 generation_files
 # 必需角色集合——v2 schema 要求四规范文件 {json, manifest, md, receipt}
@@ -244,14 +281,16 @@ def _compare_identities(per_arm_ident):
 
 
 def _bind_generation(arm, p, receipt, results_dir):
-    """⑨（046③）：从 receipt 解析 generation 目录（单指针优先）。
+    """⑨（046③）+ ⑨c（052）：从 receipt 解析 generation 目录（单指针优先）。
 
     返回 (gen_dir, legacy_protocol)。legacy receipt（publish_protocol
     缺失）按 results_dir + basename + run_id 构造路径；e116f-generation-v2
     从 outputs.derived_dir 单指针解析，强制 generation_files 必需角色
-    集合 {json, manifest, md, receipt} 全部在位（残留 A），并复核四
-    规范文件 SHA（从 bytes 快照计算，残留 B）与 receipt 声明逐位一致；
-    未知协议 fail-closed。"""
+    集合 {json, manifest, md, receipt} 全部在位（残留 A），并复核已声明
+    SHA 的角色与 receipt 声明逐位一致（残留 B）——v2 只内容绑定
+    json/manifest（md/receipt 仅存在性检查），e116i-generation-v3 追加
+    md/receipt 内容绑定（entry receipt 的 gen_md_sha256/
+    gen_receipt_sha256，052）；未知协议 fail-closed。"""
     protocol = receipt.get("publish_protocol")
     if protocol not in KNOWN_PROTOCOLS:
         _fail(f"{arm}: receipt publish_protocol={protocol!r} 不是已知协议"
@@ -262,18 +301,19 @@ def _bind_generation(arm, p, receipt, results_dir):
         gen_dir = os.path.join(
             results_dir, os.path.basename(p) + ".run-" + receipt["run_id"])
         return gen_dir, True
-    # e116f-generation-v2：receipt 单指针（outputs.derived_dir）
+    # e116f-generation-v2 / e116i-generation-v3：receipt 单指针
+    # （outputs.derived_dir）
     gen_dir = receipt.get("outputs", {}).get("derived_dir")
     if not gen_dir or not os.path.isdir(gen_dir):
         _fail(f"{arm}: receipt outputs.derived_dir 缺失或不存在: "
               f"{gen_dir!r}——generation 单指针断裂，fail closed")
     gen_files = receipt.get("outputs", {}).get("generation_files")
     if not isinstance(gen_files, dict):
-        _fail(f"{arm}: e116f-generation-v2 receipt 的 generation_files "
+        _fail(f"{arm}: {protocol} receipt 的 generation_files "
               f"不是对象映射（{type(gen_files).__name__}）——046③ v2 "
               f"schema fail closed")
     if not gen_files:
-        _fail(f"{arm}: e116f-generation-v2 receipt 缺 generation_files "
+        _fail(f"{arm}: {protocol} receipt 缺 generation_files "
               f"映射——无法从单指针解析同一 generation，fail closed")
     # 046③ 残留 A（GPT 1633 复查）：v2 schema 强制必需角色集合——
     # {json, manifest, md, receipt} 四规范角色必须全部声明；修复前仅
@@ -281,16 +321,28 @@ def _bind_generation(arm, p, receipt, results_dir):
     # 可绕过四规范文件检查
     missing_roles = REQUIRED_GEN_ROLES - set(gen_files)
     if missing_roles:
-        _fail(f"{arm}: e116f-generation-v2 generation_files 缺必需角色 "
+        _fail(f"{arm}: {protocol} generation_files 缺必需角色 "
               f"{sorted(missing_roles)}（必需全集 "
               f"{sorted(REQUIRED_GEN_ROLES)}，实际声明 "
               f"{sorted(gen_files)}）——046③ v2 schema 四规范文件不完整，"
               f"fail closed")
-    # 四规范文件存在 + SHA 与 receipt 声明逐位闭合
+    # 052（⑨c）：按协议版本构建「声明 SHA」角色映射——四规范文件全部
+    # 必须存在；v2 只有 json/manifest 有内容绑定（md/receipt 篡改不可
+    # 检出，summary 如实标注 gen_content_bound）；v3 由 entry receipt
+    # 的 gen_md_sha256/gen_receipt_sha256 把 md/receipt 升格为内容绑定，
+    # 缺任一字段即协议声明不完整 → fail-closed
     rc_sha = {
         "manifest": receipt.get("manifest_sha256"),
         "json": receipt.get("result_sha256"),
     }
+    if protocol == "e116i-generation-v3":
+        for _k in ("gen_md_sha256", "gen_receipt_sha256"):
+            if _k not in receipt:
+                _fail(f"{arm}: e116i-generation-v3 entry receipt 缺 "
+                      f"{_k}——v3 协议必须绑定 generation md/receipt 内容"
+                      f"（052），fail closed")
+        rc_sha["md"] = receipt["gen_md_sha256"]
+        rc_sha["receipt"] = receipt["gen_receipt_sha256"]
     for role, fname in gen_files.items():
         fp = os.path.join(gen_dir, fname)
         if not os.path.isfile(fp):
@@ -304,8 +356,27 @@ def _bind_generation(arm, p, receipt, results_dir):
                   f"（{fp}）: {e}——fail closed")
         if role in rc_sha and hashlib.sha256(graw).hexdigest() != rc_sha[role]:
             _fail(f"{arm}: generation 规范文件 {role} SHA 与 receipt 声明"
-                  f"不一致（{fp}）——单指针闭合失败，fail closed")
+                  f"不一致（{fp}）——单指针闭合失败"
+                  f"（{'052 内容绑定' if protocol == 'e116i-generation-v3' else 'v2 绑定角色'}），"
+                  f"fail closed")
     return gen_dir, False
+
+
+def _gen_content_bound(protocol):
+    """⑨c（052）：按发布协议如实标注 generation 内容绑定状态——修复前
+    注释宣称「四规范文件 SHA 与 receipt 声明逐位闭合」对 v2/legacy 是
+    过度声明（md/receipt 只做了存在性检查）。此处不冒充：
+      v3   —— 四角色内容全绑定（md/receipt 经 entry receipt 的
+              gen_md_sha256/gen_receipt_sha256，篡改 fail-closed）；
+      v2   —— json/manifest 内容绑定（receipt 声明），md/receipt 仅
+              存在性检查；
+      legacy—— json/manifest 经 gate① 的 receipt↔公开镜像 SHA 闭合
+              绑定，generation 文件完全未检查。
+    json/manifest 在三种协议下都有内容级闭合（gate① 对全部协议执行），
+    故恒为 true；md/receipt 按协议版本标注。"""
+    if protocol == "e116i-generation-v3":
+        return {"json": True, "manifest": True, "md": True, "receipt": True}
+    return {"json": True, "manifest": True, "md": False, "receipt": False}
 
 
 def _publish_summary(p_out, out):
@@ -566,6 +637,14 @@ def main():
     common_digest = hashlib.sha256(
         (ident_digest + _canon(non_wl_ref[1]) +
          per_arm_scorer_man[sc_ref]).encode("utf-8")).hexdigest()
+    # ---- ⑨c（052）：generation 内容绑定诚实标注——三臂协议一致时给
+    #      单一 dict，混合协议时逐臂给出（任一臂的绑定状态都不冒充）----
+    gen_bounds = {arm: _gen_content_bound(v["publish_protocol"])
+                  for arm, v in per_arm_protocol.items()}
+    if len({_canon(b) for b in gen_bounds.values()}) == 1:
+        gen_content_bound = gen_bounds[sorted(gen_bounds)[0]]
+    else:
+        gen_content_bound = gen_bounds
     # ---- ⑩ 评分口径公平门禁（047）：三臂 formal/scorer 脚本 SHA 必须
     #      完全一致——数据身份相同不足以证明评分公平，实现差异可改变
     #      得分与排名；不一致时须以同一 scorer 重评三臂后才可收口 ----
@@ -666,6 +745,17 @@ def main():
             "source_sha_stable": True,
             "derived_sha_stable": True,
             "crossarm_identity_gate": True,
+            # ⑨c（052）：generation 内容绑定逐角色如实标注（v3 四角色
+            # 全绑定；v2/legacy 的 md/receipt 不冒充内容绑定）
+            "gen_content_bound": gen_content_bound,
+            # ⑬（051）：128K 批次诚实标注——本批 TLI 臂预测落盘时
+            # far/near/αβγ 明细未随批次落盘（identity_mode=legacy-partial），
+            # mavg/aavg 的 treatment 编码不可区分（模块顶部 051 强制
+            # 更新门已校验契约与此事实一致）；归因由逐臂源目录 + 源/派生
+            # SHA 闭包承载，属 provisional。64K analyzer 不加此字段
+            # （64K 契约可区分）。
+            "identity_mode": "legacy-partial",
+            "tli_arm_treatment_indistinguishable": True,
         },
         "arms": {
             arm: {
