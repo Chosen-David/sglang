@@ -149,13 +149,14 @@ def get_pred(
     dataset,
     device,
     model_name,
+    data_fp="",
 ):
     preds = []
 
     # HACK: sample 10 examples for debugging
     # data = np.random.choice(data, 10)
 
-    for json_obj in tqdm(data):
+    for row_idx, json_obj in enumerate(tqdm(data)):
         torch.cuda.empty_cache()
         prompt = prompt_format.format(**json_obj)
         # truncate to fit max_length (we suggest truncate in the middle, since the left and right side may contain crucial instructions)
@@ -311,6 +312,11 @@ def get_pred(
             # LongBench-v2：额外落盘解析字母与样本 _id（打分口径 accuracy = pred_choice == answer）
             record["pred_choice"] = extract_choice_letter(pred)
             record["_id"] = json_obj["_id"]
+        else:
+            # E116a（GPT TL-LBV1-SAMPLE-GATE-024）：v1 记录补稳定 sample_id，
+            # 绑定 任务名 + 数据指纹 + 源行 index——评分端据此做 fail-closed
+            # 完整性门禁（无重复/与 manifest 集合相等），缺行混行不再静默通过。
+            record["_id"] = f"{dataset}:{data_fp}:{row_idx}"
         preds.append(record)
     return preds
 
@@ -422,6 +428,17 @@ if __name__ == "__main__":
 
         prompt_format = dataset2prompt[dataset]
         max_gen = dataset2maxlen[dataset]
+        # E116a：数据指纹（answers+length 逐行 canonical JSON 的 SHA256 前 12 位），
+        # 进 _id 绑定冻结输入身份；lbv2 已有官方 _id 不需要
+        if dataset == "lbv2":
+            data_fp = ""
+        else:
+            import hashlib as _hashlib
+            _fp_src = json.dumps(
+                [[obj.get("answers"), obj.get("length")] for obj in data],
+                ensure_ascii=False, sort_keys=True,
+            )
+            data_fp = _hashlib.sha256(_fp_src.encode("utf-8")).hexdigest()[:12]
         preds = get_pred(
             model,
             tokenizer,
@@ -432,6 +449,7 @@ if __name__ == "__main__":
             dataset,
             device,
             model_name,
+            data_fp=data_fp,
         )
 
         method_name = get_method_name_with_info(args)

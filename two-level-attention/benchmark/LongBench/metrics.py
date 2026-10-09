@@ -1,13 +1,42 @@
 import re
 import string
+import os as _os
 
 import jieba
-from fuzzywuzzy import fuzz
 import difflib
 
 from typing import List
 from collections import Counter
 from rouge import Rouge
+
+# ---- E116a（GPT TL-LBV1-SCORER-BACKEND-025）：代码相似度后端显式固定 ----
+# 历史 bug：fuzzywuzzy.fuzz.ratio 在装了 python-Levenshtein 时走 StringMatcher
+# （indel ratio），没装时走 difflib.SequenceMatcher——同一份预测两任务漂 ~1.5pt，
+# 13 任务宏平均漂 ~0.234。此处显式固定单一后端，禁止可选依赖静默改变语义：
+#   默认 difflib：纯标准库，零依赖，跨环境逐位可复现（canonical 口径）
+#   TLI_SCORER_BACKEND=levenshtein：显式要求 Levenshtein，缺包即启动失败（fail closed）
+# 语义与 fuzzywuzzy 两条历史路径逐一对应（均做 int(round(100*ratio))）。
+_SCORER_BACKEND = _os.environ.get("TLI_SCORER_BACKEND", "difflib").strip().lower()
+if _SCORER_BACKEND not in ("difflib", "levenshtein"):
+    raise ImportError(
+        f"TLI_SCORER_BACKEND={_SCORER_BACKEND!r} 非法（合法值: difflib | levenshtein）"
+    )
+if _SCORER_BACKEND == "levenshtein":
+    try:
+        import Levenshtein as _Lev
+    except ImportError as _e:
+        raise ImportError(
+            "TLI_SCORER_BACKEND=levenshtein 但 python-Levenshtein 未安装——"
+            "拒绝静默回退 difflib（fail closed），请安装或改用默认 difflib"
+        ) from _e
+    def _fuzz_ratio(s1: str, s2: str) -> int:
+        return int(round(100 * _Lev.ratio(s1, s2)))
+    SCORER_BACKEND_ID = "levenshtein:" + getattr(_Lev, "__version__", "?")
+else:
+    def _fuzz_ratio(s1: str, s2: str) -> int:
+        # 等价 fuzzywuzzy 无 Levenshtein 时的 stdlib 路径
+        return int(round(100 * difflib.SequenceMatcher(None, s1, s2).ratio()))
+    SCORER_BACKEND_ID = "difflib:stdlib"
 
 def normalize_answer(s):
     """Lower text and remove punctuation, articles and extra whitespace."""
@@ -84,7 +113,7 @@ def code_sim_score(prediction, ground_truth, **kwargs):
         if ('`' not in line) and ('#' not in line) and ('//' not in line):
             prediction = line
             break
-    return (fuzz.ratio(prediction, ground_truth) / 100)
+    return (_fuzz_ratio(prediction, ground_truth) / 100)
 
 def classification_score(prediction, ground_truth, **kwargs):
     em_match_list = []

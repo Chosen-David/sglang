@@ -1,0 +1,261 @@
+{
+ "purpose": "E116a GPT 0728 审计 provenance 回应：三臂 LB v1 原始预测 manifest",
+ "protocol": "13 任务正式协议（trec/samsum 排除）；best-file 策略（同任务多文件取行数最多）；旧 v1 文件无 _id，ids=行序身份 dataset:row_idx（pred.py 按数据序写盘）",
+ "cross_arm_check": "answers_sha 按行序跨臂比对（见 cross_arm_answers_check）",
+ "date": "2026-10-09",
+ "arms": {
+  "FullKV": {
+   "params": "--method none (dense) 复用 E71 观测",
+   "tasks": {
+    "narrativeqa": {
+     "n": 200,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/narrativeqa-none-01161806.jsonl",
+     "sha256": "685c82b4e2dbf31c313d31da6a65d7a5f7640f9abe6719c269953be6b7ce7659",
+     "expect": 200
+    },
+    "qasper": {
+     "n": 200,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/qasper-none-01161806.jsonl",
+     "sha256": "12119294ec43c4878265158a2ebe2cf134f477b325083445b9a89baca89018ef",
+     "expect": 200
+    },
+    "multifieldqa_en": {
+     "n": 150,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/multifieldqa_en-none-01161806.jsonl",
+     "sha256": "b129f5e19b51b8ef3942d61a1f2461bd80506a6af243ba3b0f3e53938a768be7",
+     "expect": 150
+    },
+    "hotpotqa": {
+     "n": 200,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/hotpotqa-none-01161806.jsonl",
+     "sha256": "ec4e3342780b563c415f53fdb52b5d481a6f7ee4dfdcc3083ff85bb9aca61797",
+     "expect": 200
+    },
+    "2wikimqa": {
+     "n": 200,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/2wikimqa-none-01151829.jsonl",
+     "sha256": "d42f0d4c80405ef0c43c20194a84d56266456e3fbe76eceb33985028fbe95805",
+     "expect": 200
+    },
+    "musique": {
+     "n": 200,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/musique-none-01161806.jsonl",
+     "sha256": "48a18fc4a97a2279f520550d98e2a7df07b650489ef4032e052aea900a8ea40e",
+     "expect": 200
+    },
+    "gov_report": {
+     "n": 200,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/gov_report-none-01161806.jsonl",
+     "sha256": "199d43b84d4df13a52ae6d61cfc8af34d94461f47191921b9cb2dd5cd697aa62",
+     "expect": 200
+    },
+    "qmsum": {
+     "n": 200,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/qmsum-none-01161806.jsonl",
+     "sha256": "f0cb88f0aa5d746c20301032dbac792269aa552e2f8f70f8c285f181bb2973ca",
+     "expect": 200
+    },
+    "multi_news": {
+     "n": 200,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/multi_news-none-01161806.jsonl",
+     "sha256": "fee8def20f90efc8b98e9cc93b174e54dc31f251f580b311df32cba3333ca975",
+     "expect": 200
+    },
+    "triviaqa": {
+     "n": 200,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/triviaqa-none-01161806.jsonl",
+     "sha256": "11a6cff734f99afb600396d7682e3a7b1baf1c3de53d9f5950a13eece4e33c89",
+     "expect": 200
+    },
+    "passage_retrieval_en": {
+     "n": 200,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/passage_retrieval_en-none-01161806.jsonl",
+     "sha256": "4e35ddba97a1b7b4e28d6677ce932a61b29768b0ab6a73baf8fb4eaab13f7d20",
+     "expect": 200
+    },
+    "lcc": {
+     "n": 500,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/lcc-none-01151829.jsonl",
+     "sha256": "a8a7012039557b0e5af57dc97b88c96fd69ab0b5bd017386c98b340dee181261",
+     "expect": 500
+    },
+    "repobench": {
+     "n": 500,
+     "file": "exp/results_longbench/Qwen3-8B/pred_1024/repobench-none-01151829.jsonl",
+     "sha256": "21ce15736c813a1cd3aca8fdd5c25d9c0019c5ea88d51e5a98e98e80bacd5486",
+     "expect": 500
+    }
+   }
+  },
+  "mavg(.25,.125,.625)": {
+   "params": "--tli_far_method minmax --tli_near_method avg --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625 --tli_enable_kmeans false",
+   "tasks": {
+    "narrativeqa": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/narrativeqa-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "15bf4a2c0dd0af1e9f5152090beaccaa9a7eb06542ad5fa542f23883825456c3",
+     "expect": 200
+    },
+    "qasper": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/qasper-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "4dd99953e18d3523cd3295fbfaf8370dd7fe22fb1099ecc259be7c65f88035ab",
+     "expect": 200
+    },
+    "multifieldqa_en": {
+     "n": 150,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/multifieldqa_en-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "cbbe76c9297052a2f962ef5b5cad164f2a471d966c81f19d09564feb2ff81205",
+     "expect": 150
+    },
+    "hotpotqa": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/hotpotqa-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "997f4e6d7761849200527a81ec1c72b05120470703c4dc620eb09abd642a2906",
+     "expect": 200
+    },
+    "2wikimqa": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/2wikimqa-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "f28c48e8b4f9e0212999bc5ac6a3646bbd2f400b869f3f64a0c3781aca54aee9",
+     "expect": 200
+    },
+    "musique": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/musique-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "30daa20943aede6a9dcae7ab78700e386b3a039571b7b23eb9b918c85bfc8e3a",
+     "expect": 200
+    },
+    "gov_report": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/gov_report-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "d788411a6d0ce0d33cf447467db507b9277a5b30e8ac5e404b91bd3a61423326",
+     "expect": 200
+    },
+    "qmsum": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/qmsum-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "314e2ffcaf11ae1836db985d1d65dd72633d488ed657b7d43eb22f0c5e0685d9",
+     "expect": 200
+    },
+    "multi_news": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/multi_news-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "85d027f4762edd133a8a2b7934f60356ccfb930089f692e7e4f7a08e9d5ee28f",
+     "expect": 200
+    },
+    "triviaqa": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/triviaqa-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "4e2eb46f66abd5c507c07441edae3ff449e700a3800d1a73a5aece4eeb560d10",
+     "expect": 200
+    },
+    "passage_retrieval_en": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/passage_retrieval_en-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "b4e38a13ded0f2fd17a9583106071d335d8809fc802d67f64002d010c2f16aa4",
+     "expect": 200
+    },
+    "lcc": {
+     "n": 500,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/lcc-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "ed2d3132ffe7d66fd5c859d6cb21f249745758c1fe94116646a45c9c709ff2ed",
+     "expect": 500
+    },
+    "repobench": {
+     "n": 500,
+     "file": "/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625/repobench-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "7ba58b47fe905ad70026c477dea5b1d2e482022965721df6e068b48a5901247b",
+     "expect": 500
+    }
+   }
+  },
+  "aavg(0,0)": {
+   "params": "--tli_far_method avg --tli_near_method avg --tli_alpha 0 --tli_beta 0 --tli_gamma 0 --tli_enable_kmeans false",
+   "tasks": {
+    "narrativeqa": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/narrativeqa-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "039373c08c0657bb25d4c70d1c88f0ee8a0372c58273f3620745111d9e89d1ba",
+     "expect": 200
+    },
+    "qasper": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/qasper-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "507bb643fcfe7ed6ae8f4377545104609c9825d5bce4a957ecb02429738d8918",
+     "expect": 200
+    },
+    "multifieldqa_en": {
+     "n": 150,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/multifieldqa_en-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "18cb6dbfd7f40e91dfe7527eae2274e8dff726140002380c28b028668f147341",
+     "expect": 150
+    },
+    "hotpotqa": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/hotpotqa-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "28fb18370ba007c2efa7f81767946c329e9c842aba05925a619d7974be746d65",
+     "expect": 200
+    },
+    "2wikimqa": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/2wikimqa-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "6330e5e76b047ca15e8fa19b0710d32595fc32924a1c7bf99f56e00be9c130bc",
+     "expect": 200
+    },
+    "musique": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/musique-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "612a740cf12eec00dd1e80309ff0a8e5d2dccea0fee7abefbf1b9398e07033ed",
+     "expect": 200
+    },
+    "gov_report": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/gov_report-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "24e3ebb52ab115a6a4236a2770477ca3cabfa14d46e6873ab6d312610a2d3838",
+     "expect": 200
+    },
+    "qmsum": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/qmsum-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "15832c5e37a8e773c8e1065d221a052c7cc72190583bad0b1e949589076a6c78",
+     "expect": 200
+    },
+    "multi_news": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/multi_news-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "03b2a2c363b3d8855c62f708cd102496ff605f13a7ec52c4724554bc02cd8f05",
+     "expect": 200
+    },
+    "triviaqa": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/triviaqa-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "61cf16efb04395a3a3eb830d820641c0691d3d11f7693fae420b8a69e05c5cfb",
+     "expect": 200
+    },
+    "passage_retrieval_en": {
+     "n": 200,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/passage_retrieval_en-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "cb05e6aba7ae72b144fa1090656ceca0c83d0bf928094a1d850697b90bf1de5b",
+     "expect": 200
+    },
+    "lcc": {
+     "n": 500,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/lcc-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "506ba0997afb987bc0c267f9e8d26841600334b4dff8e1d5f4f5e96aed1519e5",
+     "expect": 500
+    },
+    "repobench": {
+     "n": 500,
+     "file": "/tmp/e109_scan_v2/pred_E109_aavg_a0_b0_g0/repobench-tli_64_128_1024_c4_A-benchmarklaunchtime.jsonl",
+     "sha256": "bf2c1c01d2f49411b37f7aab8061a14743f17e57e81cfd4666da659d4eafb682",
+     "expect": 500
+    }
+   }
+  }
+ },
+ "cross_arm_answers_check": {
+  "identical_rowwise": true,
+  "mismatches": []
+ }
+}

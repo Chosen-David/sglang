@@ -1,0 +1,52 @@
+{
+ "purpose": "GPT 0728 SCORER-BACKEND-025 回应：三臂 lcc/repobench 双后端重评（code_sim 口径，max-over-answers）",
+ "date": "2026-10-09",
+ "backends": {
+  "FullKV": {
+   "lcc": {
+    "n": 500,
+    "difflib": 67.35,
+    "levenshtein": 68.81
+   },
+   "repobench": {
+    "n": 500,
+    "difflib": 64.92,
+    "levenshtein": 66.5
+   }
+  },
+  "mavg(.25,.125,.625)": {
+   "lcc": {
+    "n": 500,
+    "difflib": 67.87,
+    "levenshtein": 69.24
+   },
+   "repobench": {
+    "n": 500,
+    "difflib": 66.41,
+    "levenshtein": 67.96
+   }
+  },
+  "aavg(0,0)": {
+   "lcc": {
+    "n": 500,
+    "difflib": 67.41,
+    "levenshtein": 68.94
+   },
+   "repobench": {
+    "n": 500,
+    "difflib": 62.09,
+    "levenshtein": 63.72
+   }
+  }
+ },
+ "avg13_difflib": {
+  "FullKV": 50.13,
+  "mavg(.25,.125,.625)": 50.43,
+  "aavg(0,0)": 50.02
+ },
+ "avg13_levenshtein": {
+  "FullKV": 50.36,
+  "mavg(.25,.125,.625)": 50.66,
+  "aavg(0,0)": 50.26
+ }
+}
