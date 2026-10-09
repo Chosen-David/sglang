@@ -11,7 +11,8 @@
 > 关联：#128（overlap kernel 设计）/ #146（E109 v2 远程 sim 臂，13h/臂 直接动因）/ #147（E110
 > ccluster e2e）/ #150（E113 设计篇）。全部代码与数据在本 worktree
 > `exp/trace/{e113_greedy_triton.py, e113_seg_greedy_sim.py, e113_microbench.py,
-> test_e113_greedy_triton.py, test_e113_microbench_identity.py}` + `exp/trace/results/e113_*.json`。
+> e113_failclosed_inject.py, test_e113_greedy_triton.py, test_e113_microbench_identity.py,
+> test_e113_state_machine_054_055.py}` + `exp/trace/results/e113_*.json`。
 >
 > **E113b 更新（e2e 集成完成）**：方案1 kernel 已收编进生产路径
 > `two-level-attention/sparse_attn/indexer/greedy_triton.py`（kernel 本体，单一事实源），
@@ -113,6 +114,32 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
 > 旧版脚本把 Python reference 固定为仓库外绝对路径动态导入且 manifest 无身份——运行时无法
 > 证明双侧实现同源，**降级为「实现身份未闭合的历史观测」存档，保留不动**；其数值本身无算错
 > 证据（10 case `assign_mismatch` 均为 0）。
+>
+> **v2 数据边界与 v3 口径（054/055，2026-10-10 03:0X 补注，GPT 审计 `TL-E113-FAILCLOSED-054` /
+> `TL-E113-RAW-TIMING-055` 全接受）**：
+> - **055（P2）**：v2 JSON 的 `wall_s_*_samples` 为**排序后+舍入**（4/5 位小数）的秒值，
+>   `speedup` 从舍入前值计算——持久化样本**不能逐位重建 speedup**（复算最大相对差 ~1.17%，
+>   如 T=1024 结构簇 stored 211.2 vs recomputed 210.8962），样本顺序亦非执行顺序；python
+>   rep=1 / triton rep=3 为**独立重复样本（非 paired）**。055 修复后 v3 口径：
+>   `time.perf_counter_ns()` 整数纳秒、按执行顺序持久化不排序不舍入，median/us_per_token/
+>   speedup 全部由**已持久化原始样本**派生（读回 JSON 复算逐位一致，单测 T7）。v2 十 case
+>   数值**不撤销**（Triton 显著快于 Python 的方向与量级不受影响），但正式引用 v2 精确值时
+>   须注明该边界——**v2 = 「身份闭合、但样本曾排序+舍入（055 边界）的修复版实测」存档**
+>   （同 legacy v1 「实现身份未闭合」先例）。完整 v3 十 case 重发由主会话验收后决定；本轮
+>   已产出 4 case（`--Ts 16384,32768`，含结构簇+单例两臂）v3 口径样张于 `/tmp/e113_v3_sample/`
+>   （不覆盖归档；两轮同路径重跑实测隔离机制：第二轮把第一轮 out/sidecar 隔离改名为
+>   `*.attempt-<sha8>.superseded`，历史保留）。
+> - **054（P1）**：旧版失败分支只写 `.failure.json`、不隔离同路径旧成功 JSON/sidecar——
+>   「旧成功+新失败」可矛盾共存，且旧注入测试预清场恰好绕过该最危险转换（撤销「该路径
+>   fail-closed 发布协议已完整验收」的表述，v2 十 case 数值本身不受影响——落盘时该路径无旧
+>   成功文件）。修复后生产状态机：每次运行生成 attempt ID（时间戳-pid-输入摘要前 8 位）+
+>   新 attempt 开始时隔离同路径旧 out/sidecar/failure 为 `*.attempt-<sha8>.superseded`
+>   （历史不删除）+ failure receipt 记录 attempt ID 与隔离清单 + 成功发布原子清理同 attempt
+>   failure 并终检**可见终态唯一且属于本 attempt**（`_fail` 显式退出，python -O 不失效）。
+>   红绿验收：`test_e113_state_machine_054_055.py`（T5 旧成功→新失败 / T6 旧失败→新成功 /
+>   T7 读回复算 / T8 隔离原语，stub 生产 main() 不预清场，python 与 -O 双跑 4/4）+
+>   GPU 注入验收 `e113_failclosed_inject.py`（**不预清场**、反向预埋旧成功产物，实测 PASS：
+>   非零退出 + failure 含 attempt_id + 旧产物隔离改名 + 性能 JSON 不发布）。
 
 **v2 实测表**（10 case 全表见 v2 JSON；下表为 legacy 表同五格 + 新旧对照）：
 
@@ -271,7 +298,7 @@ GPU0 空闲（1 MiB / 0%）且无任何在跑扫描进程的窗口执行。旧�
 | Triton 原型 kernel | `exp/trace/e113_greedy_triton.py` | 5/5 单测逐位全过；BT=512/nw=4 调优默认 |
 | 对拍单测 | `exp/trace/test_e113_greedy_triton.py` | T1-T5 全 PASS（含增量≡重放铁律） |
 | SEG-GREEDY 仿真 | `exp/trace/e113_seg_greedy_sim.py` + `results/e113_seg_greedy_sim.json` | 决策级等价实证 + NO-GO 判决落袋 |
-| microbench | `exp/trace/e113_microbench.py`（050 修复版）+ `results/e113_microbench_v2.json`（**v2 正式证据**）+ `results/e113_microbench.json`（**legacy：实现身份未闭合的历史观测存档，保留不动**） | v2 已于 2026-10-10 空闲 GPU0 重跑：10/10 case 0 mismatch、身份闭包（checkout 6bdb7eb3b dirty=False、双侧同 checkout、impl SHA/seed/逐次延迟/内容 SHA+sidecar）、噪声检查过（温度 33→38°C 无降频、样本内极差 ≤0.65%）；GPU 侧 fail-closed 注入验收 PASS（`e113_failclosed_inject.py`）；红绿单测 `test_e113_microbench_identity.py` 4/4 |
+| microbench | `exp/trace/e113_microbench.py`（050 修复版 + 054/055 修复版）+ `results/e113_microbench_v2.json`（**v2 正式证据，样本曾排序+舍入的 055 边界见 §2.3 补注**）+ `results/e113_microbench.json`（**legacy：实现身份未闭合的历史观测存档，保留不动**） | v2 已于 2026-10-10 空闲 GPU0 重跑：10/10 case 0 mismatch、身份闭包（checkout 6bdb7eb3b dirty=False、双侧同 checkout、impl SHA/seed/逐次延迟/内容 SHA+sidecar）、噪声检查过（温度 33→38°C 无降频、样本内极差 ≤0.65%）；GPU 侧 fail-closed 注入验收 PASS（`e113_failclosed_inject.py`）；红绿单测 `test_e113_microbench_identity.py` 4/4。054/055 修复（2026-10-10，GPT 审计 0227）：attempt 状态机 + 整数纳秒原始计时，红绿 `test_e113_state_machine_054_055.py` 4/4（python/-O 双跑）+ GPU 注入验收 PASS（不预清场）+ 4 case v3 口径样张（/tmp，见 §2.3 补注） |
 | 本设计文档 | `research/docs/e113_method_kernel_design.md` | 本文 |
 
 **后续动作**（对齐设计篇 §9 计划，本文档补充实证校准）：
@@ -295,18 +322,26 @@ GPU0 空闲（1 MiB / 0%）且无任何在跑扫描进程的窗口执行。旧�
   （`CUDA_VISIBLE_DEVICES=<idle> python3 test_e113_greedy_triton.py`，<1 min）
 - SEG-GREEDY：`CUDA_VISIBLE_DEVICES=<idle> python3 e113_seg_greedy_sim.py --T 8192`（~15 min，
   真实 trace /tmp/trace/qwen3-8b）
-- microbench（050 修复版）：`CUDA_VISIBLE_DEVICES=<idle> python3 e113_microbench.py`（~2 min，
-  Python 臂占大头；`--wait` 可轮询等空闲）。默认双侧实现都从**当前 checkout** 加载；跨版本
-  A/B 须显式 `--ref-root`/`--tri-root`，两侧 git SHA/dirty 与实现文件 SHA256 全落 manifest；
-  correctness 门 fail-closed（任一超容差非零退出、不发布性能 JSON）；发布为临时文件 +
-  fsync + 原子 replace，manifest 含 torch/triton/CUDA/driver 版本、逐次原始延迟与输出内容
-  SHA（+ `.sha256` sidecar）。**v2 正式证据**（`results/e113_microbench_v2.json` +
-  sidecar，2026-10-10）产生方式：`git worktree add --detach /tmp/e113_clean_wt <HEAD>` 干净
-  checkout（保证 manifest dirty=False）后从 worktree 运行、`--out` 指回主树 results 目录——
-  延迟测量须在空闲 GPU 无并发扫描窗口执行（硬纪律）。fail-closed 注入验收复现：
-  `CUDA_VISIBLE_DEVICES=<idle> python3 e113_failclosed_inject.py`（退出 0 = 门生效）。
+- microbench（050 修复版 + 054/055 修复版）：`CUDA_VISIBLE_DEVICES=<idle> python3
+  e113_microbench.py`（~2 min，Python 臂占大头；`--wait` 可轮询等空闲；`--Ts 16384,32768`
+  可只跑部分 T 做最小重测，有效 T 列表绑入 attempt 输入摘要）。默认双侧实现都从
+  **当前 checkout** 加载；跨版本 A/B 须显式 `--ref-root`/`--tri-root`，两侧 git SHA/dirty
+  与实现文件 SHA256 全落 manifest；correctness 门 fail-closed（任一超容差非零退出、不发布
+  性能 JSON）；054 attempt 状态机（旧产物隔离改名 `*.attempt-<sha8>.superseded` 历史保留、
+  failure receipt 含 attempt ID、成功发布终检可见终态唯一）；055 计时为
+  `time.perf_counter_ns()` 整数纳秒按执行顺序持久化（不排序不舍入），median/us_per_token/
+  speedup 全部由已持久化原始样本派生；发布为临时文件 + fsync + 原子 replace，manifest 含
+  torch/triton/CUDA/driver 版本、逐次原始延迟与输出内容 SHA（+ `.sha256` sidecar）。
+  **v2 正式证据**（`results/e113_microbench_v2.json` + sidecar，2026-10-10）产生方式：
+  `git worktree add --detach /tmp/e113_clean_wt <HEAD>` 干净 checkout（保证 manifest
+  dirty=False）后从 worktree 运行、`--out` 指回主树 results 目录——延迟测量须在空闲 GPU
+  无并发扫描窗口执行（硬纪律）。fail-closed 注入验收复现：
+  `CUDA_VISIBLE_DEVICES=<idle> python3 e113_failclosed_inject.py`（退出 0 = 门生效；
+  v3 起不预清场、反向预埋旧成功产物，覆盖「旧成功→新失败」真实状态转换）。
   已落袋的 `results/e113_microbench.json` 是修复前旧协议产物（**实现身份未闭合的历史观测**，
-  保留不动）；CPU-only 红绿单测 `test_e113_microbench_identity.py`（4/4）。
+  保留不动）；`results/e113_microbench_v2.json` 含 055 边界（样本排序+舍入，见 §2.3 补注）。
+  CPU-only 红绿单测：`test_e113_microbench_identity.py`（4/4）+
+  `test_e113_state_machine_054_055.py`（4/4，054 状态机/055 读回复算，python 与 -O 双跑）。
 - 参考实现：`two-level-attention/sparse_attn/indexer/tli_indexer.py::_greedy_cluster_pass_python`
   （050：microbench 默认从当前 checkout 同源加载，不再引用仓库外绝对路径主树；
   `sys.dont_write_bytecode` 防落盘）
