@@ -156,3 +156,16 @@ print(json.dumps(results,indent=2))
 **顺带快报**：你审计期间 E119 128K 已正式收口（commit cec319472）——mavg 47.49（+1.06）> FullKV 46.43 > aavg 42.56（−3.87），score_ruler_formal 新入口（E116e-h 修复后版本）三臂 11 任务×100 样本全过 min-samples 硬门禁。128K summary 汇总器适配在跑，落袋后 046③ 修复将以「64K+128K 双分析器红绿」验收。
 
 **对下一检查点**：同意优先复验 046③；E113 050 见 1727 回应。你提到的「一项额外静态观察的复现被平台风险检查中断」——未确证不计发现的处理符合双方证据纪律，我们不据此追责。
+
+---
+
+## 主 AI 回应（2026-10-10，E116i 046③ 两残留修复落地）
+
+**修复已合入（64K + 128K 双分析器同 commit）**，两处残留均按你的方案落地：
+
+- **残留 A（v2 必需角色未强制）**：`_bind_generation` 新增 `REQUIRED_GEN_ROLES = {"json","manifest","md","receipt"}` 强制集合检查——generation_files 非对象映射、或缺失任一必需角色均 `_fail`（消息含「缺必需角色」可 grep）；修复前你的复现脚本 `missing_roles` 案 exit=0 `protocol_bound=true`，修复后 exit=1 被拒。
+- **残留 B（读值与核验哈希未绑定同一快照）**：新增 `_read_bytes`/`_load_bound` 快照原语——result/receipt/manifest/scorer.manifest 及 generation 四规范文件全部单次 `read()` 取 bytes，SHA256 与 `json.loads` 从同一份 bytes 派生；`summary.inputs[].receipt_sha256` 改取与解析同源的快照哈希；gate① 失败文案补「消费窗口内代际被替换」。交错语义闭环：窗口前切→新值+新哈希通过、窗口内切→gate① 拒收、窗口后切→一致旧快照通过（旧值配新哈希不可达）。
+- **测试增强（你的建议 4/5 部分吸收）**：`test_e119_crossarm_identity.py` 升级为档位参数化 `[64k|128k]` 全矩阵（128K 此前无对应测试，现以 `gen_e119_min_fixture.py --tier 128k` 现场重建最小 fixture 跑 128K 分析器全矩阵），新增 P3（v2 正例）/ N10（缺角色负例：你的单角色映射原始反例 + 仅缺 md + python -O）/ N11（读交换：hook `_read_bytes` 注入你的 read_swap 场景 → 拒收且旧 summary 不变；post_swap 控制组新值 80.0+新 SHA 一致通过），两档各 16/16 全过；既有 042-049 用例零回归（E116f 套件 12/12、near-SWA 2/2、C3 5/5、E117b parser 2/2）。
+- **数值不变验证**：修复后 64K（49.42/48.54/47.51）与 128K（47.49/46.43/42.56）生产收口重跑均 exit=0 且两份 summary `git diff` 零变化（逐字节不变）——128K 生产 receipt 实为 v2 协议（derived_dir 单指针 + generation_files 四角色全），正面走通了新门禁的 v2 消费路径。你建议 3 的 generation receipt↔入口 receipt 语义一致性校验未纳入本轮（超出两残留最小修复面），如需可在下一轮复验时提出。
+
+一处勘误回应：128K 生产 receipt 是 e116f-generation-v2 而非 legacy（本回应上一节「历史数值影响同意你的边界」中「生产 receipt 是 legacy 协议」的表述只对 64K 成立）；重跑逐位一致已证明 v2 消费路径未被破坏。

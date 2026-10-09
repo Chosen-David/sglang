@@ -44,9 +44,17 @@ E116h（GPT 1429 审计 045/046/047）消费者闭包修复：
      目录按 results_dir + basename + run_id 构造路径读取，summary 逐臂
      标 legacy_protocol=true（只声明「数据身份门禁已执行」，不声称
      E116f/E116g 发布锁协议作用于该批数据）；"e116f-generation-v2" →
-     从 receipt.outputs.derived_dir 单指针解析同一 generation 并复核
-     generation_files 四规范文件 SHA 与 receipt 声明逐位一致；其他
+     从 receipt.outputs.derived_dir 单指针解析同一 generation，强制
+     generation_files 必需角色集合 {json, manifest, md, receipt} 全部
+     在位（缺任一角色 fail-closed——GPT 1633 复查残留 A：修复前仅判
+     映射真值并遍历声明键，单角色映射可绕过四规范文件检查），并复核
+     generation 四规范文件 SHA 与 receipt 声明逐位一致；其他
      未知协议值 → fail-closed；
+  ⑨b 消费者 bytes 快照绑定（GPT 1633 复查残留 B）：result/receipt/
+     manifest 及 generation 规范文件均单次 read() 取 bytes，SHA256 与
+     JSON 解析从同一份 bytes 派生——「读值」与「核验哈希」之间不存在
+     另一进程完整替换代际的交错窗口（旧值配新哈希不可达：要么一致的
+     旧快照、要么一致的新快照、要么 gate① 拒收）；
   ⑩ 评分口径公平门禁（047）：三臂 formal/scorer 脚本 SHA 必须完全一致，
      否则 fail-closed（无等价迁移证明时不产出冠军结论——数据身份相同
      不足以证明 A/B/C 评分公平，评分实现差异可改变得分与排名）；
@@ -115,6 +123,12 @@ ARM_CONTRACT = {
 # 逐文件替换协议（legacy）；e116f-generation-v2 = generation 单指针协议
 KNOWN_PROTOCOLS = {None, "e116f-generation-v2"}
 
+# ⑨（046③ 残留 A，GPT 1633 复查）：e116f-generation-v2 的 generation_files
+# 必需角色集合——v2 schema 要求四规范文件 {json, manifest, md, receipt}
+# 全部声明在位；只声明部分角色（如仅 {"scorer": ...} 单角色映射）的
+# 畸形 receipt 一律 fail-closed（修复前仅判断映射真值即可绕过）
+REQUIRED_GEN_ROLES = {"json", "manifest", "md", "receipt"}
+
 
 def _sha256(path):
     h = hashlib.sha256()
@@ -122,6 +136,30 @@ def _sha256(path):
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _read_bytes(path):
+    """⑨b（046③ 残留 B）：bytes 快照读取——单次 read() 捕获文件全部
+    字节。后续 SHA256 与 JSON 解析都从同一份 bytes 派生，消费者「读值」
+    与「核验哈希」之间不再存在另一进程完整替换代际的交错窗口。"""
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _load_bound(path, what):
+    """⑨b（046③ 残留 B）：bytes 快照绑定加载——SHA256 与 json 解析共用
+    同一份 bytes（单次读取），返回 (obj, sha)。文件缺失/不可读/解析
+    失败一律 fail-closed；不使用 assert（045：python -O 免疫）。"""
+    try:
+        raw = _read_bytes(path)
+    except OSError as e:
+        _fail(f"{what}: 读取失败（{path}）: {e}——fail closed")
+    sha = hashlib.sha256(raw).hexdigest()
+    try:
+        obj = json.loads(raw)
+    except (ValueError, UnicodeDecodeError) as e:
+        _fail(f"{what}: JSON 解析失败（{path}）: {e}——fail closed")
+    return obj, sha
 
 
 def _fail(msg):
@@ -210,8 +248,10 @@ def _bind_generation(arm, p, receipt, results_dir):
 
     返回 (gen_dir, legacy_protocol)。legacy receipt（publish_protocol
     缺失）按 results_dir + basename + run_id 构造路径；e116f-generation-v2
-    从 outputs.derived_dir 单指针解析并复核 generation_files 四规范文件
-    SHA 与 receipt 声明逐位一致；未知协议 fail-closed。"""
+    从 outputs.derived_dir 单指针解析，强制 generation_files 必需角色
+    集合 {json, manifest, md, receipt} 全部在位（残留 A），并复核四
+    规范文件 SHA（从 bytes 快照计算，残留 B）与 receipt 声明逐位一致；
+    未知协议 fail-closed。"""
     protocol = receipt.get("publish_protocol")
     if protocol not in KNOWN_PROTOCOLS:
         _fail(f"{arm}: receipt publish_protocol={protocol!r} 不是已知协议"
@@ -228,9 +268,24 @@ def _bind_generation(arm, p, receipt, results_dir):
         _fail(f"{arm}: receipt outputs.derived_dir 缺失或不存在: "
               f"{gen_dir!r}——generation 单指针断裂，fail closed")
     gen_files = receipt.get("outputs", {}).get("generation_files")
+    if not isinstance(gen_files, dict):
+        _fail(f"{arm}: e116f-generation-v2 receipt 的 generation_files "
+              f"不是对象映射（{type(gen_files).__name__}）——046③ v2 "
+              f"schema fail closed")
     if not gen_files:
         _fail(f"{arm}: e116f-generation-v2 receipt 缺 generation_files "
               f"映射——无法从单指针解析同一 generation，fail closed")
+    # 046③ 残留 A（GPT 1633 复查）：v2 schema 强制必需角色集合——
+    # {json, manifest, md, receipt} 四规范角色必须全部声明；修复前仅
+    # 判断映射真值并遍历调用方声明的键，单角色映射（如 {"scorer": ...}）
+    # 可绕过四规范文件检查
+    missing_roles = REQUIRED_GEN_ROLES - set(gen_files)
+    if missing_roles:
+        _fail(f"{arm}: e116f-generation-v2 generation_files 缺必需角色 "
+              f"{sorted(missing_roles)}（必需全集 "
+              f"{sorted(REQUIRED_GEN_ROLES)}，实际声明 "
+              f"{sorted(gen_files)}）——046③ v2 schema 四规范文件不完整，"
+              f"fail closed")
     # 四规范文件存在 + SHA 与 receipt 声明逐位闭合
     rc_sha = {
         "manifest": receipt.get("manifest_sha256"),
@@ -240,7 +295,14 @@ def _bind_generation(arm, p, receipt, results_dir):
         fp = os.path.join(gen_dir, fname)
         if not os.path.isfile(fp):
             _fail(f"{arm}: generation 缺规范文件 {role}: {fp}")
-        if role in rc_sha and _sha256(fp) != rc_sha[role]:
+        # ⑨b（046③ 残留 B）：SHA 从单次读取的 bytes 快照计算，不再
+        # 重开活动路径（读哈希与读值同源，无交错窗口）
+        try:
+            graw = _read_bytes(fp)
+        except OSError as e:
+            _fail(f"{arm}: generation 规范文件 {role} 读取失败"
+                  f"（{fp}）: {e}——fail closed")
+        if role in rc_sha and hashlib.sha256(graw).hexdigest() != rc_sha[role]:
             _fail(f"{arm}: generation 规范文件 {role} SHA 与 receipt 声明"
                   f"不一致（{fp}）——单指针闭合失败，fail closed")
     return gen_dir, False
@@ -318,20 +380,29 @@ def main():
     task_count = None
     for arm, fn in ARMS.items():
         p = os.path.join(results_dir, fn)
-        d = json.load(open(p))
-        receipt = json.load(open(p + ".receipt.json"))
-        manifest = json.load(open(p + ".manifest.json"))
+        # ⑨b（046③ 残留 B）：bytes 快照绑定——result/receipt/manifest
+        # 的解析值与 SHA256 全部来自同一份 bytes（单次 read()），消费者
+        # 「读值」与「核验哈希」之间不存在另一进程完整替换代际的交错
+        # 窗口：要么一致旧快照、要么一致新快照、要么 gate① 拒收
+        d, result_sha = _load_bound(p, f"{arm} result JSON")
+        receipt, receipt_sha = _load_bound(
+            p + ".receipt.json", f"{arm} receipt")
+        manifest, manifest_sha = _load_bound(
+            p + ".manifest.json", f"{arm} manifest")
         # ① receipt 闭合（result + manifest 双向 SHA）——显式条件（045）
         if receipt.get("status") != "success":
             _fail(f"{arm}: receipt status={receipt.get('status')!r}（预期 "
                   f"success）——收口只聚合成功发布，fail closed")
-        if receipt["result_sha256"] != _sha256(p):
+        for _k in ("result_sha256", "manifest_sha256"):
+            if _k not in receipt:
+                _fail(f"{arm}: receipt 缺 {_k} 声明——fail closed")
+        if receipt["result_sha256"] != result_sha:
             _fail(f"{arm}: receipt↔JSON SHA 不一致（receipt 声明的 "
                   f"result_sha256 与当前 result JSON 实际 SHA 不同——"
-                  f"发布后篡改），fail closed")
-        if receipt["manifest_sha256"] != _sha256(p + ".manifest.json"):
-            _fail(f"{arm}: receipt↔manifest SHA 不一致（发布后篡改），"
-                  f"fail closed")
+                  f"发布后篡改或消费窗口内代际被替换），fail closed")
+        if receipt["manifest_sha256"] != manifest_sha:
+            _fail(f"{arm}: receipt↔manifest SHA 不一致（发布后篡改或"
+                  f"消费窗口内代际被替换），fail closed")
         # ④ 单 cell 假设 fail-closed（041 建议 4：多 cell 不许静默取首键）
         if len(d["n"]) != 1:
             _fail(f"{arm}: result JSON 含 {len(d['n'])} 个 cell "
@@ -448,7 +519,7 @@ def main():
         if not os.path.isfile(sc_path):
             _fail(f"{arm}: generation 缺 scorer.manifest.json: {sc_path}"
                   f"——fail closed")
-        sc = json.load(open(sc_path))
+        sc, _sc_sha = _load_bound(sc_path, f"{arm} scorer manifest")
         if set(sc) != set(manifest_tasks):
             _fail(f"{arm}: scorer manifest 的 task 集与 manifest tasks 不"
                   f"一致（{sorted(sc)} vs {sorted(manifest_tasks)}）"
@@ -463,11 +534,12 @@ def main():
             "per_task": cell_tasks_scores,
         }
         # ⑫（049）：逐臂不可变输入引用——last-writer-wins 时输入代际可审计
+        # ⑨b（046③ 残留 B）：receipt_sha256 取自与解析同源的 bytes 快照
         per_arm_inputs[arm] = {
             "result_file": os.path.basename(p),
             "result_sha256": receipt["result_sha256"],
             "manifest_sha256": receipt["manifest_sha256"],
-            "receipt_sha256": _sha256(p + ".receipt.json"),
+            "receipt_sha256": receipt_sha,
             "receipt_run_id": receipt.get("run_id"),
         }
 

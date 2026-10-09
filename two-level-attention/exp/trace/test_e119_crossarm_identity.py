@@ -9,6 +9,11 @@ ARM_CONTRACT 逐字段一致、全部 SHA 闭合、legacy receipt），干净检
 运行。analyzer 通过 --results-dir/--pred-root 只读指向临时副本，fixture
 与生产数据零写入。
 
+档位参数（E116i）：第一个可选参数选择 64k（默认，入库 fixture + 64K
+analyzer）或 128k（128K analyzer + 现场以 gen_e119_min_fixture.py
+--tier 128k 重建的最小 fixture——128K 批次 ARM_CONTRACT 与 64K 不同，
+TLI 臂 treatment 仅落盘 method）。全矩阵对两档各跑一遍。
+
 用例矩阵：
 
   P1 正例      fixture 三臂原样 → 汇总通过，arms 数值 40.0/35.0/30.0，
@@ -27,7 +32,7 @@ ARM_CONTRACT 逐字段一致、全部 SHA 闭合、legacy receipt），干净检
   N8 脚本SHA   篡改单臂 formal_script_sha256（047：评分口径公平）→
                fail-closed 拒绝（不再是 warn-only）；
   P2 结论动态  篡改 aavg result 分数使其反超（+receipt SHA 同步）→
-               通过，但 verdict.ruler64k_ranking/conclusion 必须跟随新
+               通过，但 verdict.ruler{tier}_ranking/conclusion 必须跟随新
                排序（aavg 冠军 +10.00），不得残留硬编码 mavg 冠军文本
                （046④）；
   O1 python -O 两类篡改（receipt SHA 不一致 / 跨臂 answers_sha）在
@@ -44,11 +49,27 @@ E116h 049（GPT 1531 审计 TL-E119-SUMMARY-ATOMICITY-049）summary 原子发布
   O2 python -O N9a 同款写中断在 python -O 下重跑 → 仍非零退出且旧
                summary 逐位不变（原子发布不依赖 assert）。
 
+E116i 046③ 两残留（GPT 1633 审计 TL-E119-CONSUMER-BINDING-046③：
+v2 必需角色未强制 + 读值与核验哈希未绑定同一快照）：
+  P3 v2 正例   三臂 receipt 升级为 e116f-generation-v2（单指针 + 四规范
+               文件）→ 汇总通过且数值不变、逐臂 publish_protocol/
+               derived_dir 标注正确、legacy_protocol=false；
+  N10 缺角色   v2 receipt 的 generation_files 被替换为单角色映射
+               {"scorer": ...}（审计原始反例，修复前 exit=0 可绕过）或
+               仅缺一个角色（md）→ 「缺必需角色」fail-closed 拒收，
+               子例 b 在 python -O 下重跑；
+  N11 读交换   消费者取到旧 result bytes 后、读 receipt 前，另一发布者
+               完整安装新代际（分数 80.0、receipt/manifest 同步闭合、
+               四 aliases 原子替换）→ bytes 快照绑定必须拒收（修复前
+               exit=0 且 summary 记旧均值 40 配新 result SHA——旧值配
+               新哈希）；post_swap 控制组（完整切换先于消费）必须以
+               新值+新哈希一致通过（拒收只针对交错，不拒绝合法更新）。
+
 所有负例还断言「不覆盖旧 summary」：失败运行前放置哨兵 summary 文件，
 失败后内容逐位不变。
 
 用法：
-  python3 exp/trace/test_e119_crossarm_identity.py
+  python3 exp/trace/test_e119_crossarm_identity.py [64k|128k]
 """
 import glob
 import json
@@ -86,13 +107,94 @@ sys.argv = [SCRIPT] + args
 mod.main()
 '''
 
+# E116i 046③ 残留 B 交错注入 wrapper：importlib 加载 analyzer，按模式
+# 在消费窗口内模拟「另一发布者完整安装新代际」。
+#   read_swap  —— hook analyzer 的 _read_bytes：消费者取到旧 result
+#                 bytes 后、后续读取前，完整替换 mavg 臂代际（四
+#                 aliases 原子替换 + gen-next 内分数 80.0/SHA 同步闭合）
+#   post_swap  —— 开跑前先完整切换（控制组：合法代际更新必须通过）
+_SWAP_WRAPPER = '''
+import hashlib, importlib.util, json, os, shutil, sys
+MODE, SCRIPT, RESULT, MARK = sys.argv[1:5]
+args = sys.argv[5:]
+spec = importlib.util.spec_from_file_location("e119_analyzer", SCRIPT)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+def sha(p):
+    return hashlib.sha256(open(p, "rb").read()).hexdigest()
+
+def save(p, obj):
+    with open(p, "w") as f:
+        json.dump(obj, f, indent=1, ensure_ascii=False)
+
+def do_swap():
+    """另一发布者完整安装新代际：分数全部 80.0、manifest/receipt 同步
+    闭合、四 aliases 原子替换（GPT 1633 审计 read_swap 场景）。"""
+    rp = RESULT + ".receipt.json"
+    r = json.load(open(rp))
+    d = json.load(open(RESULT))
+    key = next(iter(d["scores"]))
+    for t in d["scores"][key]:
+        d["scores"][key][t] = 80.0
+    oldg = r["outputs"]["derived_dir"]
+    newg = oldg + "-next"
+    if os.path.isdir(newg):
+        shutil.rmtree(newg)
+    shutil.copytree(oldg, newg)
+    r["run_id"] = r["run_id"] + "-next"
+    r["outputs"]["derived_dir"] = newg
+    r["avg"][key] = 80.0
+    save(newg + "/result.json", d)
+    r["result_sha256"] = sha(newg + "/result.json")
+    m = json.load(open(newg + "/manifest.json"))
+    m["run_id"] = r["run_id"]
+    save(newg + "/manifest.json", m)
+    r["manifest_sha256"] = sha(newg + "/manifest.json")
+    save(newg + "/receipt.json", r)
+    for src, dst in [(newg + "/result.json", RESULT),
+                     (newg + "/result.md",
+                      RESULT[:-len(".json")] + ".md"),
+                     (newg + "/manifest.json", RESULT + ".manifest.json"),
+                     (newg + "/receipt.json", rp)]:
+        shutil.copyfile(src, dst + ".next")
+        os.replace(dst + ".next", dst)
+    with open(MARK, "w") as f:
+        f.write("swapped")
+
+if MODE == "post_swap":
+    do_swap()
+    sys.argv = [SCRIPT] + args
+    mod.main()
+elif MODE == "read_swap":
+    sys.argv = [SCRIPT] + args
+    real_read = mod._read_bytes
+    fired = []
+    def hooked(path):
+        raw = real_read(path)
+        if os.path.abspath(path) == os.path.abspath(RESULT) and not fired:
+            fired.append(1)
+            do_swap()  # 消费者已取旧 result bytes，此刻完整替换代际
+        return raw
+    mod._read_bytes = hooked
+    mod.main()
+'''
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
 FIXTURE = os.path.join(REPO, "exp", "trace", "testdata", "e119_min")
 GEN_SCRIPT = os.path.join(FIXTURE, "gen_e119_min_fixture.py")
-SCRIPT = os.path.join(REPO, "exp", "trace",
-                      "analyze_e119_ruler64k_formal.py")
-SUMMARY = "e119_ruler64k_formal_summary.json"
+# E116i：档位参数——64k（默认）用入库 fixture + 64K analyzer；128k 用
+# 现场重建的 128K 档最小 fixture + 128K analyzer（其 ARM_CONTRACT 与
+# 64K 不同：TLI 臂 treatment 仅落盘 method=tli_64_128_1024_c4_A）
+TIER = sys.argv[1].lower() if len(sys.argv) > 1 else "64k"
+if TIER not in ("64k", "128k"):
+    raise SystemExit(f"用法: {sys.argv[0]} [64k|128k]（未知档位 {TIER!r}）")
+SCRIPT = os.path.join(
+    REPO, "exp", "trace", f"analyze_e119_ruler{TIER}_formal.py")
+SUMMARY = f"e119_ruler{TIER}_formal_summary.json"
+RESULT_PREFIX = f"e119_ruler{TIER}_formal"
+LNAME = "L65536" if TIER == "64k" else "L131072"
 # fixture 合成分数（与生产排序方向一致：mavg > FullKV > aavg）
 FIXTURE_AVG = {"mavg": 40.0, "FullKV": 35.0, "aavg": 30.0}
 SENTINEL = {"sentinel": "old-summary-must-not-be-overwritten"}
@@ -111,13 +213,16 @@ def _sha(path):
 
 def _fixture_usable():
     """fixture 完整性探测：receipt 三件套 + 源预测 jsonl 均在位才可用
-    （防止 .gitignore 漏白名单或异常检出导致半套 fixture 误判可用）。"""
+    （防止 .gitignore 漏白名单或异常检出导致半套 fixture 误判可用）。
+    E116i：64k 档才允许用入库 fixture；128k 档总是现场重建。"""
+    if TIER != "64k":
+        return False
     probes = [
         os.path.join(FIXTURE, "results",
-                     "e119_ruler64k_formal_mavg.json.receipt.json"),
-        os.path.join(FIXTURE, "pred_root", "mavg", "L65536", "pred_1024"),
-        os.path.join(FIXTURE, "pred_root", "fullkv", "L65536", "pred_1024"),
-        os.path.join(FIXTURE, "pred_root", "aavg", "L65536", "pred_1024"),
+                     f"{RESULT_PREFIX}_mavg.json.receipt.json"),
+        os.path.join(FIXTURE, "pred_root", "mavg", LNAME, "pred_1024"),
+        os.path.join(FIXTURE, "pred_root", "fullkv", LNAME, "pred_1024"),
+        os.path.join(FIXTURE, "pred_root", "aavg", LNAME, "pred_1024"),
     ]
     for p in probes:
         if not (os.path.isfile(p) or os.path.isdir(p)):
@@ -128,12 +233,14 @@ def _fixture_usable():
 
 def _ensure_fixture(root_tmp):
     """048①：fixture 源目录——已入库且完整则直接用；缺失（异常检出/
-    漏白名单）则用已入库生成器现场重建到临时目录，保证干净路径可跑。"""
+    漏白名单）或 128k 档则用已入库生成器现场重建到临时目录，保证
+    干净路径可跑。"""
     if _fixture_usable():
         return FIXTURE
-    dest = os.path.join(root_tmp, "fixture_regen")
+    dest = os.path.join(root_tmp, f"fixture_regen_{TIER}")
     os.makedirs(dest, exist_ok=True)
-    r = subprocess.run([sys.executable, GEN_SCRIPT, dest],
+    r = subprocess.run([sys.executable, GEN_SCRIPT, dest,
+                        "--tier", TIER],
                        capture_output=True, text=True)
     assert r.returncode == 0, (r.returncode, r.stdout[-500:], r.stderr[-500:])
     return dest
@@ -157,7 +264,7 @@ def _run(base, opt_o=False):
 
 def _manifest_path(base, arm):
     return os.path.join(base, "results",
-                        f"e119_ruler64k_formal_{arm.lower()}.json"
+                        f"{RESULT_PREFIX}_{arm.lower()}.json"
                         ".manifest.json")
 
 
@@ -168,7 +275,7 @@ def _receipt_path(base, arm):
 
 def _result_path(base, arm):
     return os.path.join(base, "results",
-                        f"e119_ruler64k_formal_{arm.lower()}.json")
+                        f"{RESULT_PREFIX}_{arm.lower()}.json")
 
 
 def _tamper_manifest(base, arm, mutate, also_receipt_identity=None):
@@ -230,9 +337,19 @@ def test_P1_positive(base):
     assert len(ig["common_identity_digest"]) == 64
     assert ig["script_sha_identical"] is True
     # 046②：arm 契约逐字段入 summary，且 per_arm_treatment 与契约相等
-    assert ig["arm_contract"]["mavg"] == {
-        "far_method": "minmax", "near_method": "avg",
-        "alpha": "0.25", "beta": "0.125", "gamma": "0.625"}
+    # （E116i：128K 批次 TLI 臂 treatment 仅落盘 method，契约随档位）
+    if TIER == "64k":
+        assert ig["arm_contract"]["mavg"] == {
+            "far_method": "minmax", "near_method": "avg",
+            "alpha": "0.25", "beta": "0.125", "gamma": "0.625"}
+        assert ig["arm_contract"]["aavg"] == {
+            "far_method": "avg", "near_method": "avg",
+            "alpha": "0", "beta": "0", "gamma": "0"}
+    else:
+        assert ig["arm_contract"]["mavg"] == \
+            {"method": "tli_64_128_1024_c4_A"}
+        assert ig["arm_contract"]["aavg"] == \
+            {"method": "tli_64_128_1024_c4_A"}
     assert ig["arm_contract"]["FullKV"] == {"method": "none"}
     for arm, treat in ig["per_arm_treatment"].items():
         assert treat == ig["arm_contract"][arm], (arm, treat)
@@ -244,7 +361,7 @@ def test_P1_positive(base):
     # 046④：结论从结构化数值动态生成（fixture 口径 mavg +5.00 冠军）
     assert s["identity"]["samples_per_task"] == 3
     assert s["identity"]["tasks"] == 4
-    assert s["verdict"]["ruler64k_ranking"] == \
+    assert s["verdict"][f"ruler{TIER}_ranking"] == \
         "mavg 40.0 > FullKV 35.0 > aavg 30.0"
     assert "mavg（vs FullKV +5.00）居首" in s["verdict"]["conclusion"]
     assert "aavg（-5.00）居末" in s["verdict"]["conclusion"]
@@ -364,7 +481,7 @@ def test_P2_dynamic_conclusion(base):
     assert {a: v["avg"] for a, v in s["arms"].items()} == \
         {"aavg": 45.0, "mavg": 40.0, "FullKV": 35.0}, s["arms"]
     assert s["arms"]["aavg"]["delta_vs_fullkv"] == 10.0
-    assert s["verdict"]["ruler64k_ranking"] == \
+    assert s["verdict"][f"ruler{TIER}_ranking"] == \
         "aavg 45.0 > mavg 40.0 > FullKV 35.0"
     assert "aavg（vs FullKV +10.00）居首" in s["verdict"]["conclusion"]
     assert "FullKV（+0.00）居末" in s["verdict"]["conclusion"]
@@ -473,6 +590,147 @@ def test_O2_python_opt_summary_atomic(base):
           "无 .tmp 残留" % r.returncode)
 
 
+# ==== E116i 046③ 两残留（GPT 1633 审计）红绿用例 ====
+
+def _to_v2(base):
+    """三臂 legacy receipt 升级为 e116f-generation-v2：在既有 run 目录
+    （即 generation）内补齐四规范文件（result.json/manifest.json/
+    result.md/receipt.json），receipt 写入 publish_protocol/derived_dir/
+    generation_files——与生产 v2 产物（128K 三臂）同构。"""
+    for arm in ("mavg", "FullKV", "aavg"):
+        p = _result_path(base, arm)
+        rp = p + ".receipt.json"
+        r = json.load(open(rp))
+        gen = p + ".run-" + r["run_id"]
+        shutil.copyfile(p, os.path.join(gen, "result.json"))
+        shutil.copyfile(p + ".manifest.json",
+                        os.path.join(gen, "manifest.json"))
+        with open(os.path.join(gen, "result.md"), "w") as f:
+            f.write("synthetic v2 generation\n")
+        r["publish_protocol"] = "e116f-generation-v2"
+        r["outputs"]["derived_dir"] = gen
+        r["outputs"]["generation_files"] = {
+            "json": "result.json", "md": "result.md",
+            "manifest": "manifest.json", "receipt": "receipt.json"}
+        json.dump(r, open(rp, "w"), indent=1, ensure_ascii=False)
+        shutil.copyfile(rp, os.path.join(gen, "receipt.json"))
+
+
+def _run_swap_wrapper(base, mode, opt_o=False):
+    """046③ 残留 B 交错注入：经 wrapper 进程跑 analyzer（hook
+    _read_bytes 或消费前完整切换），返回 (CompletedProcess, mark 路径)。"""
+    wpath = os.path.join(base, f"swap_wrapper_{mode}.py")
+    with open(wpath, "w", encoding="utf-8") as f:
+        f.write(_SWAP_WRAPPER)
+    mark = os.path.join(base, f"swap_{mode}.mark")
+    cmd = [sys.executable] + (["-O"] if opt_o else []) + [
+        wpath, mode, SCRIPT, _result_path(base, "mavg"), mark,
+        "--results-dir", os.path.join(base, "results"),
+        "--pred-root", os.path.join(base, "pred_root")]
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          cwd=REPO), mark
+
+
+def test_P3_v2_positive(base):
+    """P3（046③）：三臂升级为 e116f-generation-v2 → v2 消费路径全过：
+    数值与 P1 相同、逐臂 publish_protocol/derived_dir 单指针标注、
+    legacy_protocol=false、publish_protocol_bound 仍闭合。"""
+    _to_v2(base)
+    r = _run(base)
+    assert r.returncode == 0, (r.returncode, r.stdout[-1200:],
+                               r.stderr[-800:])
+    s = json.load(open(os.path.join(base, "results", SUMMARY)))
+    assert {a: v["avg"] for a, v in s["arms"].items()} == FIXTURE_AVG, \
+        s["arms"]
+    ig = s["identity_gate"]
+    for arm in ("mavg", "FullKV", "aavg"):
+        proto = ig["per_arm_receipt_protocol"][arm]
+        assert proto["publish_protocol"] == "e116f-generation-v2", \
+            (arm, proto)
+        assert proto["legacy_protocol"] is False, (arm, proto)
+        assert proto["generation_dir_source"] == "outputs.derived_dir", \
+            (arm, proto)
+        assert s["arms"][arm]["legacy_protocol"] is False, s["arms"]
+    assert s["closure"]["publish_protocol_bound"] is True
+    print("P3 PASS  v2 协议三臂 → 单指针解析全过，数值 40.0/35.0/30.0 "
+          "不变；publish_protocol/derived_dir 逐臂闭合，legacy 标注为 "
+          "false")
+
+
+def test_N10_v2_missing_roles(base):
+    """N10（046③ 残留 A）：v2 receipt 的 generation_files 缺必需角色
+    → fail-closed 拒收。a = 审计原始反例（单角色映射 {"scorer": ...}，
+    修复前非空即过、exit=0 可绕过四规范文件检查）；b = 仅缺一个角色
+    （md），python -O 下重跑。"""
+    _to_v2(base)
+    rp = _receipt_path(base, "mavg")
+    r = json.load(open(rp))
+    r["outputs"]["generation_files"] = {"scorer": "scorer.manifest.json"}
+    json.dump(r, open(rp, "w"), indent=1, ensure_ascii=False)
+    _expect_reject(base, "N10a(v2 单角色映射)", needle="缺必需角色")
+    # 子例 b：四角色只缺 md，python -O 下重跑（门禁不依赖 assert）
+    base_b = os.path.join(os.path.dirname(base), "fx_N10b")
+    os.makedirs(base_b)
+    _copy_fixture(base_b, _FIXTURE)
+    _to_v2(base_b)
+    rp = _receipt_path(base_b, "mavg")
+    r = json.load(open(rp))
+    del r["outputs"]["generation_files"]["md"]
+    json.dump(r, open(rp, "w"), indent=1, ensure_ascii=False)
+    _expect_reject(base_b, "N10b(v2 缺 md 角色)", opt_o=True,
+                   needle="缺必需角色")
+
+
+def test_N11_read_swap(base):
+    """N11（046③ 残留 B）：消费者取到旧 result bytes 后、读 receipt 前，
+    另一发布者完整安装新代际 → bytes 快照绑定必须拒收（修复前 exit=0
+    且 summary 记旧均值 40 配新 result SHA——旧值配新哈希）；
+    a=常解释器拒收、b=python -O 拒收、c=post_swap 控制组（完整切换
+    先于消费）必须以新值+新哈希一致通过。"""
+    _to_v2(base)
+    _place_sentinel_summary(base)
+    # -- a：读交换 → 必须拒收，且注入确实发生（mark 在位）--
+    r, mark = _run_swap_wrapper(base, "read_swap")
+    assert os.path.exists(mark), \
+        "N11a: 交错注入未触发（wrapper hook 失效，负例不可信）"
+    assert r.returncode != 0, ("N11a: 读交换后仍 exit=0（旧值配新哈希）",
+                               r.stdout[-500:])
+    assert "E119-GATE-FAIL" in r.stderr, r.stderr[-800:]
+    cur = json.load(open(os.path.join(base, "results", SUMMARY)))
+    assert cur == SENTINEL, "N11a: 拒收路径覆盖了旧 summary"
+    print("  N11a(读交换拒收) PASS  exit=%d，注入已触发，旧 summary 未"
+          "覆盖；拒绝原因: %s"
+          % (r.returncode, r.stderr.strip().splitlines()[-1][:110]))
+    # -- b：python -O 同款读交换（新鲜副本；门禁不依赖 assert）--
+    base_b = os.path.join(os.path.dirname(base), "fx_N11b")
+    os.makedirs(base_b)
+    _copy_fixture(base_b, _FIXTURE)
+    _to_v2(base_b)
+    r, mark = _run_swap_wrapper(base_b, "read_swap", opt_o=True)
+    assert os.path.exists(mark), "N11b: python -O 交错注入未触发"
+    assert r.returncode != 0, ("N11b: python -O 读交换后仍 exit=0",
+                               r.stdout[-500:])
+    print("  N11b(python -O 读交换) PASS  exit=%d，快照绑定门禁不依赖 "
+          "assert" % r.returncode)
+    # -- c：post_swap 控制组——完整切换先于消费 → 新值+新哈希通过 --
+    base_c = os.path.join(os.path.dirname(base), "fx_N11c")
+    os.makedirs(base_c)
+    _copy_fixture(base_c, _FIXTURE)
+    _to_v2(base_c)
+    r, mark = _run_swap_wrapper(base_c, "post_swap")
+    assert os.path.exists(mark), "N11c: 控制组切换未执行"
+    assert r.returncode == 0, ("N11c: 完整切换先于消费仍被拒（拒收过度）",
+                               r.stderr[-800:])
+    s = json.load(open(os.path.join(base_c, "results", SUMMARY)))
+    assert s["arms"]["mavg"]["avg"] == 80.0, s["arms"]
+    new_sha = _sha(_result_path(base_c, "mavg"))
+    assert s["inputs"]["mavg"]["result_sha256"] == new_sha, s["inputs"]
+    assert s["arms"]["mavg"]["receipt_run_id"].endswith("-next"), \
+        s["arms"]["mavg"]
+    print("  N11c(post-swap 控制) PASS  新代际 avg 80.0 与新 result SHA "
+          "一致通过——拒收只针对交错，不拒绝合法代际更新")
+
+
 def main():
     global PASS, _FIXTURE
     root_tmp = tempfile.mkdtemp(prefix="e119_ident_")
@@ -495,6 +753,9 @@ def main():
             ("O1", test_O1_python_opt),
             ("N9", test_N9_summary_atomic),
             ("O2", test_O2_python_opt_summary_atomic),
+            ("P3", test_P3_v2_positive),
+            ("N10", test_N10_v2_missing_roles),
+            ("N11", test_N11_read_swap),
         ]
         for tag, fn in cases:
             base = os.path.join(root_tmp, f"fx_{tag}")
@@ -504,7 +765,7 @@ def main():
             PASS += 1
     finally:
         shutil.rmtree(root_tmp, ignore_errors=True)
-    print(f"\nE119 crossarm identity ALL PASS ({PASS}/13)")
+    print(f"\nE119 crossarm identity ALL PASS ({PASS}/16) [tier={TIER}]")
 
 
 if __name__ == "__main__":

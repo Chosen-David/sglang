@@ -26,7 +26,12 @@
     分数 mavg 40.0 > FullKV 35.0 > aavg 30.0（与生产排序方向一致）；
   - 三臂 formal/scorer 脚本 SHA 互相一致（047 公平门禁的正例口径）。
 
-用法： python3 gen_e119_min_fixture.py [dest]   # 缺省 dest = 本脚本所在目录
+用法： python3 gen_e119_min_fixture.py [dest] [--tier 64k|128k]
+  缺省 dest = 本脚本所在目录、tier = 64k（与已入库 e119_min 逐字节一致）。
+  --tier 128k：生成 128K 档变体（L131072、e119_ruler128k_formal_* 产物
+  名、ARM_CONTRACT 与 analyze_e119_ruler128k_formal.py 一致——128K 批次
+  TLI 臂 treatment 仅落盘 method=tli_64_128_1024_c4_A），供
+  test_e119_crossarm_identity.py 128k 档测试现场重建使用（不入库）。
 生成产物逐字节确定（可重复运行校验入库文件无漂移）。
 """
 import hashlib
@@ -39,6 +44,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TASKS = ["niah_single_1", "niah_multiquery", "cwe", "vt"]
 ROWS = 3                       # 每任务行数（= manifest min_samples）
 LNUM, LNAME = 65536, "L65536"
+RESULT_PREFIX = "e119_ruler64k_formal"
 PRED_POSTFIX = "_1024"
 PRED_DIR = "pred" + PRED_POSTFIX
 METHOD_TLI = "tli_64_128_1024_c4_A"
@@ -53,6 +59,28 @@ ARM_CONTRACT = {
              "alpha": "0", "beta": "0", "gamma": "0"},
     "FullKV": {"method": "none"},
 }
+
+
+def _configure(tier):
+    """按档位覆盖常量（64k = 默认，与入库 e119_min 逐字节一致）。"""
+    global LNUM, LNAME, RESULT_PREFIX, RUN_IDS, ARM_CONTRACT
+    if tier == "64k":
+        return
+    if tier == "128k":
+        LNUM, LNAME = 131072, "L131072"
+        RESULT_PREFIX = "e119_ruler128k_formal"
+        RUN_IDS = {"mavg": "20261010120000-000001-0001",
+                   "FullKV": "20261010120000-000002-0002",
+                   "aavg": "20261010120000-000003-0003"}
+        # 128K 批次：TLI 臂 treatment 只落盘 method（与
+        # analyze_e119_ruler128k_formal.py 的 ARM_CONTRACT 逐字段一致）
+        ARM_CONTRACT = {
+            "mavg": {"method": METHOD_TLI},
+            "aavg": {"method": METHOD_TLI},
+            "FullKV": {"method": "none"},
+        }
+        return
+    raise SystemExit(f"未知 tier: {tier!r}（可选 64k|128k）")
 # 与生产排序方向一致的合成分数（mavg > FullKV > aavg）
 SCORES = {
     "mavg": {"niah_single_1": 40.0, "niah_multiquery": 44.0,
@@ -130,7 +158,7 @@ def generate(dest):
                              _answers_sha=_sha16(r["answers"]))
                         for i, r in enumerate(src_rows)]
             run_dir = os.path.join(
-                results, f"e119_ruler64k_formal_{arm.lower()}.json"
+                results, f"{RESULT_PREFIX}_{arm.lower()}.json"
                 f".run-{RUN_IDS[arm]}")
             der_fp = os.path.join(run_dir, "pred_root", LNAME, PRED_DIR,
                                   best_file)
@@ -148,7 +176,7 @@ def generate(dest):
     # ---- 三臂 result / manifest / receipt / scorer manifest ----
     for arm in ARM_DIRS:
         cell_key = arm_files[arm]["cell_key"]
-        result_name = f"e119_ruler64k_formal_{arm.lower()}.json"
+        result_name = f"{RESULT_PREFIX}_{arm.lower()}.json"
         result_fp = os.path.join(results, result_name)
         run_dir = os.path.join(results, result_name + ".run-" + RUN_IDS[arm])
         tasks_scores = SCORES[arm]
@@ -262,4 +290,15 @@ def generate(dest):
 
 
 if __name__ == "__main__":
-    generate(sys.argv[1] if len(sys.argv) > 1 else HERE)
+    argv = sys.argv[1:]
+    dest, tier = None, "64k"
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--tier":
+            tier = argv[i + 1]
+            i += 2
+        else:
+            dest = argv[i]
+            i += 1
+    _configure(tier)
+    generate(dest if dest else HERE)
