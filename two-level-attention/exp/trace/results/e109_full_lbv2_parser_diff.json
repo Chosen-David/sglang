@@ -1,0 +1,238 @@
+{
+  "experiment": "E117b_lbv2_parser_diff_table",
+  "parser_version": "official-strict-v1",
+  "spec": "_id → raw_pred → old_choice → official_choice → answer → old_judge → new_judge",
+  "arms": {
+    "FullKV": [
+      {
+        "_id": "67249705bb02136c067d76d1",
+        "raw_pred": "To determine which feature film with a publication date after 2003 has the smallest duration, we need to examine the provided data for each of the given options and compare their publication dates and durations.\n\n### Step-by-step Analysis:\n\n#### Option (A): Q470665 - \"Secretariat\"\n- **Publication Date**: 2010/10/8\n- **Duration**: 123 minutes\n\n#### Option (B): Q1229857\n- **No data provided** for this option.\n\n#### Option (C): Q490464\n-",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "D",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f95e11bb02136c067c5370",
+        "raw_pred": "To determine the correct answer, we need to analyze the organization addresses in the provided text and count the frequency of country mentions. Here's a breakdown of the process:\n\n1. **Identify the country for each organization address**:\n   - Countries are typically identified by the country code (e.g., \"US\" for United States, \"CN\" for China, \"DE\" for Germany, \"IT\" for Italy, \"JP\" for Japan, etc.).\n   - Some entries may have the country name explicitly mentioned (e.g., \"Germany\", \"China\", \"United States\", etc.).\n\n2. **Count the frequency of",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "B",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "6713066fbb02136c067d3214",
+        "raw_pred": "To determine which player is the most selfish in the fourth round of the game, we need to examine the bids made by each player during that round and assess their behavior based on the game rules and the nature of the \"selfish and greedy\" strategy described in the prompt.\n\n### Step-by-step Analysis:\n\n1. **Understand the Game Rules:**\n   - Each player independently proposes a bid.\n   - If the total of all bids does not exceed 100, each player receives their bid amount.\n   - If the total exceeds 100, all players receive nothing.\n\n2. **Identify the Fourth Round:",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "D",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f2b5ec821e116aacb2b1ec",
+        "raw_pred": "To determine the correct answer, we need to identify the album with the lowest rating among all albums by its artist, and ensure that the artist has at least one other album with a rating higher than 80.\n\nLet's analyze the data:\n\n1. **Artist: Post Malone**  \n   - Album: *Beerbongs & Bentleys* - Rating: 53  \n   - Other albums: None listed with a rating higher than 80.\n\n2. **Artist: Youngboy Never Broke Again**  \n   - Album: *Until Death Call My Name* - Rating: 65  \n   - Other albums",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "C",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f8c6b4bb02136c067c4480",
+        "raw_pred": "To determine which duration has the worst situation in terms of Palestinian deaths and injuries per day, we need to analyze the number of deaths and injuries reported in each of the specified durations.\n\n### Duration A: 28 June 2024 to 29 July 2024\n- **Total deaths**: From 28 June to 29 July, the text reports that between 7 October 2023 and 29 July 2024, at least **39,363 Palestinians were killed**.\n- **Total injuries**: Between 7 October 2023",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "C",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      }
+    ],
+    "mavg": [
+      {
+        "_id": "66f299b3821e116aacb29cfa",
+        "raw_pred": "To translate the Zhuang sentence \"Vangz Vwnzsiu youq ndaw ngoenzgeiq sij naeuz: Moix ngoenz cungj dwgrengz dangqmaz, hoeng ndaw sim gig vaiqlag.\" into Chinese, we need to break it down and understand the meaning of each part:\n\n- **Vangz Vwnzsiu** = 黄文秀 (a name, \"Huang Wenxiu\")\n- **youq** = 在 (in, at)\n- **ndaw** = 日记 (diary)\n- **ngoenzgeiq",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "B",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "67249705bb02136c067d76d1",
+        "raw_pred": "To determine which feature film with a publication date after 2003 has the smallest duration, we need to examine the provided data for each of the listed options and compare their publication dates and durations.\n\n### Step-by-step Analysis:\n\n#### Option (A): Q470665 - \"Secretariat\"\n- **Publication date**: 2010/10/8\n- **Duration**: 123 minutes\n\n#### Option (B): Q1229857 (Not found in the provided data)\n\n#### Option (C): Q490464 (Not found in the",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "D",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f95e11bb02136c067c5370",
+        "raw_pred": "To determine the correct answer, we need to analyze the organization addresses in the provided text and count the frequency of country mentions. Here's a summary of the most frequently mentioned countries:\n\n1. **United States (US)**: This is the most frequently mentioned country, as many addresses include \"US\" in the postal code or city-state.\n2. **China (CN)**: This is the second most frequently mentioned country, as several addresses include \"CN\" in the postal code or city.\n3. **Japan (JP)**: This is the third most frequently mentioned country, as several addresses include \"JP\" in the postal code or",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "B",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "6713066fbb02136c067d3214",
+        "raw_pred": "To determine which player is the most selfish in the fourth round, we need to examine the bids made by each player in that round and assess their behavior based on the game rules and the definition of \"selfish and greedy.\"\n\n### Step-by-step Analysis:\n\n#### 1. **Understand the Game Rules:**\n- Each player independently proposes a bid.\n- If the **sum of all bids does not exceed 100**, each player receives their bid amount.\n- If the **sum exceeds 100**, **all players receive nothing**.\n\n#### 2. **Identify the Fourth Round:**\n- The fourth round",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "D",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f8c6b4bb02136c067c4480",
+        "raw_pred": "To determine which duration has the worst situation in terms of Palestinian deaths and injuries per day, we need to calculate the number of deaths and injuries per day for each of the three durations.\n\n### Step 1: Extract the total number of deaths and injuries for each duration\n\n#### **Duration A: 28 June 2024 to 29 July 2024**\n- **Total deaths**: From 28 June to 29 July, the total number of deaths is **37,765 (as of 27 June)** + **188 (25–29 July",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "C",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      }
+    ],
+    "aavg": [
+      {
+        "_id": "67285e1dbb02136c067d901b",
+        "raw_pred": "To determine which news program in the TV comedy genre ran for the fewest seasons, we need to examine the data provided for each of the choices.\n\n### Step 1: Identify the TV comedy genre\nFrom the text, we know that the **TV comedy** genre is represented by the entity **Q7696995**.\n\n### Step 2: Analyze the choices\nWe will examine the attributes of each choice to determine if it is a **TV comedy** and how many **seasons** it ran for.\n\n---\n\n#### **(A) Q1130799**\n- **Name**:",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "A",
+        "old_judge": 1.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "671b1335bb02136c067d4e88",
+        "raw_pred": "To determine which player won the most times in the game, we need to count the number of wins for each player based on the game results provided in the `player_data` section of the text.\n\n### Step-by-step Analysis:\n\n1. **Examine the `player_data` for each player:**\n   - Each player has a `records` array that contains the numbers they chose in each round.\n   - The `round_records` array contains the results of each round, including the `winner` and `winner_num` (number of players who won).\n\n2. **Determine the number of wins for each player:**\n  ",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "C",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "672861afbb02136c067d90d8",
+        "raw_pred": "To determine how many matches Q439302 has played as a member of Q18521, we need to analyze the data provided in the text.\n\nFrom the text, we can see that Q439302 is associated with the New York Mets (Q18521) through the \"member of sports team\" relation. The data also includes a list of \"participant\" relations, which likely represent the players who have been part of the team.\n\nLooking at the \"participant\" relations for Q18521 (New York Mets), we can count the number of unique player",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "C",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f299b3821e116aacb29cfa",
+        "raw_pred": "To translate the Zhuang sentence \"Vangz Vwnzsiu youq ndaw ngoenzgeiq sij naeuz: Moix ngoenz cungj dwgrengz dangqmaz, hoeng ndaw sim gig vaiqlag.\" into Chinese, we need to break it down and understand the meaning of each word and phrase.\n\n- **Vangz Vwnzsiu** = 黄文秀 (a name, \"Huang Wenxiu\")\n- **youq** = 在 (in, at)\n- **ndaw** = 日记 (diary)\n- **ngoenz",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "B",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f2a46d821e116aacb2a41a",
+        "raw_pred": "To determine how many **different** comments in the given document talk about \"Mexican,\" we need to:\n\n1. **Identify all comments** that mention \"Mexican\" (case-insensitive).\n2. **Remove duplicates** (comments with identical text).\n3. **Count the remaining unique comments**.\n\n### Step 1: Identify Comments with \"Mexican\"\nWe scan through the text and extract all comments that contain the word \"Mexican\" (case-insensitive). Here are the relevant comments:\n\n1. \"I love this place! My fiance And I go here atleast once a week. The portions are huge! Food",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "B",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "67249705bb02136c067d76d1",
+        "raw_pred": "To determine which feature film with a publication date after 2003 has the smallest duration, we need to examine the provided data for each of the given choices.\n\n### Step 1: Filter by publication date after 2003\nWe look for films with a publication date after 2003.\n\n- **Q470665 (Secretariat)**: Publication date is 2010/10/8 (after 2003)\n- **Q1229857**: Not found in the data\n- **Q490464**: Not",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "D",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "672494e5bb02136c067d7697",
+        "raw_pred": "To determine which lawyer was educated at Phillips Exeter Academy, we need to examine the \"educated at\" relations for each of the given choices.\n\n- **(A) Q503119**: This is the entity for \"John Adams,\" who was a lawyer and statesman. He was educated at Harvard University, not Phillips Exeter Academy.\n- **(B) Q42402**: This is the entity for \"John Quincy Adams,\" who was also a lawyer and statesman. He was educated at Harvard University, not Phillips Exeter Academy.\n- **(C) Q534297",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "C",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "6713066fbb02136c067d3214",
+        "raw_pred": "To determine which player is the most selfish in the fourth round of the game, we need to examine the bids made by each player in that round. The \"most selfish\" player would be the one who bid the highest amount, as selfishness in this context implies a desire to maximize personal gain, even if it leads to the total exceeding 100 and thus no one receiving anything.\n\nFrom the data provided:\n\n- **Round 4**:\n  - **player_0**: bid 30\n  - **player_1**: bid 30\n  - **player_2**: bid 30\n ",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "D",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66ec332a821e116aacb1c042",
+        "raw_pred": "To find the Black-Scholes value of the call option, we use the Black-Scholes formula:\n\n$$\nC = S_0 N(d_1) - X e^{-rT} N(d_2)\n$$\n\nWhere:\n- $ S_0 $ is the current stock price\n- $ X $ is the exercise price\n- $ r $ is the risk-free interest rate\n- $ T $ is the time to expiration\n- $ N(d) $ is the cumulative distribution function of the standard normal distribution\n- $ d_1 $ and $ d_2 $ are given by:\n\n$$\nd",
+        "old_choice": "C",
+        "official_choice": null,
+        "answer": "B",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "671b1480bb02136c067d4f14",
+        "raw_pred": "To determine which player won the most times in the game, we need to count the number of wins for each player. A \"win\" is indicated by the message \"Congratulation you won.\" in the prompt array for each player.\n\nLet's count the number of wins for each player:\n\n- **player_0**: Won in Round 1, Round 4, Round 6, Round 13, Round 18 → 6 wins\n- **player_2**: Won in Round 3, Round 6, Round 15, Round 18 → 4 wins\n- **player_4",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "A",
+        "old_judge": 1.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f2b5ec821e116aacb2b1ec",
+        "raw_pred": "To determine the correct answer, we need to identify the album with the **lowest rating** among all albums by its artist, and ensure that the artist has **at least one other album with a rating higher than 80**.\n\nLet's analyze the choices based on the data provided:\n\n### (A) Money Changes Everything\n- **Artist**: The Roots\n- **Rating**: 78\n- **Other albums by The Roots**:\n  - *Food & Drink* (80)\n  - *The Fan* (80)\n  - *Undun* (80)\n  - *Tongues*",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "C",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "6724c1d4bb02136c067d77ec",
+        "raw_pred": "To determine which New Jersey city with a population under 350,000 is the biggest in terms of area, we need to examine the data provided for cities in New Jersey.\n\nFrom the text, we have the following information about cities in New Jersey:\n\n1. **Camden (Q138367)**:\n   - Population: 77,344 (as of 2010)\n   - Area: 26.782579 square kilometers\n\n2. **Paterson (Q138391)**:\n   - Population: 14",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "A",
+        "old_judge": 1.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f2a59d821e116aacb2a553",
+        "raw_pred": "To determine the correct answer, we need to identify the time that satisfies the condition of being \"wet-cold\" without sun. The definition of \"wet-cold\" is:\n\n- **Humidity > 95**\n- **Temperature < -5**\n\nAdditionally, we need to ensure that the **sun** value is **0** (indicating no sun).\n\nNow, let's examine the choices:\n\n### (A) 2017-01-22T04:10:00Z\nFrom the data:\n- **Humidity**: 99\n- **Temperature**: -",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "A",
+        "old_judge": 1.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f3a311821e116aacb2de19",
+        "raw_pred": "To answer the question, we need to identify the company that:\n\n1. **Occurred after the deal date in 2022 (including 2022)**.\n2. **Has the highest revenue** among the events with the **most occurrences** in the \"Deal Type 2\" column.\n\n### Step 1: Identify the \"Deal Type 2\" column\nFrom the data, the \"Deal Type 2\" column appears to be a column that contains the **series** (e.g., Series A, Series B, etc.) of the deal.\n\n### Step 2: Filter for events that occurred after",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "B",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      },
+      {
+        "_id": "66f8c6b4bb02136c067c4480",
+        "raw_pred": "To determine which duration has the worst situation in terms of Palestinian deaths and injuries per day, we need to calculate the number of deaths and injuries per day for each duration.\n\n### Step 1: Extract the total number of deaths and injuries for each duration.\n\n#### **Duration A: 28 June 2024 to 29 July 2024**\n- **28 June 2024**: 139 deaths and 331 injuries\n- **29 July 2024**: 188 deaths and 520 injuries\n- **Total deaths**: ",
+        "old_choice": "A",
+        "official_choice": null,
+        "answer": "C",
+        "old_judge": 0.0,
+        "new_judge": 0.0
+      }
+    ]
+  }
+}

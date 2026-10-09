@@ -17,6 +17,7 @@ import numpy as np
 import random
 import argparse
 
+from benchmark.LongBench.lbv2_choice import extract_choice_official
 from sparse_attn.arguments import add_sparse_attn_args
 from sparse_attn.patches import register_patch
 from sparse_attn.metrics import get_metrics
@@ -119,24 +120,12 @@ def post_process(response, model_name):
 
 
 def extract_choice_letter(text):
-    """LongBench-v2 四选一解析（官方口径优先 + 首字母兜底），无匹配返回 None：
-    ① 官方：'The correct answer is (X)'；② 官方：'The correct answer is X'；
-    ③ 兜底：首个独立的 A/B/C/D 字母（大小写兼容）。
-
-    注意：与 eval.py 的 lbv2_choice_score 保持同一逻辑（此处不 import metrics.py，
-    因其顶层 import jieba 等打分依赖，GPU 推理机上未必安装）。两处需保持同步。
+    """LongBench-v2 四选一解析（E117b 统一到 lbv2_choice.py 官方口径）：
+    仅 'The correct answer is (X)' / 'The correct answer is X' 两条大小写
+    敏感格式，无匹配返回 None。历史兜底（IGNORECASE 首个独立字母）会把
+    冠词 a 判成选项 A，已删除——pred_choice 落盘值与正式评分口径一致。
     """
-    if not text:
-        return None
-    t = text.replace("*", "")
-    m = re.search(r"The correct answer is \(([A-D])\)", t, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    m = re.search(r"The correct answer is ([A-D])", t, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    m = re.search(r"\b([ABCD])\b", t, flags=re.IGNORECASE)
-    return m.group(1).upper() if m else None
+    return extract_choice_official(text)
 
 
 def get_pred(

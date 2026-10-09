@@ -4,6 +4,7 @@ import json
 import argparse
 import numpy as np
 
+from .lbv2_choice import extract_choice_official, LBV2_PARSER_VERSION
 from .metrics import (
     qa_f1_score,
     rouge_zh_score,
@@ -18,26 +19,14 @@ from .metrics import (
 )
 
 def lbv2_choice_score(prediction, ground_truth, all_classes=None):
-    """LongBench-v2（lbv2）四选一 accuracy：按官方口径解析 pred 字母（'The correct
-    answer is (X)' → 'The correct answer is X' → 首个独立 A/B/C/D 兜底，大小写兼容，
-    无匹配记 0 分），与真值字母比对。
+    """LongBench-v2（lbv2）四选一 accuracy：官方口径（THUDM/LongBench）两条
+    大小写敏感模式解析 pred 字母，无匹配记 0 分，与真值字母比对。
 
-    注意：解析逻辑与 pred.py 的 extract_choice_letter 保持同步（两处不互相 import，
-    因 metrics.py 顶层依赖 jieba 等打分库，GPU 推理机上未必安装）。
+    解析统一在 lbv2_choice.py（E117b，GPT TL-LBV2-PARSER-037）：历史实现
+    的 IGNORECASE + 独立字母兜底会把冠词 "a" 判成选项 A（503×3 重放实测
+    aavg 4 个假阳性，三臂排序反转），已删除。
     """
-    pred_choice = None
-    if prediction:
-        t = prediction.replace("*", "")
-        m = re.search(r"The correct answer is \(([A-D])\)", t, flags=re.IGNORECASE)
-        if m:
-            pred_choice = m.group(1).upper()
-        else:
-            m = re.search(r"The correct answer is ([A-D])", t, flags=re.IGNORECASE)
-            if m:
-                pred_choice = m.group(1).upper()
-            else:
-                m = re.search(r"\b([ABCD])\b", t, flags=re.IGNORECASE)
-                pred_choice = m.group(1).upper() if m else None
+    pred_choice = extract_choice_official(prediction)
     gt = str(ground_truth).strip().upper()
     return 1.0 if (pred_choice is not None and pred_choice == gt) else 0.0
 

@@ -1,0 +1,71 @@
+{
+  "experiment": "E117b_lbv2_parser_official_rescore",
+  "date": "2026-10-09",
+  "supersedes": {
+    "file": "e109_full_lbv2.json",
+    "reason": "GPT TL-LBV2-PARSER-037：历史解析器 IGNORECASE 独立字母兜底把冠词 a 判成选项 A（假阳性）。正式口径统一为官方两条大小写敏感模式后全量重评，三臂排序反转。"
+  },
+  "parser": {
+    "version": "official-strict-v1",
+    "module": "benchmark/LongBench/lbv2_choice.py",
+    "semantics": "官方（THUDM/LongBench）两条大小写敏感模式，无兜底，无匹配记 0 分",
+    "star_strip": "off（官方无此行为；重放前实测 503×3 剥离与否解析逐位等价）"
+  },
+  "closure": {
+    "rows_per_arm": 503,
+    "three_arm_id_sets_equal": true,
+    "row_order_matches_source": true,
+    "answers_match_source": true,
+    "source_json": "/home/wangyuanshuo02/datasets/LongBench/data/lbv2.json",
+    "source_sha256": "15d61c22d92c96900b3c4948b6aeea218d3214b676a65df48e7b8555604c7fe2",
+    "arm_file_sha256": {
+      "FullKV": "67665479cd50a464d4f82ab7263ea64841d6326a09dc9868810c5e5ddf4c231c",
+      "mavg": "da2719cd8350b88967c92f9f67449ae685d1cac10c3b64f009860b33b18dc141",
+      "aavg": "1896ad19c04860351f06740e7d86790c6b94fb3aa02c36b967b36bdcd52da218"
+    }
+  },
+  "arms": {
+    "FullKV": {
+      "rows": 503,
+      "old_score": 32.21,
+      "old_correct": 162,
+      "official_score": 32.21,
+      "official_correct": 162,
+      "parse_diff_count": 5,
+      "false_positives_removed": 0,
+      "false_negatives_introduced": 0,
+      "delta_vs_fullkv_official": 0.0,
+      "v1_reported_score": 32.21
+    },
+    "mavg": {
+      "rows": 503,
+      "old_score": 32.01,
+      "old_correct": 161,
+      "official_score": 32.01,
+      "official_correct": 161,
+      "parse_diff_count": 5,
+      "false_positives_removed": 0,
+      "false_negatives_introduced": 0,
+      "delta_vs_fullkv_official": -0.2,
+      "v1_reported_score": 32.01
+    },
+    "aavg": {
+      "rows": 503,
+      "old_score": 32.6,
+      "old_correct": 164,
+      "official_score": 31.81,
+      "official_correct": 160,
+      "parse_diff_count": 15,
+      "false_positives_removed": 4,
+      "false_negatives_introduced": 0,
+      "delta_vs_fullkv_official": -0.4,
+      "v1_reported_score": 32.6
+    }
+  },
+  "verdict": {
+    "old_ranking": "aavg 32.60 > FullKV 32.21 > mavg 32.01（aavg +0.39 唯一超）",
+    "official_ranking": "FullKV 32.21 > mavg 32.01 > aavg 31.81",
+    "conclusion": "排序反转：官方口径下无 TLI 臂超过 FullKV；aavg 因 4 个兜底假阳性虚高。原「LB v2 冠军=aavg +0.39」结论撤销，以本文件口径为准。",
+    "diff_total": 25
+  }
+}
