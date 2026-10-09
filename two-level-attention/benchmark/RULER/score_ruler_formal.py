@@ -114,6 +114,28 @@
 #   不自哈希（避免自引用）：entry receipt 与 generation 内 receipt.json
 #   是两个不同文件，前者哈希后者。既有 64K/128K 生产 receipt（v2/legacy）
 #   一律不动，消费者按协议版本分流（见两个 analyzer 的 ⑨c）。
+# ===== #195（GPT 2026-10-10 0428 审计 059/060/061）=====
+#   TL-E119-YARN-RECEIPT-BINDING-059（P1）：_load_producer_yarn_receipt
+#       此前按 basename 找同名回执、分别记 SHA，不做同代交叉验证——
+#       「A 进程的预测配 B 进程的回执」可达（同名重跑/中断重跑/并发/
+#       事后改写）。修复：v2 回执（producer-yarn-config-v2，生成侧见
+#       pred_ruler.py）校验 status=complete + prediction_basename/
+#       SHA256/行数与 best-file 现算逐位一致，不一致/缺完成标记 →
+#       _fail；v1 回执降级 provenance=producer_receipt_v1_partial（只证
+#       factor 口径不证同代）；v1/v2 混装 → _fail（不混合证据代际）；
+#   TL-E119-YARN-RECEIPT-CLOSURE-060（P2）：validate_producer_receipt
+#       只校验开关与 factor——beta_fast/seed/模型 config hash/生产脚本
+#       hash 写入零校验。修复：严格 schema（yarn_receipt.py）+ 摘要保留
+#       完整配置指纹 + _check_producer_config_consistency 跨格一致性
+#       门禁（按 context_length 分组，同档内 model/rope/seed/脚本 hash
+#       经 effective_config_sha256 逐位一致；task/method/t/pred_postfix
+#       为分组自由字段）；
+#   TL-E119-YARN-CORRECTION-DISCOVERY-061（P2）：三份 128K
+#       .manifest.yarn_correction.json 的机器消费入口
+#       yarn_receipt.resolve_manifest_yarn_identity（同路径旁挂纠偏 →
+#       旧 yarn_factor 不再当 effective，返回 operator_declared_
+#       not_effective + null + 纠偏绑定哈希；target hash 失配 fail
+#       closed）；正式消费接线在 analyze_e119_ruler128k_formal.py。
 # 用法（单臂单 root）：
 #   python -u benchmark/RULER/score_ruler_formal.py \
 #     --root exp/results_ruler/e109_full_Qwen3-8B/L32768 \
@@ -150,7 +172,9 @@ from benchmark.RULER.score_ruler import (  # noqa: E402
     _validate_manifest_schema,
 )
 # 057：生产者原生 yarn receipt 探查/自洽校验（协议与生成侧共享同一口径）
+# 059/060（#195）：v2 同代绑定校验 + 严格 schema + 跨格配置一致性门禁
 from benchmark.RULER.yarn_receipt import (  # noqa: E402
+    RECEIPT_V1_VERSION, RECEIPT_VERSION, effective_config_sha256,
     producer_receipt_path_for, validate_producer_receipt,
 )
 
@@ -417,11 +441,29 @@ def _stamp_or_copy(src, dst, task, stamp):
 
 
 def _load_producer_yarn_receipt(pred_dir, best_basename, task, Lnum):
-    """057：探查 best-file 在原始目录的旁挂生产者 receipt 并做自洽校验。
+    """057+059/060：探查 best-file 旁挂生产者 receipt，做自洽 + 同代
+    绑定 + 严格 schema 校验。
 
     返回 receipt 摘要 dict；文件不存在 → None（legacy，如实标 missing）。
     存在但损坏/自相矛盾/协议不符/档位不符 → _fail（存在即证据：半写或
-    被篡改的 receipt 比缺失更危险，fail-closed 拒收整次发布）。"""
+    被篡改的 receipt 比缺失更危险，fail-closed 拒收整次发布）。
+
+    059 新增（producer-yarn-config-v2）同代绑定校验——修复前 formal
+    分别冻结「当前预测 SHA」与「当前回执 SHA」却不验证二者同代，「A
+    进程的预测配 B 进程的回执」可达（同名重跑/中断重跑/并发/事后改
+    写，GPT 审计 059 已复现：改预测+改回执仍 exit 0 标 producer_receipt）：
+      - v2：status 必须 complete（无完成标记=中断代际拒收）；
+        prediction_sha256 / prediction_lines 与 best-file 当前字节现算
+        逐位比对（不一致 → fail closed——预测与回执不同代）；
+      - v1（057 时代协议）无绑定字段 → 摘要 prediction_binding=None，
+        provenance 降级 producer_receipt_v1_partial（只证 factor 口径
+        不证同代），不冒充完整绑定证据。
+
+    060 新增：摘要保留完整配置指纹（model_path/model_config_sha256/
+    完整 rope_scaling/native_mpe/seed/max_gen/生产脚本/effective_
+    config_sha256），供 _check_producer_config_consistency 跨格门禁
+    比较（修复前只比较开关与 factor，beta_fast/seed/模型与脚本 hash
+    改 999/假值均可通过）。"""
     src_pred = os.path.join(pred_dir, best_basename)
     rcp_path = producer_receipt_path_for(src_pred)
     if not os.path.isfile(rcp_path):
@@ -439,15 +481,56 @@ def _load_producer_yarn_receipt(pred_dir, best_basename, task, Lnum):
         _fail(f"{rcp_path}: receipt.context_length={rcp['context_length']} "
               f"与所在目录档位 L{Lnum} 不一致——生产者证据与数据档位"
               f"冲突，fail closed（057）")
+    version = rcp["receipt_version"]
+    binding = None
+    if version == RECEIPT_VERSION:
+        # ---- 059 同代绑定：回执声明值 vs best-file 当前字节现算比对 ----
+        actual_sha = _file_sha256(src_pred)
+        actual_lines = _nlines(src_pred)
+        if actual_sha != rcp["prediction_sha256"]:
+            _fail(f"{rcp_path}: 回执声明 prediction_sha256="
+                  f"{rcp['prediction_sha256']} 与 best-file {best_basename} "
+                  f"当前字节 SHA256={actual_sha} 不一致——预测与回执不同"
+                  f"代（同名重跑/中断重跑/并发/事后改写），fail closed"
+                  f"（059）")
+        if actual_lines != rcp["prediction_lines"]:
+            _fail(f"{rcp_path}: 回执声明 prediction_lines="
+                  f"{rcp['prediction_lines']} 与 best-file {best_basename} "
+                  f"实际行数 {actual_lines} 不一致——fail closed（059）")
+        binding = {
+            "status": rcp["status"],
+            "run_id": rcp["run_id"],
+            "prediction_basename": rcp["prediction_basename"],
+            "prediction_sha256": rcp["prediction_sha256"],
+            "prediction_lines": rcp["prediction_lines"],
+            "verified_same_generation": True,
+        }
+    # v1：binding 保持 None（provenance 由 _resolve_yarn_identity 降级标注）
+    gp = rcp["generation_params"]
     return {
         "path": os.path.abspath(rcp_path),
         "sha256": _file_sha256(rcp_path),
-        "receipt_version": rcp["receipt_version"],
+        "receipt_version": version,
         "yarn_enabled": rcp["yarn_enabled"],
         "effective_yarn_factor": rcp["effective_yarn_factor"],
         "yarn_factor_source": rcp["yarn_factor_source"],
         "context_length": rcp["context_length"],
         "task": task,
+        # 059：None = v1 回执无同代绑定（只证 factor 口径不证同代）
+        "prediction_binding": binding,
+        # 060：配置指纹（跨格一致性门禁输入；task/method/t/pred_postfix
+        # 为分组自由字段，不进指纹——见 effective_config_sha256）
+        "config_fingerprint": {
+            "model_path": rcp["model_path"],
+            "model_config_sha256": rcp["model_config_sha256"],
+            "rope_scaling": rcp["rope_scaling"],
+            "native_max_position_embeddings":
+                rcp["native_max_position_embeddings"],
+            "seed": gp["seed"],
+            "max_gen": gp["max_gen"],
+            "producer_script": rcp["producer_script"],
+            "effective_config_sha256": effective_config_sha256(rcp),
+        },
     }
 
 
@@ -603,17 +686,70 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
     return tasks_manifest, cells_info, src_data_sha, producer_yarn
 
 
-def _resolve_yarn_identity(args, producer_yarn):
-    """057：run_identity 的 yarn 字段裁决（生产者证据优先）。
+def _check_producer_config_consistency(found):
+    """060（TL-E119-YARN-RECEIPT-CLOSURE）：跨格完整配置一致性门禁。
 
-    三条路径：
-      ① 全部格子有生产者 receipt → yarn/yarn_factor 取生产者 effective 值
-        （provenance="producer_receipt"）；操作者 CLI 声明与其冲突 →
-        _fail（事后声明不得覆盖实际值——128K 批次教训的核心门禁）；
+    修复前只比较 yarn_enabled/effective_factor 两项——回执声称保存的
+    完整 rope_scaling、模型 config hash、seed、生产脚本 hash 写入零
+    校验（GPT 审计 060 复现：beta_fast=999 / seed=999 / 模型与脚本假
+    hash 均通过）。
+
+    显式分组规则：按 receipt.context_length 分组（档位）；同一档内以下
+    字段必须逐格逐位一致——model_path、model_config_sha256、完整
+    rope_scaling、native_max_position_embeddings、producer_script
+    （路径+SHA）、generation_params.seed、generation_params.max_gen、
+    yarn 开关/effective factor/source（经 effective_config_sha256 规范
+    化摘要统一比较）。task / method / t / pred_postfix 为分组自由字段
+    （逐格允许变化，不进指纹）。跨档不比较——factor 等按档自动
+    （65536→2.0、131072→4.0）；跨档的 factor 全局唯一性由
+    _resolve_yarn_identity 的既有门禁（单一 effective 配置）承载。
+    不一致 → _fail 报告首个漂移字段链（fail closed，python -O 不失效）。"""
+    groups = {}
+    for key, cell in sorted(found.items()):
+        groups.setdefault(cell["context_length"], {})[key] = cell
+    for cl, cells in sorted(groups.items()):
+        hashes = {k: c["config_fingerprint"]["effective_config_sha256"]
+                  for k, c in cells.items()}
+        if len(set(hashes.values())) <= 1:
+            continue
+        ref_key = sorted(cells)[0]
+        ref = cells[ref_key]["config_fingerprint"]
+        # 先报具体字段（seed/model/rope/脚本 hash 等，诊断价值高），
+        # effective_config_sha256 是派生摘要留作兜底——按字母序先撞 SHA
+        # 会把「seed=42 vs 999」这类可定位漂移吞成不可读的 hex 失配
+        concrete = [f for f in sorted(ref)
+                    if f != "effective_config_sha256"]
+        for k in sorted(cells):
+            cur = cells[k]["config_fingerprint"]
+            for field in concrete:
+                if ref[field] != cur[field]:
+                    _fail(f"060 跨格配置漂移（L{cl} 档内）：{ref_key} 与 "
+                          f"{k} 的 config_fingerprint.{field} 不一致"
+                          f"（{ref[field]!r} vs {cur[field]!r}）——同一"
+                          f"运行同档的完整生产配置必须逐位一致，"
+                          f"fail closed（060）")
+        _fail(f"060 跨格配置漂移（L{cl} 档内）：effective_config_sha256 "
+              f"不一致（指纹差异来自 config_fingerprint 未展开收录的"
+              f"字段，如 yarn 开关/factor/source）{hashes}——"
+              f"fail closed（060）")
+
+
+def _resolve_yarn_identity(args, producer_yarn):
+    """057+059/060：run_identity 的 yarn 字段裁决（生产者证据优先）。
+
+    路径：
+      ① 全部格子有生产者 receipt → yarn/yarn_factor 取生产者 effective
+        值；provenance 按协议代际分流（059）：全部 v2（同代绑定已逐格
+        校验）→ "producer_receipt"；全部 v1 → 降级
+        "producer_receipt_v1_partial"（只证 factor 口径不证回执与预测
+        同代——057 时代产物不撤销、不冒充）；操作者 CLI 声明与生产者
+        证据冲突 → _fail（事后声明不得覆盖实际值）；
       ② 全部格子无 receipt（legacy）→ CLI 值如实降级
         provenance="operator_declared"，不冒充实际生效值；
-      ③ 部分有部分无 → _fail（单次 run_identity 不能混合「生产者证实」
-        与「操作者声明」两种口径——要么全证实要么全声明，fail closed）。
+      ③ 部分有部分无 / v1 与 v2 混合 → _fail（单次 run_identity 不得
+        混合两种口径/两种协议代际，fail closed）。
+    060：进入裁决前先做跨格完整配置一致性门禁（同档内模型/rope/seed/
+    脚本 hash 逐位一致，见 _check_producer_config_consistency）。
     _fail 走 SystemExit（非 assert），python -O 下门禁不失效。"""
     found = producer_yarn["cells"]
     missing = producer_yarn["missing"]
@@ -638,6 +774,15 @@ def _resolve_yarn_identity(args, producer_yarn):
               f"证据（缺 {sorted(missing)}）——单次 formal 的 run_identity "
               f"不能混合『生产者证实』与『操作者声明』两种口径，"
               f"fail closed（057）")
+    # 059：协议代际一致性——v1（只证 factor）与 v2（同代绑定）不得混装
+    versions = {c["receipt_version"] for c in found.values()}
+    if len(versions) > 1:
+        _fail(f"生产者 yarn receipt 协议代际混合：{sorted(versions)}——"
+              f"单次 run_identity 不得混合 v1（factor 口径）与 v2（同代"
+              f"绑定）两种证据代际，fail closed（059）")
+    version = versions.pop()
+    # 060：跨格完整配置一致性门禁（同档内应逐位一致的字段）
+    _check_producer_config_consistency(found)
     enableds = {c["yarn_enabled"] for c in found.values()}
     factors = {c["effective_yarn_factor"] for c in found.values()}
     if len(enableds) > 1 or len(factors) > 1:
@@ -661,21 +806,35 @@ def _resolve_yarn_identity(args, producer_yarn):
         _fail(f"yarn factor 声明冲突：CLI --yarn-factor={args.yarn_factor} "
               f"vs 生产者 receipt effective={factor!r}（yarn_enabled="
               f"{enabled}）——生产者证据优先，fail closed（057）")
+    provenance = ("producer_receipt" if version == RECEIPT_VERSION
+                  else "producer_receipt_v1_partial")
+    evidence = {
+        "status": "present",
+        "protocol": version,
+        # 059：v2 才声称同代绑定（prediction SHA/行数已逐格比对）；
+        # v1 只证 factor 口径，不冒充回执与预测同代
+        "same_generation_bound": version == RECEIPT_VERSION,
+        # 060：完整配置跨格一致性门禁已执行（此前只比开关+factor）
+        "config_consistency_enforced": True,
+        "cells_with_receipt": len(found),
+        "cells_total": n_total,
+        "yarn_enabled": enabled,
+        "effective_yarn_factor": factor if enabled else None,
+        "receipts": {k: {"path": v["path"], "sha256": v["sha256"]}
+                    for k, v in sorted(found.items())},
+    }
+    if version == RECEIPT_V1_VERSION:
+        evidence["note"] = ("v1 回执（057 时代协议）只证 factor 口径，"
+                            "不证回执与预测同代（无 prediction SHA/行数"
+                            "绑定字段）——producer_receipt_v1_partial 降级"
+                            "标注（059）；完整配置 schema 与跨格一致性"
+                            "门禁仍已执行（060）")
     return {
         "yarn": enabled,
         "yarn_factor": factor if enabled else None,
-        "yarn_factor_provenance": "producer_receipt",
+        "yarn_factor_provenance": provenance,
         "yarn_factor_operator_declared": args.yarn_factor,
-        "producer_evidence": {
-            "status": "present",
-            "protocol": "producer-yarn-config-v1",
-            "cells_with_receipt": len(found),
-            "cells_total": n_total,
-            "yarn_enabled": enabled,
-            "effective_yarn_factor": factor if enabled else None,
-            "receipts": {k: {"path": v["path"], "sha256": v["sha256"]}
-                        for k, v in sorted(found.items())},
-        },
+        "producer_evidence": evidence,
     }
 
 
@@ -775,15 +934,26 @@ def main():
                 min_samples=args.min_samples, data_root=args.data_root)
 
         # ---- 057：run_identity 的 yarn 字段裁决（生产者证据优先；
-        #      冲突 fail-closed；legacy 无证据 → operator_declared）----
+        #      冲突 fail-closed；legacy 无证据 → operator_declared；
+        #      059：v1 回执 → producer_receipt_v1_partial 降级标注）----
         yarn_id = _resolve_yarn_identity(args, producer_yarn)
-        if yarn_id["yarn_factor_provenance"] == "producer_receipt":
+        _prov = yarn_id["yarn_factor_provenance"]
+        if _prov == "producer_receipt":
             pe = yarn_id["producer_evidence"]
-            print(f"[formal] yarn 身份：producer_receipt 证实 yarn="
-                  f"{yarn_id['yarn']} effective_factor="
+            print(f"[formal] yarn 身份：producer_receipt（v2 同代绑定）"
+                  f"证实 yarn={yarn_id['yarn']} effective_factor="
                   f"{yarn_id['yarn_factor']!r}"
                   f"（{pe['cells_with_receipt']}/{pe['cells_total']} 格"
-                  f"生产者证据闭合，057）")
+                  f"生产者证据闭合，prediction SHA/行数逐格比对通过，"
+                  f"057+059）")
+        elif _prov == "producer_receipt_v1_partial":
+            pe = yarn_id["producer_evidence"]
+            print(f"[formal] yarn 身份：v1 回执只证 factor 口径不证同代 → "
+                  f"producer_receipt_v1_partial 降级（yarn="
+                  f"{yarn_id['yarn']} effective_factor="
+                  f"{yarn_id['yarn_factor']!r}，"
+                  f"{pe['cells_with_receipt']}/{pe['cells_total']} 格，"
+                  f"057+059）")
         else:
             print(f"[formal] yarn 身份：生产者证据缺失 → CLI 声明降级 "
                   f"operator_declared（yarn={yarn_id['yarn']} "
@@ -819,7 +989,10 @@ def main():
                 # 可能不可恢复——以 receipt/manifest 记录为准，不冒充完整
                 "note": ("model_path 为操作者声明值；yarn_factor 按 "
                          "yarn_factor_provenance 区分：producer_receipt="
-                         "生成进程旁挂 receipt 证实的实际生效值，"
+                         "生成进程旁挂 v2 回执证实的实际生效值（回执与"
+                         "best-file 经 prediction SHA/行数逐位同代绑定，"
+                         "059），producer_receipt_v1_partial=v1 回执只证 "
+                         "factor 口径不证回执与预测同代（059 降级标注），"
                          "operator_declared=legacy 产物无生产者证据时的"
                          "操作者事后声明（实际生效值未闭合，不冒充）；"
                          "legacy 数据无法从文件恢复完整输入身份"

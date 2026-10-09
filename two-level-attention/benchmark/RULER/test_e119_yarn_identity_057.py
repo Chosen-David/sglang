@@ -37,7 +37,16 @@
 # 用法：
 #   PYTHONPATH=$PWD python3 -m benchmark.RULER.test_e119_yarn_identity_057
 #   （生产入口 fail-closed 的 -O 覆盖内嵌于 F2b/F5b：以 python -O 起子进程）
+#
+# #195（059/060）升级说明：fixture 辅助 _write_receipts 从 v1 升级为
+# v2（producer-yarn-config-v2）——为每个 fixture 预测文件计算真实
+# SHA256/行数后构建 status=complete 完成回执，与修复后的生产生成侧同
+# 协议；F1-F7 断言语义不变（provenance=producer_receipt 仅 v2 同代绑定
+# 闭合后成立）。U2 保留 v1 回执往返（历史协议兼容面），v1 消费降级
+# （producer_receipt_v1_partial）与同代绑定负例由
+# test_e119_yarn_binding_059_060_061.py 覆盖。
 import glob
+import hashlib
 import json
 import os
 import shutil
@@ -52,8 +61,9 @@ TESTDATA = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 from benchmark.RULER.score_ruler import TASKS  # noqa: E402
 from benchmark.RULER.yarn_receipt import (  # noqa: E402
-    RECEIPT_SUFFIX, build_yarn_receipt, producer_receipt_path_for,
-    resolve_yarn_config, validate_producer_receipt, write_yarn_receipt,
+    RECEIPT_SUFFIX, RECEIPT_V1_VERSION, RECEIPT_VERSION,
+    build_yarn_receipt, producer_receipt_path_for, resolve_yarn_config,
+    validate_producer_receipt, write_yarn_receipt,
 )
 
 YARN_AUTO = {65536: 2.0, 131072: 4.0}   # 与 pred_ruler.py 逐位同表（U3 断言）
@@ -97,7 +107,12 @@ def _copy_fixture(base, name, native=False):
 
 def _write_receipts(pred_root, context_length, factor, enabled=True,
                      tasks=None):
-    """给 root 下每个 pred jsonl 写旁挂生产者 receipt（模拟新生成侧落盘）。"""
+    """给 root 下每个 pred jsonl 写旁挂生产者 receipt（模拟新生成侧落盘）。
+
+    #195（059）升级：v2 协议——对每个预测文件现算 SHA256 + 行数，构建
+    status=complete 完成回执（prediction_basename/SHA/行数/run_id 同代
+    绑定四件齐备），与修复后生产 pred_ruler.py 的提交产物同构；消费侧
+    _load_producer_yarn_receipt 会对绑定字段与文件字节逐位比对。"""
     n = 0
     for f in sorted(glob.glob(os.path.join(
             pred_root, "L*", "pred_*", "*.jsonl"))):
@@ -114,6 +129,11 @@ def _write_receipts(pred_root, context_length, factor, enabled=True,
             }
         else:
             eff, scaling = None, None
+        h = hashlib.sha256()
+        with open(f, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        n_lines = sum(1 for _ in open(f, "rb"))
         rcp = build_yarn_receipt(
             yarn_enabled=enabled, effective_factor=eff, yarn_factor_cli=None,
             rope_scaling=scaling, context_length=context_length, task=task,
@@ -123,7 +143,12 @@ def _write_receipts(pred_root, context_length, factor, enabled=True,
                                "method": "tli", "pred_postfix": "_fx",
                                "t": "01010000"},
             producer_script_path="benchmark/RULER/pred_ruler.py",
-            producer_script_sha256="0" * 64)
+            producer_script_sha256="0" * 64,
+            receipt_version=RECEIPT_VERSION,
+            run_id=f"fixture-{os.getpid()}-{n}",
+            prediction_basename=os.path.basename(f),
+            prediction_sha256=h.hexdigest(),
+            prediction_lines=n_lines)
         write_yarn_receipt(f, rcp)
         n += 1
     return n
@@ -157,7 +182,12 @@ def test_U1_auto_tier_resolution():
 
 def test_U2_receipt_roundtrip(base):
     """U2：receipt 原子落盘（旁挂命名约定 + jsonl 行格式零改动）+ 读回
-    校验通过 + 自相矛盾 receipt 被校验拒绝。"""
+    校验通过 + 自相矛盾 receipt 被校验拒绝。
+
+    #195（059/060）：v1 回执（057 时代协议）保留兼容面——完整
+    generation_params 必需键（060 严格 schema）下读回校验通过；v1 无
+    status/绑定字段，消费侧降级 producer_receipt_v1_partial（由
+    test_e119_yarn_binding_059_060_061.py C5 覆盖）。"""
     pred = os.path.join(base, "u2", "niah_single_1-fxm-01010000.jsonl")
     os.makedirs(os.path.dirname(pred), exist_ok=True)
     with open(pred, "w", encoding="utf-8") as f:
@@ -171,8 +201,12 @@ def test_U2_receipt_roundtrip(base):
         rope_scaling=scaling, context_length=131072,
         task="niah_single_1", model_path="/synthetic/Qwen3-8B",
         model_config_sha256=None, native_mpe=NATIVE_MPE,
-        generation_params={"max_gen": 64}, producer_script_path="p",
-        producer_script_sha256="0" * 64)
+        generation_params={"max_gen": 64, "max_num": 500, "seed": 42,
+                           "method": "tli", "pred_postfix": "_fx",
+                           "t": "01010000"},
+        producer_script_path="p",
+        producer_script_sha256="0" * 64,
+        receipt_version=RECEIPT_V1_VERSION)
     path = write_yarn_receipt(pred, rcp)
     # 命名约定：{pred 基名}-yarn_receipt.json；jsonl 字节零改动
     assert path == pred[:-len(".jsonl")] + RECEIPT_SUFFIX
@@ -182,7 +216,7 @@ def test_U2_receipt_roundtrip(base):
     assert validate_producer_receipt(back, pred) is None
     assert back["effective_yarn_factor"] == 4.0 and \
         back["yarn_factor_source"] == "auto" and \
-        back["receipt_version"] == "producer-yarn-config-v1"
+        back["receipt_version"] == RECEIPT_V1_VERSION
     # 无 tmp 残留（原子写）
     assert not glob.glob(path + ".tmp-*")
     # 自相矛盾：rope_scaling.factor 与 effective 不一致 → 校验拒绝
@@ -193,29 +227,42 @@ def test_U2_receipt_roundtrip(base):
     bad2 = dict(back, yarn_enabled=False)
     assert validate_producer_receipt(bad2, pred) is not None
     print("U2 PASS  receipt 原子落盘 + 旁挂命名约定 + jsonl 零改动 + "
-          "读回校验通过 + 自相矛盾/状态矛盾 receipt 拒绝")
+          "读回校验通过（v1 兼容面，060 严格 schema 下完整必需键）+ "
+          "自相矛盾/状态矛盾 receipt 拒绝")
 
 
 def test_U3_producer_wiring():
     """U3：生成侧接线（有 torch/sparse_attn 的环境）——pred_ruler 的
-    YARN_FACTOR_AUTO 与本套件同表，resolve/write 走 pred_ruler 引用的
-    同一实现。缺依赖环境 SKIP（formal 侧用例不受影响）。"""
+    YARN_FACTOR_AUTO 与本套件同表，resolve/stage/commit/锁走 pred_ruler
+    引用的同一实现（059：生产路径已从 write_yarn_receipt 单段直写升级为
+    stage_yarn_receipt + commit_yarn_generation 两段式提交 + 输出路径锁）。
+    缺依赖环境 SKIP（formal 侧用例不受影响）。"""
     try:
         import benchmark.RULER.pred_ruler as pr
     except Exception as e:   # torch/transformers/sparse_attn 缺失
         print(f"U3 SKIP  pred_ruler 不可导入（{type(e).__name__}: {e}）"
               f"——生成侧接线断言需 torch 环境，formal 侧用例不受影响")
         return
+    from benchmark.RULER.yarn_receipt import (
+        acquire_output_lock, commit_yarn_generation, release_output_lock,
+        stage_yarn_receipt,
+    )
     assert pr.YARN_FACTOR_AUTO == YARN_AUTO, pr.YARN_FACTOR_AUTO
     f64, _ = pr.resolve_yarn_config(True, None, 65536, pr.YARN_FACTOR_AUTO,
                                     pr.QWEN3_NATIVE_MPE)
     f128, _ = pr.resolve_yarn_config(True, None, 131072, pr.YARN_FACTOR_AUTO,
                                      pr.QWEN3_NATIVE_MPE)
     assert f64 == 2.0 and f128 == 4.0
-    assert pr.write_yarn_receipt is write_yarn_receipt and \
-        pr.resolve_yarn_config is resolve_yarn_config
+    # 059：生产者消费同一实现（resolve / 临时回执 staging / 单次提交 /
+    # 输出路径锁）——resolve 同函数、stage/commit/锁原语同对象
+    assert pr.resolve_yarn_config is resolve_yarn_config
+    assert pr.stage_yarn_receipt is stage_yarn_receipt and \
+        pr.commit_yarn_generation is commit_yarn_generation and \
+        pr.acquire_output_lock is acquire_output_lock and \
+        pr.release_output_lock is release_output_lock
     print("U3 PASS  pred_ruler.YARN_FACTOR_AUTO={65536: 2.0, 131072: 4.0} "
-          "与 resolve/write 同一实现闭环（131072 → 4.0）")
+          "与 resolve/stage/commit/锁 同一实现闭环（131072 → 4.0，"
+          "059 两段式提交接线）")
 
 
 def test_F1_producer_evidence_positive(base):

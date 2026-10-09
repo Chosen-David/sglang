@@ -31,12 +31,20 @@
 # 生成链自动档 4.0」的身份冲突。现每次运行把 effective yarn 配置原子写入
 # 预测产物旁挂 receipt（{pred 基名}-yarn_receipt.json，见 yarn_receipt.py），
 # 生成路径/行格式/自动档语义零改动。
+# ---- 059（GPT 2026-10-10 0428 审计 TL-E119-YARN-RECEIPT-BINDING）----
+# v1 回执在生成循环之前落最终旁挂路径、且不含预测内容 SHA/行数/run ID/
+# 完成标记——「A 进程的预测配 B 进程的回执」可达（同名重跑/中断重跑/
+# 并发/事后改写）。现升级 producer-yarn-config-v2：预测先写不可变临时
+# generation，循环结束关闭后算 SHA256+行数，构建 status=complete 完成
+# 回执，经单次原子提交点落最终路径（回执最后落盘=提交信号）；全生命
+# 周期持规范化输出路径 flock（见 main() 内设计注释）。
 import argparse
 import hashlib
 import json
 import os
 import random
 import sys
+from datetime import datetime
 
 # 057：生产者原生 effective-config receipt（yarn_receipt.py 零重依赖，
 # 生成/消费/测试三方共享同一口径）。REPO 入 sys.path 前置于一切仓库内
@@ -54,8 +62,9 @@ from transformers import (  # noqa: E402
     AutoConfig, AutoModelForCausalLM, AutoTokenizer)
 
 from benchmark.RULER.yarn_receipt import (  # noqa: E402
-    _file_sha256, build_yarn_receipt, resolve_yarn_config,
-    write_yarn_receipt,
+    _file_sha256, acquire_output_lock, build_yarn_receipt,
+    commit_yarn_generation, producer_receipt_path_for, release_output_lock,
+    resolve_yarn_config, stage_yarn_generation, stage_yarn_receipt,
 )
 from sparse_attn.arguments import add_sparse_attn_args  # noqa: E402
 from sparse_attn.patches import register_patch  # noqa: E402
@@ -170,84 +179,126 @@ def main():
     method_name = get_method_name_with_info(args)
     out_path = os.path.join(
         out_dir, f"{args.task}-{method_name}-{args.t}.jsonl")
-    fout = open(out_path, "w", encoding="utf-8")
 
-    # ---- 057：生产者原生 effective-config receipt（旁挂原子写）----
-    # 记录本进程实际生效配置（自动档解析/显式覆盖之后），供 formal 消费
-    # 侧以生产者证据闭合 yarn 身份（修复「manifest 声明 2.0 vs 生成链
-    # 自动档 4.0」的 128K 身份冲突）。三点设计：
-    #   ① 旁挂 .json 不进任何 {task}-*.jsonl glob——下游 wc -l /
-    #      best-file 仲裁 / SKIP 幂等零扰动，既有产物行格式不动；
-    #   ② 临时文件 + fsync + os.replace 原子落盘——中断不留半写
-    #      receipt（半写比缺失危险：消费侧把存在当证据，损坏即 fail）；
-    #   ③ 写在生成循环之前：receipt 描述的是产出这些预测字节的运行
-    #      配置；进程中途崩溃留下的 partial 文件由 formal 的
-    #      min-samples / best-file 仲裁兜底，receipt 本身仍如实。
-    model_cfg_path = os.path.join(args.model_path, "config.json")
-    yarn_receipt = build_yarn_receipt(
-        yarn_enabled=use_yarn,
-        effective_factor=factor,
-        yarn_factor_cli=args.yarn_factor,
-        rope_scaling=rope_scaling,
-        context_length=args.context_length,
-        task=args.task,
-        model_path=os.path.abspath(args.model_path),
-        model_config_sha256=(
-            _file_sha256(model_cfg_path)
-            if os.path.isfile(model_cfg_path) else None),
-        native_mpe=QWEN3_NATIVE_MPE,
-        generation_params={
-            "max_gen": MAX_GEN, "max_num": args.max_num, "seed": SEED,
-            "method": args.method, "pred_postfix": args.pred_postfix,
-            "t": args.t,
-        },
-        producer_script_path="benchmark/RULER/pred_ruler.py",
-        producer_script_sha256=_file_sha256(os.path.abspath(__file__)))
-    yarn_rcp_path = write_yarn_receipt(out_path, yarn_receipt)
-    print(f"[yarn-receipt] effective config -> {yarn_rcp_path}")
+    # ---- 059：不可变 generation + 完成回执单次原子提交 ----
+    # 修复前两处缺陷：①直接以 open(..., "w") 截断最终预测路径——生成
+    # 中途崩溃毁掉上一代完整 best-file；②回执在生成循环之前落最终旁
+    # 挂路径且无完成标记/预测绑定——「A 进程的预测配 B 进程的回执」
+    # 可达（GPT 审计 059 最小复现：改预测+改回执 → formal 仍 exit 0
+    # 标 producer_receipt）。
+    # 设计（E116f generation/commit 同款语义 + 056 flock 口径）：
+    #   ① 全生命周期持规范化输出路径锁（realpath(父目录)+basename 键，
+    #      042 加固防锁键漂移；attempt_lock_path/commit 语义见
+    #      yarn_receipt.py）——覆盖「临时 generation 写入 → SHA/行数
+    #      计算 → 完成回执 → 单次提交」全程，后到者阻塞等待，崩溃由
+    #      内核自动释放；
+    #   ② 预测写不可变临时 {out}.gen-{attempt_id}（不以 .jsonl 结尾 →
+    #      不进 {task}-*.jsonl glob——中断残留不污染 best-file 仲裁 /
+    #      SKIP 幂等的行数口径，最终路径保持上一代完整产物）；
+    #   ③ 循环结束 fout.close() 后计算预测 SHA256 + 最终行数，构建
+    #      status=complete 完成回执（producer-yarn-config-v2，含
+    #      prediction_basename/SHA/行数/run_id）写临时旁挂（同样不落
+    #      最终路径）；
+    #   ④ 单次提交点：先 os.replace 临时预测 → 最终路径，再
+    #      os.replace 完成回执 → 最终旁挂（回执最后落盘 = 提交信号）。
+    # 崩溃语义：提交前死亡 → 最终路径=上一代完整产物（旧预测配旧回执，
+    # 同代自洽）；两步之间死亡 → 新预测配旧回执（SHA 必失配）→ formal
+    # 同代绑定校验 fail-closed 拒收（坏态可检，不静默）。
+    attempt_id = (datetime.now().strftime("%Y%m%d%H%M%S") +
+                  f"-{os.getpid()}-{random.randint(1000, 9999)}")
+    lock_fd = acquire_output_lock(out_path)
+    try:
+        tmp_pred = stage_yarn_generation(out_path, attempt_id)
+        fout = open(tmp_pred, "w", encoding="utf-8")
+    except OSError as e:
+        release_output_lock(lock_fd)
+        raise SystemExit(f"[pred] 打开临时 generation 失败（{e}）")
 
-    for row in tqdm(rows):
-        torch.cuda.empty_cache()
-        input_ids = tokenizer(row["input"], truncation=False,
-                              return_tensors="pt").input_ids.to("cuda")
-        context_length = input_ids.shape[-1]
-        with torch.no_grad():
-            output = model(input_ids=input_ids, past_key_values=None,
-                           use_cache=True,
-                           **({"logits_to_keep": 1} if keep_logits else {}))
-            past = output.past_key_values
-            pred_idx = output.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
-            gen = [pred_idx.item()]
-            for _ in range(MAX_GEN - 1):
-                # min_length 语义：禁止在 context 结束前停（RULER 官方口径）
-                if len(gen) < 2 and pred_idx.item() in eos_ids:
-                    pass  # 首位不许停（近似 min_length=context+1）
-                out = model(input_ids=pred_idx, past_key_values=past,
-                            use_cache=True)
-                past = out.past_key_values
-                pred_idx = out.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
-                gen.append(pred_idx.item())
-                if pred_idx.item() in eos_ids and len(gen) > 1:
-                    break
-        pred = tokenizer.decode(gen, skip_special_tokens=True)
-        metrics = get_metrics()
-        budget = metrics.get_select_tokens()
-        metrics.clear()
-        # E116c（GPT 0826 审计 TL-RULER-SAMPLE-GATE-026）：样本身份绑定源行
-        # index（RULER 源 jsonl 自带 0..99 int，比 LB v1 的 data_fp 指纹更直接）
-        # + answers canonical SHA256 前 16 位（与 LongBench manifest 口径一致），
-        # 评分端据此做 fail-closed 集合闭包校验；其余字段与行为零改动。
-        fout.write(json.dumps({
-            "pred": pred, "answers": row["outputs"],
-            "length": row["length"], "budget": budget,
-            "_id": f"{args.task}:{row['index']}",
-            "_answers_sha": hashlib.sha256(json.dumps(
-                row["outputs"], ensure_ascii=False, sort_keys=True)
-                .encode("utf-8")).hexdigest()[:16],
-        }, ensure_ascii=False) + "\n")
-        fout.flush()
-    fout.close()
-    print(f"saved -> {out_path}")
+    try:
+        for row in tqdm(rows):
+            torch.cuda.empty_cache()
+            input_ids = tokenizer(row["input"], truncation=False,
+                                  return_tensors="pt").input_ids.to("cuda")
+            context_length = input_ids.shape[-1]
+            with torch.no_grad():
+                output = model(input_ids=input_ids, past_key_values=None,
+                               use_cache=True,
+                               **({"logits_to_keep": 1} if keep_logits else {}))
+                past = output.past_key_values
+                pred_idx = output.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
+                gen = [pred_idx.item()]
+                for _ in range(MAX_GEN - 1):
+                    # min_length 语义：禁止在 context 结束前停（RULER 官方口径）
+                    if len(gen) < 2 and pred_idx.item() in eos_ids:
+                        pass  # 首位不许停（近似 min_length=context+1）
+                    out = model(input_ids=pred_idx, past_key_values=past,
+                                use_cache=True)
+                    past = out.past_key_values
+                    pred_idx = out.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
+                    gen.append(pred_idx.item())
+                    if pred_idx.item() in eos_ids and len(gen) > 1:
+                        break
+            pred = tokenizer.decode(gen, skip_special_tokens=True)
+            metrics = get_metrics()
+            budget = metrics.get_select_tokens()
+            metrics.clear()
+            # E116c（GPT 0826 审计 TL-RULER-SAMPLE-GATE-026）：样本身份绑定源行
+            # index（RULER 源 jsonl 自带 0..99 int，比 LB v1 的 data_fp 指纹更直接）
+            # + answers canonical SHA256 前 16 位（与 LongBench manifest 口径一致），
+            # 评分端据此做 fail-closed 集合闭包校验；其余字段与行为零改动。
+            fout.write(json.dumps({
+                "pred": pred, "answers": row["outputs"],
+                "length": row["length"], "budget": budget,
+                "_id": f"{args.task}:{row['index']}",
+                "_answers_sha": hashlib.sha256(json.dumps(
+                    row["outputs"], ensure_ascii=False, sort_keys=True)
+                    .encode("utf-8")).hexdigest()[:16],
+            }, ensure_ascii=False) + "\n")
+            fout.flush()
+        fout.close()
+
+        # ---- 059：完成回执（v2 同代绑定）→ 临时旁挂 → 单次原子提交 ----
+        # 057 的配置指纹字段全部保留（effective factor/完整 rope_scaling/
+        # 模型路径与 config hash/生成参数/生产脚本身份）；v2 新增同代绑定
+        # 四件：status=complete + prediction_basename/SHA256/行数 + run_id
+        # ——formal 消费侧据此做「回执 ↔ best-file 字节」逐位比对，预测
+        # 被事后改写 / 回执与预测不同代 → fail-closed。
+        pred_sha = _file_sha256(tmp_pred)
+        pred_lines = sum(1 for _ in open(tmp_pred, "rb"))
+        model_cfg_path = os.path.join(args.model_path, "config.json")
+        yarn_receipt = build_yarn_receipt(
+            yarn_enabled=use_yarn,
+            effective_factor=factor,
+            yarn_factor_cli=args.yarn_factor,
+            rope_scaling=rope_scaling,
+            context_length=args.context_length,
+            task=args.task,
+            model_path=os.path.abspath(args.model_path),
+            model_config_sha256=(
+                _file_sha256(model_cfg_path)
+                if os.path.isfile(model_cfg_path) else None),
+            native_mpe=QWEN3_NATIVE_MPE,
+            generation_params={
+                "max_gen": MAX_GEN, "max_num": args.max_num, "seed": SEED,
+                "method": args.method, "pred_postfix": args.pred_postfix,
+                "t": args.t,
+            },
+            producer_script_path="benchmark/RULER/pred_ruler.py",
+            producer_script_sha256=_file_sha256(os.path.abspath(__file__)),
+            run_id=attempt_id,
+            prediction_basename=os.path.basename(out_path),
+            prediction_sha256=pred_sha,
+            prediction_lines=pred_lines)
+        tmp_rcp = stage_yarn_receipt(out_path, yarn_receipt, attempt_id)
+        commit_yarn_generation(tmp_pred, tmp_rcp, out_path)
+        print(f"[yarn-receipt] effective config + 同代绑定 -> "
+              f"{producer_receipt_path_for(out_path)}")
+        print(f"saved -> {out_path}")
+    finally:
+        # 崩溃/异常路径：临时 generation / 临时回执残留（不污染
+        # {task}-*.jsonl glob），最终路径保持上一代完整产物；锁由本处
+        # 显式释放或进程退出时内核自动释放（flock 不持久，无死锁）。
+        release_output_lock(lock_fd)
 
 
 if __name__ == "__main__":

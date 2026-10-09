@@ -104,6 +104,14 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+# 061（TL-E119-YARN-CORRECTION-DISCOVERY）：manifest 旁挂纠偏的机器消费
+# 入口——三份 128K .manifest.yarn_correction.json 从此有真实消费者；声明
+# operator_declared_not_effective 的 manifest 其 yarn_factor 不再当 effective
+from benchmark.RULER.yarn_receipt import (  # noqa: E402
+    resolve_manifest_yarn_identity,
+)
 RESULTS = os.path.join(ROOT, "exp", "trace", "results")
 PRED_ROOT = os.path.join(ROOT, "exp", "results_ruler", "e109_full_Qwen3-8B")
 
@@ -208,8 +216,14 @@ def _canon(obj):
     return json.dumps(obj, ensure_ascii=False, sort_keys=True)
 
 
-def _arm_identity(manifest):
+def _arm_identity(manifest, yarn_resolved):
     """从单臂 formal manifest 提取跨臂可比身份字段。
+
+    061：yarn/yarn_factor 经 resolve_manifest_yarn_identity（manifest
+    旁挂纠偏消费入口）解析——manifest 声明 operator_declared_not_
+    effective（128K 三臂均有纠偏 sidecar）时 effective_yarn_factor=null
+    进入跨臂身份（三臂同为 null，可比性保持；若只有部分臂有纠偏 →
+    三臂身份不一致 → ⑥ fail-closed loudly，不静默混装两种口径）。
 
     返回 (identity, treatment, non_wl_extra)：
       identity     —— 必须三臂逐字段一致的数据身份（进共同 digest）；
@@ -221,8 +235,10 @@ def _arm_identity(manifest):
     identity = {
         "data_root": ri["data_root"],
         "model_path": ri["model_path"],
-        "yarn": ri["yarn"],
-        "yarn_factor": ri["yarn_factor"],
+        # 061：消费纠偏解析结果（旁挂 correction 声明 not_effective 时
+        # 旧 manifest 的 2.0 不再当 effective；null 进跨臂身份）
+        "yarn": yarn_resolved["yarn"],
+        "yarn_factor": yarn_resolved["effective_yarn_factor"],
         "expect_tasks": manifest["expect_tasks"],
         "min_samples": manifest["min_samples"],
         "task_set": sorted(tasks.keys()),
@@ -446,6 +462,7 @@ def main():
     per_arm_scripts = {}
     per_arm_scorer_man = {}
     per_arm_protocol = {}   # ⑨：{arm: {"publish_protocol", "legacy_protocol"}}
+    per_arm_yarn = {}       # 061：{arm: 纠偏解析后的 yarn 身份（含 provenance）}
     per_arm_inputs = {}     # ⑫（049）：逐臂不可变输入引用（SHA 可审计）
     samples_seen = set()    # ⑪：样本数元信息从数据推导，不硬编码
     task_count = None
@@ -567,8 +584,14 @@ def main():
             if tinfo["derived_sha256"] != _sha256(der_fp):
                 _fail(f"{arm}/{task}: 派生 SHA 漂移（{der_fp} 与 receipt "
                       f"记录不一致——发布后被篡改），fail closed")
+        # ⑥前置（061）：manifest 旁挂纠偏消费——解析入口探查
+        # {manifest}.yarn_correction.json（128K 三臂均有），声明
+        # operator_declared_not_effective 时旧 yarn_factor=2.0 不再当
+        # effective；target hash 失配 → fail-closed（解析入口内部）
+        yarn_resolved = resolve_manifest_yarn_identity(p + ".manifest.json")
+        per_arm_yarn[arm] = yarn_resolved
         # ⑤ 跨臂身份提取（formal manifest，已经 receipt manifest_sha 闭合）
-        ident, treatment, non_wl = _arm_identity(manifest)
+        ident, treatment, non_wl = _arm_identity(manifest, yarn_resolved)
         # ⑧ 显式 arm 契约（046②）：treatment 逐字段校验
         expected = ARM_CONTRACT[arm]
         if treatment != expected:
@@ -710,6 +733,14 @@ def main():
                 "model_path", "yarn", "yarn_factor", "data_root",
                 "extra_params(白名单外逐键)", "scorer_manifest_digest",
             ],
+            # 061（TL-E119-YARN-CORRECTION-DISCOVERY）：逐臂 yarn 身份经
+            # manifest 旁挂纠偏解析入口消费（resolve_manifest_yarn_
+            # identity）——yarn/yarn_factor 取解析后的 effective 值
+            # （128K 三臂均有纠偏 sidecar：operator_declared_not_effective
+            # → effective=null，不再当 2.0 也不脑补 4.0）；纠偏绑定
+            # 三重哈希（target manifest / correction 文件 / correction
+            # version）逐臂冻结在此，供下游单指针审计
+            "per_arm_yarn_identity": per_arm_yarn,
             "treatment_whitelist": sorted(TREATMENT_WHITELIST),
             "arm_contract": {a: dict(c) for a, c in ARM_CONTRACT.items()},
             "per_arm_treatment": per_arm_treatment,
