@@ -1,0 +1,83 @@
+{
+  "experiment": "E119_ruler64k_formal_closure",
+  "date": "2026-10-09",
+  "entry": "benchmark/RULER/score_ruler_formal.py（E116e 正式入口：min-samples 硬门禁 + staging 原子发布 + 身份扩展 receipt/manifest）",
+  "identity": {
+    "length_tier": "L65536（YaRN factor 2.0，64K 全档）",
+    "model": "Qwen3-8B",
+    "samples_per_task": 100,
+    "tasks": 11
+  },
+  "closure": {
+    "three_arm_receipts_success": true,
+    "receipt_result_sha_matches": true,
+    "all_cells_n100": true,
+    "source_sha_stable": true
+  },
+  "arms": {
+    "mavg": {
+      "avg": 49.42,
+      "receipt_run_id": "20261009125539-313359-1340",
+      "result_file": "e119_ruler64k_formal_mavg.json",
+      "per_task": {
+        "niah_single_1": 86.0,
+        "niah_single_2": 100.0,
+        "niah_single_3": 100.0,
+        "niah_multikey_1": 99.0,
+        "niah_multikey_2": 54.0,
+        "niah_multikey_3": 0.0,
+        "niah_multiquery": 28.5,
+        "niah_multivalue": 31.5,
+        "cwe": 0.3,
+        "fwe": 12.33,
+        "vt": 32.0
+      },
+      "delta_vs_fullkv": 0.88,
+      "ruler32_official": 59.99
+    },
+    "FullKV": {
+      "avg": 48.54,
+      "receipt_run_id": "20261009125615-313939-7208",
+      "result_file": "e119_ruler64k_formal_fullkv.json",
+      "per_task": {
+        "niah_single_1": 100.0,
+        "niah_single_2": 100.0,
+        "niah_single_3": 100.0,
+        "niah_multikey_1": 100.0,
+        "niah_multikey_2": 50.0,
+        "niah_multikey_3": 0.0,
+        "niah_multiquery": 20.25,
+        "niah_multivalue": 26.25,
+        "cwe": 0.6,
+        "fwe": 4.0,
+        "vt": 32.8
+      },
+      "delta_vs_fullkv": 0.0,
+      "ruler32_official": 59.38
+    },
+    "aavg": {
+      "avg": 47.51,
+      "receipt_run_id": "20261009125646-314472-1494",
+      "result_file": "e119_ruler64k_formal_aavg.json",
+      "per_task": {
+        "niah_single_1": 92.0,
+        "niah_single_2": 99.0,
+        "niah_single_3": 79.0,
+        "niah_multikey_1": 97.0,
+        "niah_multikey_2": 55.0,
+        "niah_multikey_3": 0.0,
+        "niah_multiquery": 25.25,
+        "niah_multivalue": 40.25,
+        "cwe": 0.2,
+        "fwe": 6.33,
+        "vt": 28.6
+      },
+      "delta_vs_fullkv": -1.03,
+      "ruler32_official": 57.33
+    }
+  },
+  "verdict": {
+    "ruler64k_ranking": "mavg 49.42 > FullKV 48.54 > aavg 47.51",
+    "conclusion": "64K 正式口径下 mavg(+0.88) 超 FullKV、aavg(−1.03) 落后；与 32K 正式排序（mavg 59.99 > FullKV 59.38 > aavg 57.33）方向一致——RULER 32K/64K 两档 mavg 冠军稳定，128K 待全齐后同口径收口。"
+  }
+}
