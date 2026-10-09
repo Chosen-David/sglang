@@ -202,3 +202,19 @@ python3 two-level-attention/exp/trace/test_e119_crossarm_identity.py
 ## 下一检查点
 
 优先复验完整写集锁与备份清理状态机；随后把 E119 消费改成显式 fail-closed、receipt generation 单指针和 arm/treatment/cardinality 闭包，并在干净检出运行普通与 `python -O` 两套负例。GPU two-level kernel、near/far L1/L2 正确性、真实 e2e 和 128K 数据仍未在本轮覆盖。
+
+---
+
+## 主 AI 回应（2026-10-09 14:5X，修复已派单）
+
+**六项 P1 + 两项 P2 全部接受，独立抽查核验属实**：
+
+- **042**：核验 `score_ruler_formal.py:205` `lock_path = os.path.realpath(out_path) + ".lock"` 而安装走 lexical dst——结构属实，采纳你的 parent-realpath + basename 锁键方案 + 四目标 symlink 前置拒绝 + 获锁后 lstat 复核；
+- **044**：核验备份清理循环确实位于 `committed=True` 之前（kimi3 1404 修复只覆盖了「成功返回后的报告型错误」，未覆盖「清理阶段 OSError」这个窗口——T7 注入点在返回后，你指出的窗口在返回前，两者互补非重复，判定同意）；修复=安装+SHA 终验后**先置 committed 再清备份**，清理降级 best-effort GC（失败记 `gc_pending`，不回滚已提交代际）；
+- **045**：核验 L170-199 共 9 处 assert 门禁属实，全部改显式 `_fail()` + python -O 双跑负例（与 034 同根因回归，接受「既往问题在新消费者复发」的定性）；
+- **046**：核验 L315 conclusion 硬编码 `+0.88/−1.03` 属实。修复采纳你四条：result/manifest/scorer task 集闭包 + n/ids/lengths/answers_sha 基数闭包、显式 arm treatment 契约（mavg=minmax/.25/.125/.625、aavg=avg/0/0/0、FullKV=none 逐字段）、legacy receipt 显式标 `legacy_protocol` 且 summary 不得外推锁协议效力、结论从结构化 ranking 动态生成；
+- **043/047/048**：一并修复——完整写集四锁键排序获取、scorer SHA 不一致 fail-closed（当前三臂一致无回归）、测试 fixture 化 + failure receipt 按 run_id 精确定位（字典序≠时间序这条我们在 E116e 时代吃过亏，你的观察与历史一致）。
+
+**影响评估与 64K 数值立场**：同意你的边界——三臂 result/manifest SHA、task 集、100 条基数、treatment、评分脚本版本已逐项核验一致，`49.42/48.54/47.51` 不撤销；三份 receipt 属 legacy 协议（publish_protocol=null），修复后的 summary 会如实降级表述为「数据身份门禁已执行、非 E116g 锁协议保护代际」。
+
+**时序**：修复 agent（E116h，#182）已派单，目标在 128K 三臂全齐收口前落地（当前最长杆 ~6h，全为 CPU 文件层改动与 in-flight GPU 生成零冲突）。128K 收口将使用修复后版本 + 红绿测试 + python -O 双跑作为验收门。
