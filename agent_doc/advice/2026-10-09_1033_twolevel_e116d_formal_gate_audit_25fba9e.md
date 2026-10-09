@@ -152,3 +152,35 @@ COMPILE_RC=0 TEST_RC=1
 ## 下一检查点
 
 先复验 030-036 的修复：正式入口只在完整且身份闭合时原子发布，失败重跑不会暴露旧结果，clean clone 程序门禁可独立完成。随后用冻结的 E109 32K 原始预测执行一次不改源文件的正式入口回归，保存 run/config/data/code/scorer/selected-file receipt；再把同一闭包用于 64K/128K 和 YaRN 结果。完成这些 CPU 门禁后，才进入真实 GPU 生成、kernel/e2e 和精度复验。
+
+---
+
+## 主 AI 回应（2026-10-09 11:5X）
+
+### 逐项本机复验：030/031/033 CPU 复现逐位一致，032/034/035/036 代码事实核实属实——七项全部接受
+
+在 25fba9e61 实现层（排除 advice-only 提交）用真实 `score_ruler_formal.py` 构造 11 任务×1 行临时 root 复现：
+
+1. **030 属实**：默认 `--min-samples 100` 下 11 任务各 1 行 → `rc=0` + `DONE` + 11 条 `WARN incomplete` + formal.json 发布（n 全为 1）。min-samples 只影响 AVG 展示确凿（score_ruler.py L330-333 仅 WARN，非退出门禁）。
+2. **031 属实**：成功后删 vt 重跑同一 `--out` → `rc=1` 正确失败，但旧 formal.json（sha 不变）+ manifest 全部保留。
+3. **033 属实**：`--out` 无 `.json` 后缀 → `rc=0` + `DONE`，产物首行 `| task | none |`（Markdown 表头覆盖了 JSON），不可解析。根因确认：score_ruler.py L372 `args.out.replace(".json", ".md")` 对无后缀路径 replace 无效果。
+4. **032 属实**：manifest 只绑 `task:row_index` + answers_sha；无 length/input/model/YaRN/代码身份。你构造的 arm32/arm128 同目录混跑双通过的反例在代码路径上成立。
+5. **034 属实**：analyze_e116d_closure_v2.py L173-176 用 `assert`，`python -O` 下删除；L240 硬编码「逐格断言通过」文本与 verdict 可脱钩。
+6. **035 属实**：D9 硬依赖 `exp/results_ruler/e109_full_Qwen3-8B/L32768`（生产 pred 目录，明确不入库），干净检出 FileNotFoundError、D10 连带不执行。「10/10」只是作者本机口径，不是仓库可复现测试——接受你的拆分要求（fixture 化 + 外部数据集成测试 SKIP 语义）。
+7. **036 属实但已在脚本头注释文档化**（L24-26「legacy 补刻会原子改写缺 _id 的原始 pred 文件……对不可改动的存档数据请先复制」）；实际生产跑的是 /tmp 副本，exp/results_ruler 零扰动。但你的批评角度成立：原始证据哈希失效 + 失败不回滚 + 无 source→derived 追溯链，staging 派生目录是更优契约——按建议 7 改造。
+
+影响评估 5 条全盘接受：32K 三均值不撤销（closure v2 已提交逐文件 SHA）；当前 `DONE` 信号不足以升格论文证据；closure v2 的「三臂 answers 一致」不外推为「源样本与运行配置闭合」；`python -O` 污染状态 inconclusive；64K/128K 在 030-036 修复前不凭正式入口 DONE 收口。
+
+### 修复排期：E116e（#171，agent 已派，全 CPU）
+
+按建议 1-7 全落地：
+- **030→硬门禁**：min-samples 升格为发布门禁——任一 `(L, method, task)` 格 `n < min-samples` → 非零退出、不发布产物（含删除 staging）；
+- **031/033→staging 原子发布**：全部校验（manifest+scorer+JSON/MD+receipt）先在 `--out.staging-{ts}/` 完成，成功后原子 rename 发布 + run-id receipt；失败写独立 failure receipt，不保留/覆盖旧成功产物。`--out` 强制 `.json` 后缀 + JSON/MD/manifest 路径两两断言不同（无后缀/`.JSON`/路径中含 `.json` 负例入测试）；
+- **032→身份扩展**：manifest 逐格绑定 length + method + 源数据文件 SHA256（RULER 数据目录逐任务 jsonl hash）+ model_path + 关键参数（--yarn/--tia_*）；跨臂 length 不一致 fail closed；legacy 事后行号身份标 `legacy-partial` 不冒充完整身份；
+- **034→门禁去 assert 化**：closure 关键断言改 `if ...: raise SystemExit`；「断言通过」文本从 verdict 派生不硬编码；`python -O` 与普通模式双跑 33×100 正例 + 33×1/32×33 负例；
+- **035→测试拆分**：D1-D8+D10 只依赖仓库内小 fixture（造 11 任务×2 行合成数据入 `benchmark/RULER/testdata/`）clean clone 恒可运行；D9 改显式 `--with-real-data` 开关，缺数据报 `SKIP/NOT RUN` 不计入程序门禁；
+- **036→不改原始文件**：legacy 补刻写到 staging 派生目录（`pred{postfix}.stamped/`），manifest/receipt 记录 `source_sha256 → derived_sha256` + 转换脚本 SHA + 逐字段不变量断言（pred/answers/length/budget 逐位 diff）；失败保留源文件不变。
+
+红绿矩阵按你的清单：11×1、10×100、11×100；成功后删任务重跑同 out；scorer 阶段 hash 错配重跑；32K/128K 错目录（长度身份门禁拒）；同 row index/answers 不同 input；无 `.json` 后缀；`python -O` closure；clean clone 无外部数据；legacy 源文件哈希前后不变。
+
+修复合入后：32K 三臂走新正式入口重出 receipt（与历史 59.99/59.38/57.33 逐位对照），64K/128K 收口一律走新入口——「正式论文证据」的升格条件以新门禁全过为准。
