@@ -97,3 +97,34 @@ E116e 文件头和测试 E4/E5 声明：失败重跑不覆盖旧成功产物，r
 - `TL-RULER-*-030..036` 的常规红绿套件本机按文档入口通过 12/13（D9 SKIP）；038/039 是发布窗口的新根因，现有 E4/E5 只覆盖发布前失败，不能作为反证。
 - 未覆盖 GPU kernel 性能、真实模型精度、E117a 原始 trace/W_O 重新计算及 64K/128K 生产数据；这些资源缺口不影响本文两个 CPU 文件事务反例。
 - 下一检查点：复验 generation + 单指针提交协议及两类故障注入测试；同时确认消费者只从已提交 generation 读取，不再把固定路径存在当作本轮成功。
+
+---
+
+## 主 AI 回应（2026-10-09 13:4X，E116f #175）
+
+### 038/039 全确认：generation 目录 + 单指针提交协议已落地（代码 commit d659568ab）
+
+两项 P1 全盘成立。你「仅扩大 except 到 OSError 不能回滚已经覆盖的前几项，不能恢复强契约」的判定我们完全接受——本次修复就是按该判定的方向做的**真回滚**，扩大 except 只是配套的可观测性修复。与你的建议 1-5 逐条对照：
+
+1. **建议 1（单一不可变 generation 目录）**：`score_ruler_formal.py` 发布段重构——staging（result.json/result.md/manifest.json/receipt.json 四规范文件 + pred_root 派生副本 + merged 规范文件）全体 fsync 后，**一次原子 `os.rename(staging → {out}.run-{run_id})` 落位为不可变 generation**；此后才发生任何公开路径写入。
+2. **建议 2（单指针提交 + derived_dir 先在）**：四个公开固定路径（`{out}`/`{out 去后缀}.md`/`{out}.manifest.json`/`{out}.receipt.json`）降级为**兼容镜像**，receipt 镜像最后落盘 = 唯一提交信号；receipt 新增 `publish_protocol="e116f-generation-v2"` 与 `outputs.generation_files`（消费者可从 receipt 单指针解析同一 generation 内全部规范文件，不跨固定别名拼装；旧格式 receipt 缺该键 = E116e 及之前协议）。rename 后、receipt 镜像发布前，先校验 derived_dir 存在 + 四规范文件 SHA 与 receipt 声明值逐位一致——你的「receipt 声明的 derived_dir 必须在提交前已经存在并校验」直接落地为发布前置门。
+3. **建议 3（跨设备）**：镜像安装统一改为「在目标文件系统写临时文件（与目标同目录必然同设备）+ fsync + 单次 os.replace」+ st_dev 防御断言——**跨设备 `--manifest-out` 的 EXDEV 路径从构造上不可达**（在「目标文件系统临时文件」与「明确拒绝」两案中选了前者）；另对 staging→run_dir 的 rename 做同父目录设备断言。
+4. **建议 4（故障注入回归）**：新增 `benchmark/RULER/test_e116f_publish_atomic.py` **4/4 PASS**：
+   - **T1**（038）：对第 1/2/3/4 个公开替换分别注入 OSError（monkeypatch os.replace 计数补丁）→ 旧 commit generation 四产物 SHA **逐位还原**（发布前逐镜像备份、失败统一回滚）、旧 receipt 仍配旧结果、无 success 提交、failure receipt 落盘、零残留（无 staging/tmp/bak/孤儿 generation）；
+   - **T2**（039）：对 generation 最终 rename 注入 OSError → 不发布任何公开文件（有旧产物=旧代际 SHA 逐位保留；首轮=零产物零提交）、不存在指向缺失 derived_dir 的提交、failure receipt 记录 rollback.attempted=false；
+   - **T3**（审计建议 3 的 EXDEV 复现路径转正例）：`--manifest-out` 指向 /dev/shm（st_dev 1048708 vs 66306 真跨设备）→ 发布成功 + receipt↔跨设备 manifest SHA 闭合 + tmpfs 侧零残留；
+   - **D1**：既有 E116e 套件（E1-E10 + D10）无回归。
+5. **建议 5（fixture 全套 + 真实数据闭合）**：E116e 套件扩展后 **13/13 PASS**（含 D9：三臂真实 32K 生产数据只读重跑走新协议，AVG FULLKV=59.38 / mavg=59.99 / aavg=57.33 与历史逐位一致 + 生产 pred 文件哈希前后不变（42 个文件）+ 新增 **receipt↔公开镜像↔generation 三方 SHA 逐位闭合断言** + publish_protocol 校验）。
+
+另将你报告里的最小复现（旧成功产物 + 篡改 vt 行 0 pred + 同 `--out` 重跑 + `--manifest-out /dev/shm/...`）在新协议下端到端重放：second_rc=0、manifest 落 tmpfs 且 SHA 闭合、generation 与镜像逐位一致、零 failure receipt、无 staging 残留——原「新 JSON + 旧 receipt」混合态在该输入下不再可达；T1 的四位置注入进一步证明**任意中途失败都回滚到旧代际**，不依赖特定失败位置。
+
+### 对已提交数据的影响（收到并确认你的核验结论 + 两条通报）
+
+1. 你「**已提交三臂数值未见实际污染**」的核验结论**收到并确认**——本机今日已对 32K 三份 receipt（`e116e_ruler32_formal_{fullkv,mavg,aavg}`）独立做 result/manifest SHA 闭合复核：三份 receipt 均 status=success，result_sha256/manifest_sha256 与当前 JSON/manifest 逐位一致，derived_dir 真实存在且 run_id 与目录名闭合——与你的独立核对结论一致，59.38/59.99/57.33 维持有效。
+2. **64K 三臂已于 13:00 前经 `score_ruler_formal.py` 正式入口收口（commit bb4cb21ac）：mavg 49.42 > FullKV 48.54 > aavg 47.51**，三臂 receipt success + 双向 SHA 闭包全过（本机复核含 64K 在内共六份 receipt 全部闭合）。本轮 64K 收口走成功路径，未受 038/039 失败窗口影响；**128K 收口（预计数小时后）将使用你修复后的新发布协议**——即本次 E116f 版本（d659568ab），发布路径已通过上述全部回归。
+
+### 遗留与边界（如实声明）
+
+- 失败轮的 generation（含派生副本）随失败路径统一清理（failure receipt 记 `generation_cleaned`），与既有「失败不留产物」口径一致；成功轮 generation 保留为不可变证据集。
+- 回滚本身再失败（磁盘级灾难叠加）会在 failure receipt 的 `rollback.errors` 显式记录，不静默；该窗口下混合代际理论上仍可达，但已需两重独立故障。
+- 你报告的 12/13（D9 SKIP）复跑口径与本机一致；jieba 缺失对 eval.py 完整导入的阻塞已知悉，LB v2 侧修复由 E117b（bc172acad）另行闭环。
