@@ -3,12 +3,13 @@
 > 定位：本文档是 **kernel 化设计文档的实证篇**，与主树设计篇
 > `/home/wangyuanshuo02/sglang/research/docs/sim_greedy_kernel_design.md`（#150，CUDA C++ persistent
 > kernel V1 主线）互补：该文档给「应该怎么设计」，本文档给「已落地的 Triton 原型逐位等价实证 +
-> 方案2 界验证仿真否决 + 干净口径 microbench 数据」，其结论直接校准设计篇的 V1/V2 决策门。
+> 方案2 界验证仿真否决 + microbench 数据」（速度数据 2026-10-10 起降级为**实现身份未闭合的
+> 历史观测**，见 §2.3 的 050 注记），其结论直接校准设计篇的 V1/V2 决策门。
 >
 > 关联：#128（overlap kernel 设计）/ #146（E109 v2 远程 sim 臂，13h/臂 直接动因）/ #147（E110
 > ccluster e2e）/ #150（E113 设计篇）。全部代码与数据在本 worktree
 > `exp/trace/{e113_greedy_triton.py, e113_seg_greedy_sim.py, e113_microbench.py,
-> test_e113_greedy_triton.py}` + `exp/trace/results/e113_*.json`。
+> test_e113_greedy_triton.py, test_e113_microbench_identity.py}` + `exp/trace/results/e113_*.json`。
 >
 > **E113b 更新（e2e 集成完成）**：方案1 kernel 已收编进生产路径
 > `two-level-attention/sparse_attn/indexer/greedy_triton.py`（kernel 本体，单一事实源），
@@ -22,9 +23,9 @@
 
 ## 0. 结论速览
 
-| 问题 | 判决（全部实测支撑） |
+| 问题 | 判决（正确性列全部实测支撑；**速度列为实现身份未闭合的历史观测**，见 §2.3 的 050 注记） |
 |---|---|
-| **方案1 Triton 单 kernel 顺序化** | **GO（立即可用）**：与 Python 参考 100% 逐位一致（T2：8 seed × 3 sim × 393216 token 位 0 mismatch），增量续跑 ≡ 全量重放（T3，E110 铁律过）；干净口径 **4.9-83 μs/token**（随 K 扫描量），生产口径（K̄≈2.3K@T=16K）~17 μs/token，vs Python 循环 **3.4-51× 加速** |
+| **方案1 Triton 单 kernel 顺序化** | **GO（立即可用）**：与 Python 参考 100% 逐位一致（T2：8 seed × 3 sim × 393216 token 位 0 mismatch），增量续跑 ≡ 全量重放（T3，E110 铁律过）；**4.9-83 μs/token**（随 K 扫描量；legacy 观测），生产口径（K̄≈2.3K@T=16K）~17 μs/token，vs Python 循环 **3.4-51× 加速**（legacy 观测，修复版重跑后方可作正式性能证据） |
 | **方案2 段式推测 + Cauchy-Schwarz 界验证（SEG-GREEDY）** | **NO-GO（仿真否决）**：算法本身决策级精确（assign_mismatch=0 全 case），但**可证明跳过率仅 0.29-2.9%**、候选集 28-86% 活簇——界在单例密集的贪心态上太松，加速无来源 |
 | **方案3 终态路线** | Triton 原型 = **立即止血**（13h/臂 → 估 ~1-2.5h/臂）；CUDA persistent V1（设计篇主线，2-3 μs/token 目标）= 终态——Triton 实测 17 μs/token 证实了设计篇「8 program/78 SM + 每 token 归约延迟」的担忧，但 Triton 版零语义风险、当天可上线 |
 | method 矩阵 | §4 全表：规则稠密段（块统计/GEMM/kmeans）→ cuBLAS/Triton 已有或低风险；**唯一 launch-bound 段就是 sim_greedy 贪心链**，本原型已解决 |
@@ -68,7 +69,7 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
   `sq` 增量维护 `sq[dst] += 2·dot_a + ‖x‖²`，`dot_a` 从扫描期 dot 直接取（规避 -inf×0=NaN 污染 sq 的
   E108 实测坑）；归并时 per-token `+= x` 与参考实现**天然同累加序**（铁律 2 fp 纪律不触碰）。
 - **容量**：wrapper 保证 K ≥ max(k_live)+T（最坏每 token 新建），F.pad 扩容点与参考一致。
-- **调优（E113 实测，GPU1 干净口径，T=16384）**：BT=128/nw=8 → 41.0 μs/token；
+- **调优（E113 实测，GPU1 空闲，T=16384；μs/token 数值为实现身份未闭合的历史观测，见 §2.3 050 注记）**：BT=128/nw=8 → 41.0 μs/token；
   **BT=512/nw=4 → 9.8 μs/token（4.2×）**；BT=1024 持平、K=16K 单例臂 512 略优 → 默认 BT=512/nw=4。
   BT 不改语义：dot 归约沿 dd 维（行内 32 元素与 BT 无关），跨 tile 严格 > 链与 BT 无关——调参后
   单测 5/5 逐位全同复验过。chunk 单 launch 越大越快（16384 vs 8192：9.8 vs 17.1 μs/token，
@@ -88,7 +89,18 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
 > 零覆盖。**贪心类单测必须用 base+noise 混合簇结构数据**（同 base 的 token 间 cos≈0.9+），
 > 否则测试无鉴别力。
 
-### 2.3 性能（microbench 干净口径，GPU1 空闲，`results/e113_microbench.json`）
+### 2.3 性能（microbench，GPU1 空闲，`results/e113_microbench.json`）
+
+> **050 注记（2026-10-10，GPT 审计 `TL-E113-BENCH-PROVENANCE-050`，
+> `agent_doc/advice/2026-10-09_1727_twolevel_e113_microbench_audit_e2d51d5.md`）**：
+> 生成本表 JSON 的旧版 `e113_microbench.py` 把 Python reference 固定为仓库外绝对路径
+> `/home/wangyuanshuo02/sglang/two-level-attention` 主树动态导入，且结果 manifest 未记录
+> git SHA/dirty、双侧实现文件 hash 与依赖版本——运行时无法证明双侧实现同源，干净独立
+> 检出自足复现不成立。本表速度数据与 §2.4 的 e2e 量级推算据此**降级为「实现身份未闭合的
+> 历史观测」**：数值本身无算错证据（10 case `assign_mismatch` 均为 0），但论文或正式性能表
+> 继续引用前必须用 050 修复版（同 checkout 双侧加载 + fail-closed manifest）重跑；
+> 修复已落地（`exp/trace/e113_microbench.py` + 红绿单测
+> `test_e113_microbench_identity.py`），旧 JSON 保留不动。
 
 | 数据臂 | T | K_live | Python μs/token | Triton μs/token | 加速比 |
 |---|---|---|---|---|---|
@@ -105,6 +117,9 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
   口径 79-84 μs/token（实现略异）。保守取 E108 口径，生产 K̄ 下加速 **~5×**；本机口径 **~15×**。
 
 ### 2.4 e2e 量级推算（保守，用 E108 口径换算）
+
+> 注：本节推算以 §2.3 的速度数据为输入，同受 050 注记约束——降级为**实现身份未闭合的历史
+> 观测**推算值，修复版重跑后方可作正式依据。
 
 - 贪心段（现状 ~5h/任务，16K token 主导）：17 μs/token → 0.28 s/层 × 36 层 ≈ **10 s/样本** →
   200 样本 ≈ 33 min/任务（原 2.7h prefill 贪心段 → **~5×**）；32K 任务 ×2（带宽/延迟而非 launch）。
@@ -223,7 +238,7 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
 | Triton 原型 kernel | `exp/trace/e113_greedy_triton.py` | 5/5 单测逐位全过；BT=512/nw=4 调优默认 |
 | 对拍单测 | `exp/trace/test_e113_greedy_triton.py` | T1-T5 全 PASS（含增量≡重放铁律） |
 | SEG-GREEDY 仿真 | `exp/trace/e113_seg_greedy_sim.py` + `results/e113_seg_greedy_sim.json` | 决策级等价实证 + NO-GO 判决落袋 |
-| microbench | `exp/trace/e113_microbench.py` + `results/e113_microbench.json` | 干净口径 10 case 落袋（含逐位抽验 0 mismatch） |
+| microbench | `exp/trace/e113_microbench.py`（050 修复版）+ `results/e113_microbench.json`（**legacy：实现身份未闭合的历史观测，重跑落新 JSON 前不作正式性能证据**） | 10 case 落袋（含逐位抽验 0 mismatch）；修复版重跑排 GPU 空闲窗口，红绿单测 `test_e113_microbench_identity.py` 4/4 |
 | 本设计文档 | `research/docs/e113_method_kernel_design.md` | 本文 |
 
 **后续动作**（对齐设计篇 §9 计划，本文档补充实证校准）：
@@ -245,9 +260,16 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
   （`CUDA_VISIBLE_DEVICES=<idle> python3 test_e113_greedy_triton.py`，<1 min）
 - SEG-GREEDY：`CUDA_VISIBLE_DEVICES=<idle> python3 e113_seg_greedy_sim.py --T 8192`（~15 min，
   真实 trace /tmp/trace/qwen3-8b）
-- microbench：`CUDA_VISIBLE_DEVICES=<idle> python3 e113_microbench.py`（~5 min，Python 臂占大头；
-  `--wait` 可轮询等空闲）
-- 参考实现：主树 `two-level-attention/sparse_attn/indexer/tli_indexer.py::_greedy_cluster_pass`
-  （只读 import，`sys.dont_write_bytecode` 防落盘）
+- microbench（050 修复版）：`CUDA_VISIBLE_DEVICES=<idle> python3 e113_microbench.py`（~5 min，
+  Python 臂占大头；`--wait` 可轮询等空闲）。默认双侧实现都从**当前 checkout** 加载；跨版本
+  A/B 须显式 `--ref-root`/`--tri-root`，两侧 git SHA/dirty 与实现文件 SHA256 全落 manifest；
+  correctness 门 fail-closed（任一超容差非零退出、不发布性能 JSON）；发布为临时文件 +
+  fsync + 原子 replace，manifest 含 torch/triton/CUDA/driver 版本、逐次原始延迟与输出内容
+  SHA（+ `.sha256` sidecar）。已落袋的 `results/e113_microbench.json` 是修复前旧协议产物
+  （**实现身份未闭合的历史观测**），修复版重跑落新 JSON 前保留不动；
+  CPU-only 红绿单测 `test_e113_microbench_identity.py`（4/4）。
+- 参考实现：`two-level-attention/sparse_attn/indexer/tli_indexer.py::_greedy_cluster_pass_python`
+  （050：microbench 默认从当前 checkout 同源加载，不再引用仓库外绝对路径主树；
+  `sys.dont_write_bytecode` 防落盘）
 - E108 基线：e108_sim_greedy_probe.json（84/79 μs/token、C/N=0.2776、fp 边界注记）
 - 设计篇对照：`/home/wangyuanshuo02/sglang/research/docs/sim_greedy_kernel_design.md`（#150）

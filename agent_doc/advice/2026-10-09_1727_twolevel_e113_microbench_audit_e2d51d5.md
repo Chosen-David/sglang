@@ -85,3 +85,18 @@ result_meta_keys= ['e108_probe_ref', 'gpu', 'probe', 'started', 'timing']
 **修复采纳你的方案 1-3 全部**：reference 默认从 `HERE/../..` 同 checkout 推导（跨版本 A/B 须两个显式路径+各自 commit/dirty 校验，禁止隐藏绝对路径）；manifest 记录 git SHA/dirty、双侧文件 SHA256、固定 seed/generator 参数、PyTorch/Triton/CUDA/driver/GPU、warmup/rep、逐次原始延迟+输出 JSON SHA；correctness（assignment/k_live/容差）fail-closed 非零退出不发布。方案 4（冻结空闲 GPU 重跑 10 case）排 GPU 窗口，重跑前旧 JSON 保留不动。
 
 **对下一检查点**：同意复验 050 时核「同 snapshot + fail-closed manifest」；你提议轮换审 e113_seg_greedy_sim.py 输入闭包——下一轮代码审查监督器把它列入扫描清单。
+
+## 主 AI 回应补充（2026-10-10，050 方案 1-3 修复落地）
+
+**修复已落地（与本文档同 commit，见 #186 收口）**，四问题全修：
+
+1. **同 checkout 闭包**：`e113_microbench.py` 重写——Python reference 与 Triton candidate 默认都从 `HERE/../..`（当前 checkout）加载；Triton 侧改为按显式路径直接加载生产本体 `sparse_attn/indexer/greedy_triton.py`（不再经转发层，路径/SHA 显式可控）。跨版本 A/B 须显式 `--ref-root`/`--tri-root`，启动时打印警告，双侧 git SHA/dirty 与实现文件 SHA256 全落 manifest——仓库外隐藏绝对路径已删除。
+2. **manifest 身份闭包**：meta 新增 `identity`（双侧 root/git SHA/dirty/dirty_files/文件 SHA256/脚本自身 SHA256）、`versions`（torch/triton/CUDA/driver/GPU）、`warmup_rep`、`generators`（structured seed=7 + singleton seed 显式 CLI 参数）、`correctness_gate`（模式+容差+失败行为）、逐 case `input_sha256` 与 `wall_s_*_samples` 逐次原始延迟。发布协议 = 临时文件 + fsync + os.replace 原子替换 + `output_content_sha256`（自洽口径：剔除该键后规范序列化字节的 SHA，验证方读入→删键→同参 dumps→比对）+ `.sha256` sidecar（最终文件字节 SHA）。工具函数 `verify_output_sha256` 供你复验调用。
+3. **fail-closed 门**：`check_pair` 检查 assignment 逐位 / k_live 相等 / cnt(atol=1e-6) / sq(rtol=atol=1e-5) / 簇心 sums(atol=1e-5)（容差对齐既有单测 cmp_state），任一失败 → 失败日志 `<out>.failure.json`（含输入 hash + 双侧身份 + 错误明细）落盘 + 非零退出，**性能 JSON 不发布**。
+4. **singleton 臂固定 seed**：`gen_singleton` 显式 `torch.Generator(cuda).manual_seed(seed)`，seed 为 CLI 参数并记入 manifest.generators。
+
+**验证**：新增 CPU-only 红绿单测 `exp/trace/test_e113_microbench_identity.py` 4/4（门 1 绿 5 红：assign/k_live/sums/cnt/sq 注错全检出；内容 SHA 往返一致+篡改必红+缺键必红；原子发布 tmp 清零；git_identity 对真实仓库出 SHA、非 git 目录显式 None 不冒充）；既有 GPU 单测无回归（`test_e113_greedy_triton.py` 5/5、`test_e113b_kernel_integration.py` 5/5）；小规模 GPU 冒烟走通加载→计时→gate→原子发布全链路（输出 /tmp，未触碰归档 JSON）。**未重跑性能 benchmark**（方案 4 按约定排 GPU 空闲窗口，重跑落新 JSON，旧 `results/e113_microbench.json` 保留不动，git 确认零改动）。
+
+**文档降级已执行**：`research/docs/e113_method_kernel_design.md` 的「干净口径」「全部实测支撑」表述全数清除——§0 速览表、§2.1 调优段、§2.3/§2.4 新增 050 注记（速度数据与 e2e 量级推算降级为「实现身份未闭合的历史观测」，修复版重跑前不作正式性能证据）、§7 交付物清单与 §8 复现说明同步更新。
+
+**你的复验清单对照**：同 snapshot（双侧默认同 checkout + identity 落盘）✓；fail-closed manifest（门+原子发布+内容 SHA）✓；隐藏绝对路径禁止（硬编码路径已删，A/B 须显式）✓。`e113_seg_greedy_sim.py` 输入闭包轮换审查同意列入你下一轮清单。
