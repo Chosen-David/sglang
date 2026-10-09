@@ -1,0 +1,81 @@
+{
+ "scores": {
+  "L32768/none": {
+   "niah_single_1": 100.0,
+   "niah_single_2": 100.0,
+   "niah_single_3": 100.0,
+   "niah_multikey_1": 99.0,
+   "niah_multikey_2": 76.0,
+   "niah_multikey_3": 4.0,
+   "niah_multiquery": 24.5,
+   "niah_multivalue": 25.0,
+   "cwe": 83.5,
+   "fwe": 7.0,
+   "vt": 34.2
+  }
+ },
+ "n": {
+  "L32768/none": {
+   "niah_single_1": 100,
+   "niah_single_2": 100,
+   "niah_single_3": 100,
+   "niah_multikey_1": 100,
+   "niah_multikey_2": 100,
+   "niah_multikey_3": 100,
+   "niah_multiquery": 100,
+   "niah_multivalue": 100,
+   "cwe": 100,
+   "fwe": 100,
+   "vt": 100
+  }
+ },
+ "incomplete_cells": [],
+ "sources": {
+  "L32768/none": {
+   "niah_single_1": {
+    "file": "niah_single_1-none-10090537.jsonl",
+    "sha256": "5cf10d2f2a2593675a1a7c84644e227c7a008253c6bf6a84a27232dc42631cf9"
+   },
+   "niah_single_2": {
+    "file": "niah_single_2-none-10090537.jsonl",
+    "sha256": "982198119428f9e05eb248c96a4386764fc8eb91b96319a8955c53552e2155ae"
+   },
+   "niah_single_3": {
+    "file": "niah_single_3-none-10090537.jsonl",
+    "sha256": "493f09935cffcf3d9c1e808045ccaf74be8cd49edb99a6830e25b8199f00e2fb"
+   },
+   "niah_multikey_1": {
+    "file": "niah_multikey_1-none-10090606.jsonl",
+    "sha256": "60dbef5a13331dbcaaa3a93aab1e5eba64f10cc4f9c74e24a5eeddf05f191bb4"
+   },
+   "niah_multikey_2": {
+    "file": "niah_multikey_2-none-10090537.jsonl",
+    "sha256": "0441bd41d803ba908e45628be639e56a02d9cfce9f39c95d1a76b42084a1958c"
+   },
+   "niah_multikey_3": {
+    "file": "niah_multikey_3-none-merged.jsonl",
+    "sha256": "3739f159ea910d4adad0965a5c645271ad8dc3134771b5554f3707261c68c747"
+   },
+   "niah_multiquery": {
+    "file": "niah_multiquery-none-merged.jsonl",
+    "sha256": "8ac6d1f9911b90c5f24396c74d1a1618eecf980fb6c6962dae81ac900e3df3bc"
+   },
+   "niah_multivalue": {
+    "file": "niah_multivalue-none-merged.jsonl",
+    "sha256": "24f74922a37aa05dd20ca62436f0f780ef6bb1816db45f6ba8ccedd534b29ba1"
+   },
+   "cwe": {
+    "file": "cwe-none-merged.jsonl",
+    "sha256": "0f63bb22d3bd7a7c0fb74db99890e0a8ad32e2f9c42e135d9ef831a2b6ba39e0"
+   },
+   "fwe": {
+    "file": "fwe-none-merged.jsonl",
+    "sha256": "c857d0d89dc36983074306227c1f0e043a252904a1d3ab110153f771e3156a03"
+   },
+   "vt": {
+    "file": "vt-none-merged.jsonl",
+    "sha256": "6d80bf0d68167c2f22bab490378789f64af8a129dfa39e1166b1a060323be639"
+   }
+  }
+ }
+}

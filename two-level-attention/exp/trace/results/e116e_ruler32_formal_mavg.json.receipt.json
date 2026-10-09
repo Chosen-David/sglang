@@ -1,0 +1,183 @@
+{
+ "run_id": "20261009112216-238205-5285",
+ "status": "success",
+ "generated": "2026-10-09T11:22:17.100242",
+ "formal": {
+  "script": "benchmark/RULER/score_ruler_formal.py",
+  "sha256": "c6b70a27601143c9faa8bd22218f3cf6a79ba2d47633cf17893db92665b88e43"
+ },
+ "scorer": {
+  "script": "benchmark/RULER/score_ruler.py",
+  "sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99"
+ },
+ "inputs": {
+  "root": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B",
+  "pred_postfix": "_E109_mavg_a0.25_b0.125_g0.625",
+  "data_root": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER",
+  "expect_tasks": 11,
+  "min_samples": 100,
+  "run_identity": {
+   "data_root": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER",
+   "model_path": null,
+   "yarn": false,
+   "yarn_factor": null,
+   "extra_params": {},
+   "formal_script_sha256": "c6b70a27601143c9faa8bd22218f3cf6a79ba2d47633cf17893db92665b88e43",
+   "scorer_sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99",
+   "note": "model_path/yarn 等为操作者声明值；legacy 数据无法从文件恢复完整输入身份（identity_mode=legacy-partial），native 数据由 pred_ruler.py 落盘"
+  }
+ },
+ "outputs": {
+  "json": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/results/e116e_ruler32_formal_mavg.json",
+  "md": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/results/e116e_ruler32_formal_mavg.md",
+  "manifest": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/results/e116e_ruler32_formal_mavg.json.manifest.json",
+  "derived_dir": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/results/e116e_ruler32_formal_mavg.json.run-20261009112216-238205-5285"
+ },
+ "manifest_sha256": "0599b827583c0619b1fbc0c96e948980543eb1ca61cc8b96f648489676c65530",
+ "result_sha256": "fcf75ad167a06eb62f4ca748da95c8d2fb14d0d97172ff25571a1ae73cfed7ae",
+ "source_data_sha256": {
+  "32768/niah_single_1": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_single_1.jsonl",
+   "sha256": "e851c310be0cc7d1fa32469c9443f8fb2dd65ab6b3b28d8f2d700db86399c2db"
+  },
+  "32768/niah_single_2": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_single_2.jsonl",
+   "sha256": "26af960be2fdcf7c7907b7fd2a17c6bb44958381e90ccc50ad297770b51eaf79"
+  },
+  "32768/niah_single_3": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_single_3.jsonl",
+   "sha256": "1e383c1b27269f8796650d37012b212c1d51124b3388bc8fce56c809698b7bc8"
+  },
+  "32768/niah_multikey_1": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_multikey_1.jsonl",
+   "sha256": "530af35848867e9908b5cfa8251363b366c12d6ab20b5aee7445c11f53d8df23"
+  },
+  "32768/niah_multikey_2": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_multikey_2.jsonl",
+   "sha256": "073bae295bd94baa1880f33c4b0ccaec3a4d510dac2b31935b3ce488ad698fe8"
+  },
+  "32768/niah_multikey_3": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_multikey_3.jsonl",
+   "sha256": "d13f08fb05ac73aa062377c764c602d762d6b9d1e22092ec1e522596bfbb0a76"
+  },
+  "32768/niah_multiquery": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_multiquery.jsonl",
+   "sha256": "273bb35ea339defdee27055947a7ea78512877c0e1648c701225ef49fcc8e91c"
+  },
+  "32768/niah_multivalue": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_multivalue.jsonl",
+   "sha256": "1da24401a722c00618e4d4d1b72583620a331d0a4c7b6df384dad3974b0bd234"
+  },
+  "32768/cwe": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/cwe.jsonl",
+   "sha256": "07fcda888ce6d9f834639abafa23c8fd726a352227432a26175bc3c3ff2e0051"
+  },
+  "32768/fwe": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/fwe.jsonl",
+   "sha256": "23a8073809df38f32194cf5cfec6a311a286f4776af6771a3912b33010a65206"
+  },
+  "32768/vt": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/vt.jsonl",
+   "sha256": "f34626c7908480ea16c6e7c77decd51326e202014570b107156730ea6e69f4b7"
+  }
+ },
+ "cells": {
+  "L32768/tli_64_128_1024_c4_A": {
+   "length_dir": 32768,
+   "identity_mode": "legacy-partial",
+   "tasks": {
+    "niah_single_1": {
+     "n": 100,
+     "best_file": "niah_single_1-tli_64_128_1024_c4_A-10090535.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_single_1-tli_64_128_1024_c4_A-10090535.jsonl",
+     "source_sha256": "e17f81bff4476fce454f75bd9671034c71a15fe8cd5034e4b765b84bceb00a2c",
+     "derived_sha256": "488017d0f7f9b2f8623fd9fb1989419d9edb70e08e996d943e2ed87629ffb1da"
+    },
+    "niah_single_2": {
+     "n": 100,
+     "best_file": "niah_single_2-tli_64_128_1024_c4_A-10090535.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_single_2-tli_64_128_1024_c4_A-10090535.jsonl",
+     "source_sha256": "04ee0cf2c1ea114d6539f9e0cff2cfeda04df4d44e5ccabdeb1695b303fc91e1",
+     "derived_sha256": "48aada9472f581da2e12ecac38553ac16ab74d039539983288fe2171a79701e3"
+    },
+    "niah_single_3": {
+     "n": 100,
+     "best_file": "niah_single_3-tli_64_128_1024_c4_A-10090535.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_single_3-tli_64_128_1024_c4_A-10090535.jsonl",
+     "source_sha256": "b119f08883637398270c868a504d9ab4589c098c1758adcdee70c1080558afb6",
+     "derived_sha256": "567df7509eafa7b6afeb35fb9a7bd20199c81e994ff47e392c203ed7eac67d35"
+    },
+    "niah_multikey_1": {
+     "n": 100,
+     "best_file": "niah_multikey_1-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_multikey_1-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_sha256": "310f03f6b8954a4d0d8575cd291e8554f86ec439b7697aa0ded6d4d3f74f1d39",
+     "derived_sha256": "8037dee20a565a89e305a161f9a6a9f1517fd925d3be9ad8ff99490179cabe1c"
+    },
+    "niah_multikey_2": {
+     "n": 100,
+     "best_file": "niah_multikey_2-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_multikey_2-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_sha256": "607bbf99eb920e78f614644683ac85481596677e526574f4f6e82e2a067d7f23",
+     "derived_sha256": "aa06d93ad8386c637857a66a5fd31d1f89fdfd8591b0fdb77d77594bde35a5b4"
+    },
+    "niah_multikey_3": {
+     "n": 100,
+     "best_file": "niah_multikey_3-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_multikey_3-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_sha256": "25734c938f2fbc6a36f58ba706ef858ab8239065a36161f018d605df522d6676",
+     "derived_sha256": "934664325f2e26a9ccccac4a3dda81c46fc614f11c1cd2a043e1ce81a5b45b63"
+    },
+    "niah_multiquery": {
+     "n": 100,
+     "best_file": "niah_multiquery-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_multiquery-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_sha256": "170c09f4043916c08481049345a1633365a52ddef1287bf12f37397b899e1c11",
+     "derived_sha256": "74df68aebe1b880214c7094e06866fd3a5a213390e50e9d5ab737e21d5cc9f91"
+    },
+    "niah_multivalue": {
+     "n": 100,
+     "best_file": "niah_multivalue-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_multivalue-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_sha256": "87cc9f5a2cf4264f6dda8a398de70d50e59f5c6805660efeaa3b4b8b0f641af8",
+     "derived_sha256": "75d6c14e71c500735a8164767a407a526f211a3993b5549fcdce883af3d8ddf4"
+    },
+    "cwe": {
+     "n": 100,
+     "best_file": "cwe-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/cwe-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_sha256": "79f200b1ab7a95b5545571aa9cdc2d638265063e447a293b8fe1733552f9a4e2",
+     "derived_sha256": "5cc599f4d503a998109a2d7ef484ecc8d0142ddc37198f4b5c1838063be245dd"
+    },
+    "fwe": {
+     "n": 100,
+     "best_file": "fwe-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/fwe-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_sha256": "249d3182293b48f9e45244fe92f0bba321fe2b8b627ca2647480be8327dac75b",
+     "derived_sha256": "9437777e82e9bc7cbe8410e2526408e7a0b19fc60ee687b96c2a9da947b7a02e"
+    },
+    "vt": {
+     "n": 100,
+     "best_file": "vt-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/vt-tli_64_128_1024_c4_A-10090605.jsonl",
+     "source_sha256": "b16d8cf0e5f5727a9b395cc353348fc77f46009ce83d9511b0ebe228f3589671",
+     "derived_sha256": "6942e9c1114149c81da1cbbfdbc7395f047f05e153f0c2e2fefdf44e47d57359"
+    }
+   }
+  }
+ },
+ "avg": {
+  "L32768/tli_64_128_1024_c4_A": 59.99
+ },
+ "legacy_stamp": {
+  "n_stamped": 11,
+  "invariant_fields": [
+   "pred",
+   "answers",
+   "length",
+   "budget"
+  ],
+  "invariant_asserted": true,
+  "note": "补刻只发生在 staging 派生副本；源文件 SHA256 记录于 cells[].tasks[].source_sha256，全程只读"
+ }
+}

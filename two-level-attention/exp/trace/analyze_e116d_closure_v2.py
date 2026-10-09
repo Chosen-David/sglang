@@ -14,6 +14,9 @@
 #   - per_task / cross_arm_answers_check / collision 全部引用同一 selected
 #     文件（完整路径 + SHA256 + 行数）；
 #   - 33 格计数断言：3 臂 × 11 任务 × 100 行 = 3300；
+#     （E116e/034：断言已改为显式 SystemExit 硬门禁——`python -O` 不再
+#     能删除；跨臂 answers 全等/文件内零重复/零路径冲突同为硬门禁，
+#     任一失败不写结果；「断言通过」描述文本从实际 verdict 派生）
 #   - 同键多文件候选全集 + 采用/排除原因落盘（rejected 也记 SHA256+行数）；
 #   - partial 文件 pred 对比只声明「共同前缀 N 行 0 差异，尾部未覆盖」，
 #     禁止外推为「任一文件得分相同」；
@@ -169,11 +172,23 @@ def main():
                     "pairwise_pred_check": pairwise,
                 }
 
-    # ---- 33 格计数一致性断言 ----
-    assert n_cells == len(ARMS) * len(TASKS) == 33, \
-        f"格数 {n_cells} != 33（3 臂 × 11 任务）"
-    assert total_selected_rows == 33 * EXPECTED_ROWS == 3300, \
-        f"selected 行数总和 {total_selected_rows} != 3300"
+    # ---- 33 格计数一致性门禁 ----
+    # E116e（TL-RULER-CLOSURE-OPT-034）：assert 会被 `python -O` 删除，
+    # 导致不完整数据（如 33 格各 1 行）在优化模式下照样发布自相矛盾
+    # 结果——改用显式 if + raise SystemExit（两种解释器模式下行为一致，
+    # 失败时不写任何输出文件）。
+    expected_cells = len(ARMS) * len(TASKS)
+    expected_rows = expected_cells * EXPECTED_ROWS
+    if n_cells != expected_cells:
+        raise SystemExit(
+            f"[CLOSURE-FAIL] 格数 {n_cells} != {expected_cells}"
+            f"（{len(ARMS)} 臂 × {len(TASKS)} 任务）——不完整闭包，"
+            f"不写结果（python -O 下同样拒绝）")
+    if total_selected_rows != expected_rows:
+        raise SystemExit(
+            f"[CLOSURE-FAIL] selected 行数总和 {total_selected_rows} != "
+            f"{expected_rows}（{expected_cells} 格 × {EXPECTED_ROWS} 行）"
+            f"——存在 partial 文件，不写结果（python -O 下同样拒绝）")
 
     # ---- 跨臂 answers 逐行一致性（引用与 per_task 完全相同的 selected）----
     cross_arm = {"all_identical_rowwise": True}
@@ -212,6 +227,38 @@ def main():
     # ---- 跨臂 selected 路径冲突（同一文件被两臂采用）----
     collision = {p: v for p, v in collision_paths.items() if len(v) > 1}
 
+    # ---- E116e（034 续）：verdict 完整性硬门禁——与计数门禁同理由
+    # （发布脚本不得依赖可被 -O 删除的 assert / 不得把失败状态写成结果），
+    # 以下任一不成立即非零退出、不写输出：
+    #   ① 跨臂 answers 逐行全等；② 文件内零重复；③ 零路径冲突 ----
+    within_ok = all(v["n"] == v["unique_canon"]
+                    for t in within.values() for v in t.values())
+    if not cross_arm["all_identical_rowwise"]:
+        bad = [t for t, v in cross_arm.items()
+               if t != "all_identical_rowwise" and not v["identical_rowwise"]]
+        raise SystemExit(
+            f"[CLOSURE-FAIL] 跨臂 answers 逐行不一致：{bad}——不写结果"
+            f"（python -O 下同样拒绝）")
+    if not within_ok:
+        bad = [f"{t}/{a}" for t, v in within.items()
+               for a, w in v.items() if w["n"] != w["unique_canon"]]
+        raise SystemExit(
+            f"[CLOSURE-FAIL] 文件内存在重复 canonical 行：{bad}——不写结果"
+            f"（python -O 下同样拒绝）")
+    if collision:
+        raise SystemExit(
+            f"[CLOSURE-FAIL] 跨臂 selected 路径冲突：{collision}——不写结果"
+            f"（python -O 下同样拒绝）")
+
+    # 034：描述文本从实际 verdict 派生（不硬编码「断言通过」——
+    # 到这里四项门禁已全过，verdict 必然全真；文本引用实际数值）
+    verdict_cells_complete = (n_cells == expected_cells and
+                              total_selected_rows == expected_rows)
+    assertion_text = (f"{len(ARMS)} 臂 × {len(TASKS)} 任务 × "
+                      f"{EXPECTED_ROWS} 行 = {expected_rows}，计数门禁"
+                      f"通过（cells_complete={verdict_cells_complete}，"
+                      f"普通与 python -O 模式行为一致）")
+
     out = {
         "check": ("E116d RULER 32K 三臂闭包对账 v2（单一 selected-file 冻结，"
                   "修订 GPT 0935 审计确认的 v1 快照漂移）"),
@@ -237,7 +284,7 @@ def main():
             "arms": len(ARMS), "tasks": len(TASKS), "cells": n_cells,
             "expected_rows_per_cell": EXPECTED_ROWS,
             "selected_rows_total": total_selected_rows,
-            "assertion": "3 臂 × 11 任务 × 100 行 = 3300，逐格断言通过",
+            "assertion": assertion_text,
         },
         "per_task": per_task,
         "cross_arm_answers_check": cross_arm,
@@ -246,12 +293,10 @@ def main():
         "same_key_collision_check": same_key,
         "partial_files": partial_files,
         "verdict": {
-            "cells_complete": n_cells == 33 and total_selected_rows == 3300,
+            "cells_complete": verdict_cells_complete,
             "cross_arm_answers_rowwise_identical":
                 cross_arm["all_identical_rowwise"],
-            "within_file_zero_duplicate": all(
-                v["n"] == v["unique_canon"]
-                for t in within.values() for v in t.values()),
+            "within_file_zero_duplicate": within_ok,
             "cross_arm_selected_path_collision": bool(collision),
             "partial_files_present": bool(partial_files),
             "note": ("pred 前缀一致的候选对只声明前缀性质；得分等价性仅对"
@@ -261,8 +306,8 @@ def main():
     }
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     json.dump(out, open(OUT, "w"), indent=1, ensure_ascii=False)
-    print(f"[closure-v2] 33 格 selected 行数总和 = {total_selected_rows}"
-          f"（断言 3300 通过）")
+    print(f"[closure-v2] {expected_cells} 格 selected 行数总和 = "
+          f"{total_selected_rows}（计数门禁 {expected_rows} 通过）")
     print(f"[closure-v2] 跨臂 answers 逐行全等 = "
           f"{cross_arm['all_identical_rowwise']}")
     print(f"[closure-v2] 跨臂 selected 路径冲突 = {collision or '无'}")

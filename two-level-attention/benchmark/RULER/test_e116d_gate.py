@@ -5,6 +5,7 @@
 #   任务闭包 → D8；真实数据生产正式入口回归 → D9；E116c 套件不回归 → D10
 # 负例全部 fail closed（非零退出 + 不写任何输出文件）。
 # 用法: PYTHONPATH=$PWD python3 benchmark/RULER/test_e116d_gate.py
+import glob
 import json
 import os
 import shutil
@@ -213,41 +214,66 @@ def test_D():
 
         # ---- D9 正例：三臂 32K 真实数据（/tmp 副本）走生产正式入口
         # score_ruler_formal.py → 成功 + FULLKV AVG 与 59.38 逐位一致
+        # E116e 适配：新正式入口要求 --data-root（源数据 SHA256 身份绑定），
+        # legacy _id 补刻改写到 staging 派生目录（原始文件全程只读），
+        # 故断言改为「原始拷贝零改动 + 派生副本含 _id」。
         src = os.path.join(REPO, "exp/results_ruler/e109_full_Qwen3-8B",
                            "L32768")
-        real_base = os.path.join(base, "real")
-        os.makedirs(real_base)
-        shutil.copytree(src, os.path.join(real_base, "L32768"))
-        avgs = {}
-        for tag, postfix in [("FULLKV", "_E109_FULLKV"),
-                             ("mavg", "_E109_mavg_a0.25_b0.125_g0.625"),
-                             ("aavg", "_E109_aavg_a0_b0_g0")]:
-            out = os.path.join(base, f"formal_{tag}.json")
-            r = subprocess.run(
-                [sys.executable, "-u", "-m",
-                 "benchmark.RULER.score_ruler_formal",
-                 "--root", real_base, "--pred-postfix", postfix,
-                 "--out", out],
-                capture_output=True, text=True, cwd=REPO,
-                env={**os.environ, "PYTHONPATH": REPO})
-            assert r.returncode == 0 and "DONE" in r.stdout, \
-                (tag, r.returncode, r.stdout[-3000:], r.stderr[-2000:])
-            d = json.load(open(out))
-            mkey = [k for k in d["scores"]][0]
-            scores = d["scores"][mkey]
-            assert len(scores) == 11, (tag, scores.keys())
-            avg = round(sum(scores.values()) / 11, 2)
-            avgs[tag] = avg
-        assert avgs["FULLKV"] == 59.38, \
-            f"FULLKV AVG {avgs['FULLKV']} != 59.38（历史口径 e109_full_ruler32）"
-        # legacy 无 _id 数据被正式入口补刻身份并通过 manifest 门禁
-        stamped = json.loads(open(os.path.join(
-            real_base, "L32768", "pred_E109_FULLKV",
-            "niah_single_1-none-10090537.jsonl")).readline())
-        assert "_id" in stamped and "_answers_sha" in stamped, stamped
-        print(f"D9 PASS  三臂真实数据走 score_ruler_formal.py 全部成功："
-              f"AVG FULLKV={avgs['FULLKV']}（59.38 逐位一致）/ "
-              f"mavg={avgs['mavg']} / aavg={avgs['aavg']}；legacy _id 补刻生效")
+        data_root = os.environ.get(
+            "E116E_DATA_ROOT",
+            "/home/wangyuanshuo02/sparse-bench/third_party/"
+            "KVCache-Factory/data/RULER")
+        if not (os.path.isdir(src) and os.path.isdir(
+                os.path.join(data_root, "32768"))):
+            print("D9 SKIP  本机无真实 32K 三臂数据/源数据目录"
+                  "（外部数据集成测试，不计入程序门禁）")
+        else:
+            real_base = os.path.join(base, "real")
+            os.makedirs(real_base)
+            shutil.copytree(src, os.path.join(real_base, "L32768"))
+            avgs = {}
+            for tag, postfix in [("FULLKV", "_E109_FULLKV"),
+                                 ("mavg", "_E109_mavg_a0.25_b0.125_g0.625"),
+                                 ("aavg", "_E109_aavg_a0_b0_g0")]:
+                out = os.path.join(base, f"formal_{tag}.json")
+                r = subprocess.run(
+                    [sys.executable, "-u", "-m",
+                     "benchmark.RULER.score_ruler_formal",
+                     "--root", real_base, "--pred-postfix", postfix,
+                     "--data-root", data_root,
+                     "--out", out],
+                    capture_output=True, text=True, cwd=REPO,
+                    env={**os.environ, "PYTHONPATH": REPO})
+                assert r.returncode == 0 and "DONE" in r.stdout, \
+                    (tag, r.returncode, r.stdout[-3000:], r.stderr[-2000:])
+                d = json.load(open(out))
+                mkey = [k for k in d["scores"]][0]
+                scores = d["scores"][mkey]
+                assert len(scores) == 11, (tag, scores.keys())
+                avg = round(sum(scores.values()) / 11, 2)
+                avgs[tag] = avg
+                # 036：原始（拷贝）pred 文件零改动——legacy 无 _id 保持在原样
+                orig = os.path.join(real_base, "L32768", "pred_E109_FULLKV",
+                                    "niah_single_1-none-10090537.jsonl")
+                orig_row = json.loads(open(orig).readline())
+                assert orig_row.get("_id") is None, \
+                    f"原始文件被原地补刻（036 回归）: {orig_row.keys()}"
+            assert avgs["FULLKV"] == 59.38, \
+                f"FULLKV AVG {avgs['FULLKV']} != 59.38（历史口径 e109_full_ruler32）"
+            assert avgs["mavg"] == 59.99 and avgs["aavg"] == 57.33, avgs
+            # legacy 补刻发生在 staging 派生目录（成功后改名 {out}.run-*）
+            stamped_glob = os.path.join(
+                base, "formal_FULLKV.json.run-*", "pred_root", "L32768",
+                "pred_E109_FULLKV", "niah_single_1-none-10090537.jsonl")
+            stamped_files = glob.glob(stamped_glob)
+            assert stamped_files, "派生目录中未找到补刻副本"
+            stamped = json.loads(open(stamped_files[0]).readline())
+            assert "_id" in stamped and "_answers_sha" in stamped, stamped
+            print(f"D9 PASS  三臂真实数据走 score_ruler_formal.py 全部成功："
+                  f"AVG FULLKV={avgs['FULLKV']}（59.38 逐位一致）/ "
+                  f"mavg={avgs['mavg']} / aavg={avgs['aavg']}；legacy _id "
+                  f"补刻在派生目录生效（原始文件零改动）")
+            PASS += 1
 
         # ---- D10：现有 E116c 套件全部用例不回归（11/11）
         r = subprocess.run(
@@ -257,11 +283,13 @@ def test_D():
         assert r.returncode == 0 and "E116c ALL PASS (11/11)" in r.stdout, \
             (r.returncode, r.stdout[-3000:], r.stderr[-2000:])
         print("D10 PASS test_e116c_gate.py 11/11 无回归")
-        PASS += 10
+        PASS += 9
     finally:
         shutil.rmtree(base, ignore_errors=True)
 
 
 if __name__ == "__main__":
     test_D()
-    print(f"\nE116d ALL PASS ({PASS}/10)")
+    # D9 为外部真实数据集成测试（E116e 起缺数据时 SKIP 不计入门禁）
+    print(f"\nE116d ALL PASS ({PASS}/10"
+          f"{'，D9 SKIP' if PASS == 9 else ''})")

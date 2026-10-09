@@ -1,0 +1,183 @@
+{
+ "run_id": "20261009112217-238207-7067",
+ "status": "success",
+ "generated": "2026-10-09T11:22:17.416328",
+ "formal": {
+  "script": "benchmark/RULER/score_ruler_formal.py",
+  "sha256": "c6b70a27601143c9faa8bd22218f3cf6a79ba2d47633cf17893db92665b88e43"
+ },
+ "scorer": {
+  "script": "benchmark/RULER/score_ruler.py",
+  "sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99"
+ },
+ "inputs": {
+  "root": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B",
+  "pred_postfix": "_E109_aavg_a0_b0_g0",
+  "data_root": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER",
+  "expect_tasks": 11,
+  "min_samples": 100,
+  "run_identity": {
+   "data_root": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER",
+   "model_path": null,
+   "yarn": false,
+   "yarn_factor": null,
+   "extra_params": {},
+   "formal_script_sha256": "c6b70a27601143c9faa8bd22218f3cf6a79ba2d47633cf17893db92665b88e43",
+   "scorer_sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99",
+   "note": "model_path/yarn 等为操作者声明值；legacy 数据无法从文件恢复完整输入身份（identity_mode=legacy-partial），native 数据由 pred_ruler.py 落盘"
+  }
+ },
+ "outputs": {
+  "json": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/results/e116e_ruler32_formal_aavg.json",
+  "md": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/results/e116e_ruler32_formal_aavg.md",
+  "manifest": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/results/e116e_ruler32_formal_aavg.json.manifest.json",
+  "derived_dir": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/results/e116e_ruler32_formal_aavg.json.run-20261009112217-238207-7067"
+ },
+ "manifest_sha256": "2e0d1e503c7528e7c2733d2cb973d47a8dad62c94f6aa11f1251c20dfe2e318c",
+ "result_sha256": "985768110b448804ab73a8dd767ddcef6e7f62a11454c4ab5c54e2d7daf6657f",
+ "source_data_sha256": {
+  "32768/niah_single_1": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_single_1.jsonl",
+   "sha256": "e851c310be0cc7d1fa32469c9443f8fb2dd65ab6b3b28d8f2d700db86399c2db"
+  },
+  "32768/niah_single_2": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_single_2.jsonl",
+   "sha256": "26af960be2fdcf7c7907b7fd2a17c6bb44958381e90ccc50ad297770b51eaf79"
+  },
+  "32768/niah_single_3": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_single_3.jsonl",
+   "sha256": "1e383c1b27269f8796650d37012b212c1d51124b3388bc8fce56c809698b7bc8"
+  },
+  "32768/niah_multikey_1": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_multikey_1.jsonl",
+   "sha256": "530af35848867e9908b5cfa8251363b366c12d6ab20b5aee7445c11f53d8df23"
+  },
+  "32768/niah_multikey_2": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_multikey_2.jsonl",
+   "sha256": "073bae295bd94baa1880f33c4b0ccaec3a4d510dac2b31935b3ce488ad698fe8"
+  },
+  "32768/niah_multikey_3": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_multikey_3.jsonl",
+   "sha256": "d13f08fb05ac73aa062377c764c602d762d6b9d1e22092ec1e522596bfbb0a76"
+  },
+  "32768/niah_multiquery": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_multiquery.jsonl",
+   "sha256": "273bb35ea339defdee27055947a7ea78512877c0e1648c701225ef49fcc8e91c"
+  },
+  "32768/niah_multivalue": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/niah_multivalue.jsonl",
+   "sha256": "1da24401a722c00618e4d4d1b72583620a331d0a4c7b6df384dad3974b0bd234"
+  },
+  "32768/cwe": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/cwe.jsonl",
+   "sha256": "07fcda888ce6d9f834639abafa23c8fd726a352227432a26175bc3c3ff2e0051"
+  },
+  "32768/fwe": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/fwe.jsonl",
+   "sha256": "23a8073809df38f32194cf5cfec6a311a286f4776af6771a3912b33010a65206"
+  },
+  "32768/vt": {
+   "path": "/home/wangyuanshuo02/sparse-bench/third_party/KVCache-Factory/data/RULER/32768/vt.jsonl",
+   "sha256": "f34626c7908480ea16c6e7c77decd51326e202014570b107156730ea6e69f4b7"
+  }
+ },
+ "cells": {
+  "L32768/tli_64_128_1024_c4_A": {
+   "length_dir": 32768,
+   "identity_mode": "legacy-partial",
+   "tasks": {
+    "niah_single_1": {
+     "n": 100,
+     "best_file": "niah_single_1-tli_64_128_1024_c4_A-10090537.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_single_1-tli_64_128_1024_c4_A-10090537.jsonl",
+     "source_sha256": "1cd691c54786d1eecd9842f57f348caa927627684bddcfce2afb0ec0e2aab8a1",
+     "derived_sha256": "e998729452cc09f1c1d98ad02577c2bb437da2063747f6d5dbb35cfa772ada9d"
+    },
+    "niah_single_2": {
+     "n": 100,
+     "best_file": "niah_single_2-tli_64_128_1024_c4_A-10090537.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_single_2-tli_64_128_1024_c4_A-10090537.jsonl",
+     "source_sha256": "efb6a730f98be872304848c9d3e2d35e82ead6d3537f6d505033a84ccea64b9a",
+     "derived_sha256": "fd586e877311d41ea46c0f8b039dc8fe09effc429cfe0fabb1bf6c78365bf984"
+    },
+    "niah_single_3": {
+     "n": 100,
+     "best_file": "niah_single_3-tli_64_128_1024_c4_A-10090537.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_single_3-tli_64_128_1024_c4_A-10090537.jsonl",
+     "source_sha256": "a3963afef7baac91f6381b157e6b06008bd9fd96e5b1be79d383919b9c75baaf",
+     "derived_sha256": "0e04a5b21b60d0fc4c20a4538043776ceb8b8df91977bdbdab971548e618e4ae"
+    },
+    "niah_multikey_1": {
+     "n": 100,
+     "best_file": "niah_multikey_1-tli_64_128_1024_c4_A-10090655.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_multikey_1-tli_64_128_1024_c4_A-10090655.jsonl",
+     "source_sha256": "adbf210aec8db8195f7d3831bba358f4a2feffe25c2bbe4d721e4c051a660b80",
+     "derived_sha256": "4295fe4d3ffe2fc719dcad8251e1881e668a49331c95b9965185170bc895c0b1"
+    },
+    "niah_multikey_2": {
+     "n": 100,
+     "best_file": "niah_multikey_2-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_multikey_2-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_sha256": "0fd8308796e86502c6377b21a1ffe013a38736797b7471628c58a2e6e6d4963c",
+     "derived_sha256": "05c668058f6a22552520e40c56d4c6ad302a5347dbf47a8677a76cd23e746e69"
+    },
+    "niah_multikey_3": {
+     "n": 100,
+     "best_file": "niah_multikey_3-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_multikey_3-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_sha256": "ddcafa69b89593bf41bbf9a2b6a78f8fb7a6e4df57596a24bcda5b2a53f67eeb",
+     "derived_sha256": "6ed57d40f62a8dbfd81d7ac594bf2d1e538890c5cda747521da0002021ee0380"
+    },
+    "niah_multiquery": {
+     "n": 100,
+     "best_file": "niah_multiquery-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_multiquery-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_sha256": "8f7ecaaa29b4ee109fd1d850de7e2317faa322b777a6ca0b40e54b8daa805a76",
+     "derived_sha256": "25dfbcbccc4ecd1d5ed6911d089b2b25c309a8fafae0771d18ff6053279023e3"
+    },
+    "niah_multivalue": {
+     "n": 100,
+     "best_file": "niah_multivalue-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_multivalue-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_sha256": "89a45da2fa1da08e6ad690da3ed434c054a3e9596cf0c7b47b815646dabacf17",
+     "derived_sha256": "b2e00b4b1d8aa7c6404665497e0edcf83a39c12f88c39cf69793819c0ac47680"
+    },
+    "cwe": {
+     "n": 100,
+     "best_file": "cwe-tli_64_128_1024_c4_A-10090655.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/cwe-tli_64_128_1024_c4_A-10090655.jsonl",
+     "source_sha256": "31639b8482677f3e9470e7e63a8d0d50479bc4c381fb8ab7fcdc1b851342d92a",
+     "derived_sha256": "edcd1d3b990211d7ccb555002d3c603eeef519fadcdcc56270c060751c7676da"
+    },
+    "fwe": {
+     "n": 100,
+     "best_file": "fwe-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/fwe-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_sha256": "aa623f0369af2e9c8d6caa9c3d72d18171f715e074daced13a9528cee4b8d7a7",
+     "derived_sha256": "8b497baa151e7f2176c07f36f12d030897d972a3c34966fad0a9af96cd0edb85"
+    },
+    "vt": {
+     "n": 100,
+     "best_file": "vt-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/vt-tli_64_128_1024_c4_A-10090606.jsonl",
+     "source_sha256": "87d071e9fc4167931b37368df1bdeeb8775984b4fe0bf0fb9395797dc37815f4",
+     "derived_sha256": "152414aa8e9dd4df705825337653950d83bbfcf9e5ac6c6c1ba6808c173a1dfb"
+    }
+   }
+  }
+ },
+ "avg": {
+  "L32768/tli_64_128_1024_c4_A": 57.33
+ },
+ "legacy_stamp": {
+  "n_stamped": 11,
+  "invariant_fields": [
+   "pred",
+   "answers",
+   "length",
+   "budget"
+  ],
+  "invariant_asserted": true,
+  "note": "补刻只发生在 staging 派生副本；源文件 SHA256 记录于 cells[].tasks[].source_sha256，全程只读"
+ }
+}

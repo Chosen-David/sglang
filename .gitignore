@@ -172,6 +172,8 @@ benchmark/llava_bench/images
 benchmark/llava_bench/mme_pack
 *.jsonl
 !tools/sglang-simulator/examples/replay/trace.jsonl
+# E116e：RULER 正式评分门禁测试的入库 fixture（合成数据，11 任务×2 行）
+!two-level-attention/benchmark/RULER/testdata/**/*.jsonl
 tmp*.txt
 /tmp/
 

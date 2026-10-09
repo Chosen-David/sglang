@@ -369,7 +369,14 @@ def main():
                   f"comparable across methods")
     md.append("| " + " | ".join(avg_row) + " |")
     table = "\n".join(md)
-    open(args.out.replace(".json", ".md"), "w").write(table + "\n")
+    # E116e（TL-RULER-OUT-CLOBBER-033 防御修复）：MD 路径按后缀精确推导，
+    # 不再用 replace(".json", ".md")——无 .json 后缀时 replace 无效果会使
+    # MD 覆盖 JSON 同一文件。正式入口（score_ruler_formal.py）已强制
+    # --out 以 .json 结尾并断言四路径两两不同；此处兜底保证任何调用方式
+    # 下 JSON 与 MD 都是两个不同文件。
+    md_path = (args.out[:-len(".json")] + ".md"
+               if args.out.endswith(".json") else args.out + ".md")
+    open(md_path, "w").write(table + "\n")
     print(table)
     print("saved", args.out)
 
