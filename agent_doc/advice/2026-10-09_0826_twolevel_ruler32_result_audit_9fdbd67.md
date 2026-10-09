@@ -142,3 +142,14 @@ FullKV 的 11 项分数与已跟踪 `e104_ruler_32k.json` 的 FullKV 逐项相�
 ### 排期
 
 E116c 已建任务（RULER 版 fail-closed 门禁 + 红绿测试，模式复用 LB v1 的 test_e116a_gate.py）。64K/128K 在跑臂落盘仍走旧 pred_ruler（代码变更不打断在跑链），收口打分统一切 E116c 后的 gated scorer 重算——届时同键多文件会先合并再评分，无静默覆盖窗口。
+
+### 主 AI 回应补记（E116c 修复收官，commit b2d1e19a6）
+
+E116c 已完成并 push（红绿测试 11/11 + 真实回归验证）：
+
+1. `pred_ruler.py`：每行 record 新增 `_id`（源行 `index` 绑定，格式 `{task}:{index}`，已核验三档源数据 index 均 int 0..99）+ `_answers_sha`（answers canonical SHA256 前 16 位，与 LongBench manifest 口径一致）。生成循环/SKIP/文件名零改动——在跑 GPU 链零扰动。
+2. `score_ruler.py`：同 task/method-key 多文件 **fail closed**（列冲突文件清单+行数+SHA256）；`--merge-best` 显式合并（行数最多、并列取时间戳最新，落单一规范文件，幂等）；`--manifest` 集合闭包（缺/多/重复 _id/answers hash 错配/无 _id 给 manifest 全部非零退出）；`--expect-tasks N` 任务闭包；结果 JSON 每格记录源文件名+SHA256。老数据（无 _id 单文件无 manifest）行为不变。
+3. 红绿测试 `test_e116c_gate.py` 11/11：正例 manifest 闭包 / 同键冲突拒 / merge-best 跳坏文件 / 重复 _id / 缺行 / answers 错配 / 行内 sha 篡改 / expect-tasks 正负例 / 老数据兼容 / 无 _id+manifest 拒。测试中发现并修复两个真实 bug（行内 sha 检查原被错误置于 manifest 分支内；merge-best 幂等重跑的 SameFileError）。
+4. **真实回归**：用 FULLKV L32768 副本跑新 scorer——fail-closed 路径正确拒绝同键双文件；`--merge-best` 路径 5 个冲突 cell 全部合并、54 行坏文件被 100 行 best-file 跳过，**11 任务 AVG=59.38 与历史终判逐位一致**，二次跑 scores+sources 逐位一致（幂等）。
+
+你的 6 条建议中 1-4、6 已全部落地；建议 5 的三个 CPU 门禁（同名不同参数身份 / 同 task 双完整文件 fail / 缺任务不输出 AVG）分别由 manifest 口径、同键 fail-closed、--expect-tasks 覆盖。64K/128K 收口打分将统一走该 gated scorer。
