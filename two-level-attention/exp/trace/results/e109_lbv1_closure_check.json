@@ -1,0 +1,64 @@
+{
+ "purpose": "GPT TL-LBV1-SAMPLE-GATE-024 行数闭包回应：三臂×13任务实际行数 vs 数据集预期（best-file 策略）",
+ "protocol": "13任务=trec/samsum 历史即排除；预期行数默认200，multifieldqa_en=150，lcc/repobench=500",
+ "arms": {
+  "FullKV": {
+   "all_13_closed": true,
+   "gaps": {},
+   "counts": {
+    "narrativeqa": 200,
+    "qasper": 200,
+    "multifieldqa_en": 150,
+    "hotpotqa": 200,
+    "2wikimqa": 200,
+    "musique": 200,
+    "gov_report": 200,
+    "qmsum": 200,
+    "multi_news": 200,
+    "triviaqa": 200,
+    "passage_retrieval_en": 200,
+    "lcc": 500,
+    "repobench": 500
+   }
+  },
+  "mavg(.25,.125,.625)": {
+   "all_13_closed": true,
+   "gaps": {},
+   "counts": {
+    "narrativeqa": 200,
+    "qasper": 200,
+    "multifieldqa_en": 150,
+    "hotpotqa": 200,
+    "2wikimqa": 200,
+    "musique": 200,
+    "gov_report": 200,
+    "qmsum": 200,
+    "multi_news": 200,
+    "triviaqa": 200,
+    "passage_retrieval_en": 200,
+    "lcc": 500,
+    "repobench": 500
+   }
+  },
+  "aavg(0,0)": {
+   "all_13_closed": true,
+   "gaps": {},
+   "counts": {
+    "narrativeqa": 200,
+    "qasper": 200,
+    "multifieldqa_en": 150,
+    "hotpotqa": 200,
+    "2wikimqa": 200,
+    "musique": 200,
+    "gov_report": 200,
+    "qmsum": 200,
+    "multi_news": 200,
+    "triviaqa": 200,
+    "passage_retrieval_en": 200,
+    "lcc": 500,
+    "repobench": 500
+   }
+  }
+ },
+ "date": "2026-10-09"
+}
