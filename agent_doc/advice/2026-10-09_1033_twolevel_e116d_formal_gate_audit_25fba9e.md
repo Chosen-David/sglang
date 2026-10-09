@@ -184,3 +184,20 @@ COMPILE_RC=0 TEST_RC=1
 红绿矩阵按你的清单：11×1、10×100、11×100；成功后删任务重跑同 out；scorer 阶段 hash 错配重跑；32K/128K 错目录（长度身份门禁拒）；同 row index/answers 不同 input；无 `.json` 后缀；`python -O` closure；clean clone 无外部数据；legacy 源文件哈希前后不变。
 
 修复合入后：32K 三臂走新正式入口重出 receipt（与历史 59.99/59.38/57.33 逐位对照），64K/128K 收口一律走新入口——「正式论文证据」的升格条件以新门禁全过为准。
+
+### E116e 收官通知（2026-10-09 12:0X，commit 72dd858b2，主会话独立复验）
+
+七项 030-036 全部落地（E116e #171），主会话独立复验通过后已 push：
+
+1. **030→发布硬门禁**：任一 (L, method, task) 格 `n < --min-samples` → 非零退出、不发布任何产物、staging 清理，failure receipt 落盘。反例重放：11×1 行默认 100 → `rc=1` + `[GATE-FAIL] n=1 < min-samples 100——拒绝发布`。
+2. **031/033→staging 原子发布**：全校验（manifest+scorer+JSON/MD+receipt）先在 `{out}.staging-{run_id}/` 完成，成功后逐文件 `os.replace` 原子发布（receipt 最后落盘=提交信号）；失败写独立 `{out}.failure-{run_id}.json`（明确「旧产物属于上一轮成功」），旧产物与源文件零触碰。`--out` 强制非空小写 `.json`（无后缀/.JSON/中间含 `.json`/`.jsonl` 全拒）+ 四路径两两不同断言；score_ruler.py MD 路径改后缀精确推导（L372 `replace` 根因修复）。反例重放：无后缀 → `rc=1` + `[GATE-FAIL] --out 必须以非空小写 .json 后缀结尾`。
+3. **032→身份扩展**：manifest/receipt 逐格绑定 length 档位+行统计、method、源数据文件 SHA256（`{data_root}/{L}/{task}.jsonl` ×11）、model_path、--yarn/--yarn-factor/--extra-param。长度身份双门禁：①行 `length ≤ L` 档位（131072 行混入 L32768 即拒——按你的上界语义实现）②同 task 跨 method 逐行 length 一致。**实现注记：真实 pred 行 length 是实际 token 数（27k~32768）非标称值，恒等比较会误杀全部真实数据，故用上界+一致性双门禁**。legacy 标 `identity_mode=legacy-partial`。
+4. **034→closure 去 assert 化**：计数/跨臂 answers 全等/文件内零重复/零路径冲突改显式 `SystemExit` 硬门禁；「断言通过」文本从实际 verdict 派生；`python -O` 与普通模式双跑 33×1 负例均非零退出不写结果、33×100 正例 verdict 一致（E8）。
+5. **035→测试拆分**：`benchmark/RULER/testdata/e116e/`（11 任务×2 行合成 fixture）入库，E1-E10+D10 clean clone 恒可运行（本机复跑 **程序门禁 12/13 + D9 SKIP**）；D9 改 `--with-real-data` 显式开关，缺数据 SKIP 退出码 0 不计门禁。E116c 11/11 + E116d 10/10 无回归（D9 已适配新 CLI）。
+6. **036→源文件只读**：`_stamp_or_copy()` 源文件全程只读；legacy 补刻写 staging 派生副本（成功后 `{out}.run-{run_id}/` 版本化目录）；receipt 记 source_sha256→derived_sha256 + 写后重读逐字段不变量断言（pred/answers/length/budget 逐位不变，`invariant_asserted: true`）。
+
+**真实 32K 三臂收官回归（生产目录直接只读跑）**：主会话独立复算 `e116e_ruler32_formal_{fullkv,mavg,aavg}.json` 逐任务 11 格求均 → **FULLKV=59.38 / mavg=59.99 / aavg=57.33 与历史逐位一致**；receipt 含 run_id + formal/scorer 脚本 SHA256 + 源数据 SHA×11 + 42 个 selected 文件 source SHA，已入库 `exp/trace/results/`。
+
+红绿矩阵按你的清单全落：11×1 拒、10×100 拒、11×100 正例、成功后删任务重跑（旧产物 SHA 逐位不变）、scorer hash 错配重跑、131072 混入+同 ids 不同 length 双 method 拒、四种非法 --out 拒、closure python -O 双模式、clean clone SKIP、legacy 源哈希前后不变。
+
+**「正式论文证据」升格条件自此绑定新门禁**：64K/128K 收口一律走新正式入口（含 --data-root 必填），DONE 信号 = receipt + 全门禁 + 原子发布三者齐全。
