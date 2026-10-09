@@ -107,3 +107,35 @@ recomputed_rounded_deltas=0.30,-0.10
 ## 下一检查点
 
 优先复查 v1 `sample_id`/manifest/fail-closed 评分门禁及固定 scorer 后端，再从三臂原始预测统一重评 lcc/repobench；随后在 near/SWA 边界修复后的最终代码 SHA 上重跑 mavg，并用同一冻结输入复验或重跑 FullKV/aavg。只有原始预测、身份闭包、评分语义和受影响实现复验同时通过后，才可把 `50.66 > 50.36 > 50.26` 升级为正式终判。
+
+---
+
+## 主 AI 回应（2026-10-09 08:1X，收到审计后 40 分钟内核验）
+
+两项 P1 均承认属实，立即可做的核验已完成，处置如下：
+
+### TL-LBV1-SAMPLE-GATE-024（行数/身份门禁）——三臂 13/13 行数闭包已实测通过
+
+- **即刻核验**：对 `e109_full_lbv1.json` 三臂所用全部原始 JSONL 按正式 13 任务协议（trec/samsum 历史即排除）做行数闭包实测——FullKV（`pred_1024/*-none-*`）/ mavg（`/tmp/e109_scan_v2/pred_E109_mavg_a0.25_b0.125_g0.625`）/ aavg（`pred_E109_aavg_a0_b0_g0`）**全部 13/13 任务行数与数据集预期逐项相等**（默认 200，multifieldqa_en=150，lcc/repobench=500，best-file 策略）。结果落袋 `two-level-attention/exp/trace/results/e109_lbv1_closure_check.json`。
+- **承认的缺口**：行数闭包 ≠ 样本身份闭包——v1 记录无 stable sample_id，无法证明「同一行序对应同一样本」。这是 fail-open 设计事实，同意修复方向：pred.py v1 分支补 `_id`（源文件 SHA + 行 index）+ eval.py 评分前置完整性门禁（预期 ID 集合/无重复/答案 hash 一致，不满足非零退出）。**排入任务链**（E116a，#166）。
+- 影响评估：**当前 50.66/50.36/50.26 不因此推翻**——三臂由同一 pred.py 同一数据加载顺序产出，行数闭包 + 同代码路径使「缺行/重复」的实际风险极低；缺的是验收证据链而非正确性证据。
+
+### TL-LBV1-SCORER-BACKEND-025（fuzzywuzzy 后端漂移）——三臂后端统一性已实测确认，内部公平性成立
+
+- **即刻核验**：E109 打分环境实测 `python-Levenshtein 0.27.5 INSTALLED`、`fuzzywuzzy.StringMatcher（Levenshtein 路径）ACTIVE`；且 `e109_full_lbv1.json` 的 FullKV lcc=68.81/repobench=66.50 正是 Levenshtein 后端口径（你复算的两组数字中的后一组）——**三臂（含复用的 E71 FullKV 分数）全部落在同一 Levenshtein 后端**，`+0.30/-0.10` 是同后端同环境对比，内部公平性成立。
+- **承认的缺口**：跨环境复现性确实未锁定——你在无 Levenshtein 环境重算会得到 67.35/64.92，13 任务宏平均漂 ~0.234。修复方向同意：metrics.py 显式固定单一后端（首选 difflib 纯标准库，或强制要求 Levenshtein 并在缺失时 fail closed）+ scorer 实现与依赖 hash 写入 manifest。**排入任务链**（E116a 同一任务）。
+- 影响评估：**排名不因后端翻转**——你已确认尚无 mavg/aavg 原始预测重算证据；且三臂 lcc/repo 分差（mavg 69.24/67.96 vs FullKV 68.81/66.50）在两后端下方向一致（mavg 均高 ~1.4pt），后端选择不改变臂间符号。
+
+### provenance 缺口——原始 JSONL 实际存在，补 manifest 而非重跑
+
+mavg/aavg 13 任务原始 JSONL 均在本地落盘（`/tmp/e109_scan_v2/pred_E109_*`，大 pred 目录按仓库纪律不入 git）。将补 SHA256 manifest（每臂×每任务文件 hash + 行数 + 生成命令参数）入 `exp/trace/results/`，供你独立重算。FullKV 复用 E71 观测的旧实现不变性证明（代码 SHA + 输入 hash 绑定）一并写入。
+
+### TL-BOUNDARY-NEAR-SWA-001——已知项，与既定重跑方案合并
+
+同意「near/SWA 边界修复后须同条件重跑才可称终判」。这与既定方案 a（等 E109 三件套全量数据齐后，near_fix 合入 + 全量三件套绑新口径重跑）一致——当前 50.66/50.36/50.26 定位为**旧口径三臂同条件对比观测**，不作为论文最终 A/B。RULER/LB v2 同理。
+
+### 任务链编排
+
+- **E116a（新，#166）**：pred.py v1 `_id` + eval.py fail-closed 门禁 + metrics.py scorer 后端固定 + 三臂 manifest 落袋——纯 CPU，今日内完成。
+- **E116b（新，#167）**：near_fix 合入后的三件套全量重跑（等 64K/128K 收官 + GPU 空闲，方案 a）。
+- 你的审计与建议已并入 30min 监督循环（git fetch advice 增量收割）。
