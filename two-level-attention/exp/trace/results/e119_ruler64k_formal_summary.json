@@ -190,5 +190,28 @@
   "verdict": {
     "ruler64k_ranking": "mavg 49.42 > FullKV 48.54 > aavg 47.51",
     "conclusion": "64K 正式口径下 mavg（vs FullKV +0.88）居首、aavg（-1.03）居末，完整排序 mavg 49.42 > FullKV 48.54 > aavg 47.51；与 32K 正式排序（mavg 59.99 > FullKV 59.38 > aavg 57.33）方向一致——RULER 32K/64K 两档 mavg 冠军稳定，128K 待全齐后同口径收口（三臂 receipt 均为 legacy 发布协议（生成早于 E116f/E116g 发布锁），本 summary 只声明：数据身份门禁（task/ID/答案/源数据 SHA/评分口径闭包）已对这些文件执行并通过；不声称发布锁协议作用于该批数据的生成）。"
+  },
+  "inputs": {
+    "mavg": {
+      "result_file": "e119_ruler64k_formal_mavg.json",
+      "result_sha256": "587b946f30d85ddec5f606c4606270e3ef01d27e2a24d9bfb45cb45ecd3e7efa",
+      "manifest_sha256": "b73a67e043c7d4a8b7fba1a2cd1adb80c4898cd161a1d7f773d4217c7b7a744c",
+      "receipt_sha256": "f169ebd99451f0382a5cb0c124cb3f19372cc77d2ad9318deb942f0c563846a0",
+      "receipt_run_id": "20261009125539-313359-1340"
+    },
+    "FullKV": {
+      "result_file": "e119_ruler64k_formal_fullkv.json",
+      "result_sha256": "97b8eeb397402149f320a7016b194ca5e28c10dbdcc9d7f9569d4e2c414f715b",
+      "manifest_sha256": "942db160961389dfc2f8c07a409af6239fc1c55769943e7d3565f1a6edb58fbc",
+      "receipt_sha256": "19ef4cecf5db775abe37e00cdcc159c4d175b17db4e0179ec87e7e4dc1ba030a",
+      "receipt_run_id": "20261009125615-313939-7208"
+    },
+    "aavg": {
+      "result_file": "e119_ruler64k_formal_aavg.json",
+      "result_sha256": "68d49ea1b9b92b4593afc3797d8a4c6972a6871f6258bc75e2d9cc8a8e7cc37b",
+      "manifest_sha256": "68217085c8bb5b63504027abb8f010199ac758658750f8c2010370bc2fa618b1",
+      "receipt_sha256": "f5c4101bc9515f8d3e75b4c2cd6007c54a6757eb696ec8c3aaf35ddf1ea0c757",
+      "receipt_run_id": "20261009125646-314472-1494"
+    }
   }
 }

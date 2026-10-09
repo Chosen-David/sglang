@@ -53,6 +53,16 @@ E116h（GPT 1429 审计 045/046/047）消费者闭包修复：
   ⑪ 结论动态生成（046④）：ranking/delta/conclusion 全部从结构化数值
      生成，不硬编码任何 64K 结果数字。
 
+E116h（GPT 1531 审计 TL-E119-SUMMARY-ATOMICITY-049）summary 原子发布：
+  ⑫ summary 写入不再直接 `open(p_out, "w")` 截断——同目录临时文件完整
+     序列化 + flush/fsync + 落盘后重新解析校验必要字段，全部通过才
+     os.replace 原子替换公开路径；发布锁（锁键与 042 同口径
+     realpath(parent)+lexical basename）串行化并发汇总器。任何写入异常
+     （进程被杀/磁盘写满/写中断）只遗留或清理临时文件，上一份
+     last-known-good summary 字节不变；summary 同时保留三臂不可变输入
+     引用（result/manifest/receipt 逐臂 SHA），使 last-writer-wins 的
+     输入代际可审计。
+
 产物：exp/trace/results/e119_ruler64k_formal_summary.json
 用法： python3 exp/trace/analyze_e119_ruler64k_formal.py \
           [--results-dir DIR] [--pred-root DIR]
@@ -61,6 +71,7 @@ E116h（GPT 1429 审计 045/046/047）消费者闭包修复：
      检出可用已入库 fixture 的 pred_root 替代——048① 的路径参数化）。
 """
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -230,6 +241,60 @@ def _bind_generation(arm, p, receipt, results_dir):
     return gen_dir, False
 
 
+def _publish_summary(p_out, out):
+    """⑫（049）：summary 原子发布——同目录临时文件完整序列化 + fsync +
+    落盘后重新解析校验必要字段，全部通过才 os.replace 原子替换公开
+    路径；发布锁（锁键与 042 同口径 realpath(parent)+lexical basename）
+    串行化并发汇总器。任何写入异常只遗留或清理临时文件，公开 summary
+    （last-known-good）字节不变。"""
+    lock_path = os.path.join(
+        os.path.dirname(os.path.realpath(p_out)),
+        os.path.basename(p_out) + ".lock")
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    p_tmp = None
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        # 042 同款教训：获锁后复核公开路径非 symlink——锁键 canonicalization
+        # 与安装目标必须同一口径，否则首替换后锁键漂移
+        if os.path.islink(p_out):
+            _fail(f"summary 目标 {p_out} 是符号链接——fail closed"
+                  f"（049：锁键与安装路径须同一 canonicalization）")
+        p_tmp = f"{p_out}.tmp-{os.getpid()}"
+        with open(p_tmp, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        # 落盘后重新解析 + 必要字段校验：未通过则不替换公开文件
+        check = json.load(open(p_tmp, encoding="utf-8"))
+        for must in ("identity", "identity_gate", "closure", "arms",
+                     "verdict"):
+            if must not in check:
+                _fail(f"summary 落盘重解析缺必要字段 {must!r}——临时文件"
+                      f"不替换公开 summary（049 fail closed）")
+        os.replace(p_tmp, p_out)
+        p_tmp = None
+        # 父目录 fsync（best-effort）：replace 后的目录项持久化，
+        # 平台不支持时忽略——原子性由 os.replace 本身保证
+        try:
+            dfd = os.open(os.path.dirname(p_out) or ".", os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except OSError:
+            pass
+    finally:
+        if p_tmp is not None and os.path.exists(p_tmp):
+            try:
+                os.remove(p_tmp)
+            except OSError:
+                pass
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        finally:
+            os.close(lock_fd)
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="E119 三臂收口汇总（E116g 跨臂身份门禁 + E116h 消费者"
@@ -253,6 +318,7 @@ def main():
     per_arm_scripts = {}
     per_arm_scorer_man = {}
     per_arm_protocol = {}   # ⑨：{arm: {"publish_protocol", "legacy_protocol"}}
+    per_arm_inputs = {}     # ⑫（049）：逐臂不可变输入引用（SHA 可审计）
     samples_seen = set()    # ⑪：样本数元信息从数据推导，不硬编码
     task_count = None
     for arm, fn in ARMS.items():
@@ -401,6 +467,14 @@ def main():
             "result_file": os.path.basename(p),
             "per_task": cell_tasks_scores,
         }
+        # ⑫（049）：逐臂不可变输入引用——last-writer-wins 时输入代际可审计
+        per_arm_inputs[arm] = {
+            "result_file": os.path.basename(p),
+            "result_sha256": receipt["result_sha256"],
+            "manifest_sha256": receipt["manifest_sha256"],
+            "receipt_sha256": _sha256(p + ".receipt.json"),
+            "receipt_run_id": receipt.get("run_id"),
+        }
 
     # ---- ⑥ 跨臂身份门禁主体 ----
     # 数据身份（含白名单外 extra_params + scorer manifest 摘要）逐字段比较
@@ -539,9 +613,13 @@ def main():
                 f"{champ} 冠军{'稳定' if same_dir else '不稳定'}，128K 待"
                 f"全齐后同口径收口（{protocol_txt}）。"),
         },
+        # ⑫（049）：三臂不可变输入引用（已过 receipt↔文件 SHA 闭合门禁）
+        "inputs": per_arm_inputs,
     }
     p_out = os.path.join(results_dir, "e119_ruler64k_formal_summary.json")
-    json.dump(out, open(p_out, "w"), ensure_ascii=False, indent=2)
+    # ⑫（049）：原子发布——写中断/进程被杀/磁盘满只毁临时文件，
+    # 上一份 last-known-good summary 字节不变
+    _publish_summary(p_out, out)
     print(json.dumps(out["arms"], ensure_ascii=False, indent=2))
     print("identity_gate:", json.dumps(
         {k: out["identity_gate"][k] for k in

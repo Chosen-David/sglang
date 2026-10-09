@@ -34,6 +34,16 @@ ARM_CONTRACT 逐字段一致、全部 SHA 闭合、legacy receipt），干净检
                python -O 下重跑 → 仍非零退出且不覆盖旧 summary
                （045：门禁全部为显式条件 + _fail，assert 零依赖）。
 
+E116h 049（GPT 1531 审计 TL-E119-SUMMARY-ATOMICITY-049）summary 原子发布：
+  N9a 写中断   注入 json.dump 写出 '{"partial":' 前缀后抛 OSError →
+               非零退出、旧 summary SHA 逐位不变且仍可解析、无 .tmp
+               残留（修复前 open(p_out,"w") 直接截断毁掉 last-known-good）；
+  N9b 并发发布 双汇总器（一慢速持锁写、一正常）并发写同一 summary →
+               两进程均成功，最终文件为某一完整代际（与单跑逐字节
+               一致），无混写/截断/临时残留；
+  O2 python -O N9a 同款写中断在 python -O 下重跑 → 仍非零退出且旧
+               summary 逐位不变（原子发布不依赖 assert）。
+
 所有负例还断言「不覆盖旧 summary」：失败运行前放置哨兵 summary 文件，
 失败后内容逐位不变。
 
@@ -47,6 +57,34 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+# 049 故障注入 wrapper：importlib 加载 analyzer 模块，按模式 monkeypatch
+# json.dump（analyzer 唯一的 json.dump 调用点 = summary 原子发布）。
+#   interrupt —— 写出 '{"partial":' 前缀后抛 OSError（049 审计原始反例）
+#   slow      —— 持锁慢速写（time.sleep 后真写），驱动并发发布窗口
+_WRAPPER = '''
+import json, os, sys, importlib.util
+MODE, SCRIPT = sys.argv[1], sys.argv[2]
+args = sys.argv[3:]
+spec = importlib.util.spec_from_file_location("e119_analyzer", SCRIPT)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+real_dump = json.dump
+if MODE == "interrupt":
+    def boom(obj, fh, *a, **k):
+        fh.write('{"partial":')
+        fh.flush()
+        raise OSError("injected-write-interruption")
+    json.dump = boom
+elif MODE == "slow":
+    def slow(obj, fh, *a, **k):
+        import time
+        time.sleep(float(os.environ.get("E119_SLOW_DUMP", "3")))
+        real_dump(obj, fh, *a, **k)
+    json.dump = slow
+sys.argv = [SCRIPT] + args
+mod.main()
+'''
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
@@ -358,6 +396,83 @@ def test_O1_python_opt(base):
     _expect_reject(base_b, "O1b(python -O, crossarm identity)", opt_o=True)
 
 
+def _run_wrapper(base, mode, opt_o=False, extra_env=None, popen=False):
+    """049 故障注入：经 wrapper 进程跑 analyzer（monkeypatch json.dump）。"""
+    wpath = os.path.join(base, f"wrapper_{mode}.py")
+    with open(wpath, "w", encoding="utf-8") as f:
+        f.write(_WRAPPER)
+    cmd = [sys.executable] + (["-O"] if opt_o else []) + [
+        wpath, mode, SCRIPT,
+        "--results-dir", os.path.join(base, "results"),
+        "--pred-root", os.path.join(base, "pred_root")]
+    env = dict(os.environ)
+    if extra_env:
+        env.update(extra_env)
+    if popen:
+        return subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True,
+                                cwd=REPO, env=env)
+    return subprocess.run(cmd, capture_output=True, text=True,
+                           cwd=REPO, env=env)
+
+
+def _assert_no_tmp(base):
+    res = os.path.join(base, "results")
+    left = [f for f in os.listdir(res) if ".tmp-" in f]
+    assert not left, f"summary 临时文件残留: {left}"
+
+
+def test_N9_summary_atomic(base):
+    """N9（049）：summary 原子发布红绿——a 写中断毁不了旧 summary、
+    b 并发双发布无混写/截断。"""
+    sp = _place_sentinel_summary(base)
+    old_sha = _sha(sp)
+    # -- a：写中断（049 审计原始反例：写前缀后抛 OSError）--
+    r = _run_wrapper(base, "interrupt")
+    assert r.returncode != 0, ("N9a: 写中断后仍 exit=0", r.stdout[-500:])
+    cur = json.load(open(sp))
+    assert cur == SENTINEL, "N9a: 写中断毁掉了旧 summary"
+    assert _sha(sp) == old_sha, "N9a: 旧 summary 字节被改动"
+    _assert_no_tmp(base)
+    print("  N9a(写中断) PASS  exit=%d，旧 summary SHA 逐位不变且可解析，"
+          "无 .tmp 残留（049: last-known-good 不再被 open(w) 截断）"
+          % r.returncode)
+    # -- b：并发双发布（慢速持锁写 × 正常写）--
+    # 先单跑一次取「完整代际」期望字节
+    r_single = _run(base)
+    assert r_single.returncode == 0, (r_single.returncode, r_single.stderr[-500:])
+    expected = open(sp, "rb").read()
+    procs = [
+        _run_wrapper(base, "slow",
+                     extra_env={"E119_SLOW_DUMP": "4"}, popen=True),
+        _run_wrapper(base, "slow",
+                     extra_env={"E119_SLOW_DUMP": "0.5"}, popen=True),
+    ]
+    rcs = [p.wait() for p in procs]
+    assert rcs == [0, 0], ("N9b: 并发发布进程失败", rcs,
+                          [p.stderr.read()[-300:] for p in procs])
+    assert open(sp, "rb").read() == expected, \
+        "N9b: 并发发布后 summary 不是任一完整代际（混写/截断）"
+    _assert_no_tmp(base)
+    print("  N9b(并发发布) PASS  双汇总器并发（4s/0.5s 持锁写）均成功，"
+          "最终文件与单跑逐字节一致，无混写/截断/临时残留")
+
+
+def test_O2_python_opt_summary_atomic(base):
+    """O2（049 建议 4）：N9a 同款写中断在 python -O 下重跑 → 仍非零
+    退出且旧 summary 逐位不变（原子发布路径不依赖 assert）。"""
+    sp = _place_sentinel_summary(base)
+    old_sha = _sha(sp)
+    r = _run_wrapper(base, "interrupt", opt_o=True)
+    assert r.returncode != 0, ("O2: python -O 写中断后仍 exit=0",
+                               r.stdout[-500:])
+    assert json.load(open(sp)) == SENTINEL, "O2: python -O 写中断毁掉旧 summary"
+    assert _sha(sp) == old_sha
+    _assert_no_tmp(base)
+    print("  O2(python -O 写中断) PASS  exit=%d，旧 summary 逐位不变，"
+          "无 .tmp 残留" % r.returncode)
+
+
 def main():
     global PASS, _FIXTURE
     root_tmp = tempfile.mkdtemp(prefix="e119_ident_")
@@ -378,6 +493,8 @@ def main():
             ("N8", test_N8_script_sha_fail_closed),
             ("P2", test_P2_dynamic_conclusion),
             ("O1", test_O1_python_opt),
+            ("N9", test_N9_summary_atomic),
+            ("O2", test_O2_python_opt_summary_atomic),
         ]
         for tag, fn in cases:
             base = os.path.join(root_tmp, f"fx_{tag}")
@@ -387,7 +504,7 @@ def main():
             PASS += 1
     finally:
         shutil.rmtree(root_tmp, ignore_errors=True)
-    print(f"\nE119 crossarm identity ALL PASS ({PASS}/11)")
+    print(f"\nE119 crossarm identity ALL PASS ({PASS}/13)")
 
 
 if __name__ == "__main__":
