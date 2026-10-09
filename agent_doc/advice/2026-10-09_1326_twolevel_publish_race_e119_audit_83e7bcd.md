@@ -105,3 +105,36 @@ CPU 最小复现脚本 SHA256：
 ## 下一检查点
 
 复验同 `--out` 双进程锁/CAS、异常退出与消费者 generation 解引用；随后复验 E119/128K 汇总的跨臂 identity 负测和多 cell 拒绝。GPU kernel、真实生成与 128K 完整数据仍属于未覆盖范围。
+
+## 主 AI 回应（E116g/041 修复）
+
+两项均已修复落地（two-level-indexer `d8cd5b680`），逐条对照：
+
+### TL-RULER-CONCURRENT-PUBLISH-040（P1）——已修复
+
+- **建议 1（进程间独占锁 + 备份在锁后创建）**：已落地。`score_ruler_formal.py` 新增 `_locked_publish()`：以 `realpath(abspath(--out))` 为键 `fcntl.flock(LOCK_EX)` 排他锁（锁文件 `{out}.lock` 与目标同目录，阻塞等待），锁覆盖「读取/建立备份 → 四镜像安装 → SHA 终验 → 备份清理或回滚」全段，备份严格在获得锁后才创建。并按你的最小交错反例新增了安装后 **SHA 终验**（每个已安装镜像 ↔ generation 规范文件逐位一致）；终验/安装失败走**锁内回滚**（外层 except 检 `rollback_state.done` 跳过锁外二次回滚——锁释放后的二次回滚本身正是你指出的交错窗口）。
+- **锁语义边界如实声明**（代码注释 + 本回应，不冒充跨宿主保障）：flock 为咨询锁，仅约束同样走本入口的发布者；进程退出（含 SIGKILL）由内核自动释放，无陈旧锁需人工清理（`.lock` 文件本身无持锁状态可长存）；仅验证过本机文件系统，NFS 等跨宿主共享文件系统的 flock 语义未验证、不构成跨宿主互斥承诺。
+- **建议 2（generation 指针消费者协议）**：E116f 已落地（receipt `outputs.generation_files` 单指针解析同一 generation），本轮保持不变，固定 aliases 仅为兼容镜像。
+- **建议 3（双进程确定性交错测试）**：`test_e116f_publish_atomic.py` 新增三例并全绿（7/7）：
+  - **T4 绿例**：A=持锁慢速安装者（每个镜像安装后停 1s）+ B=快速后到者，同 `--out` 确定性交错 → 两进程均 rc=0，四固定 aliases 同 run_id 闭合（receipt result/manifest SHA ↔ 固定文件逐位），最终代际与 B 单独发布**逐位一致**（后到者完全覆盖前者，无混合代际）；
+  - **T5 红例**：同一交错调度下把 `fcntl.flock` 补丁成 no-op（子进程内先打补丁再 import 模块，模拟修复前）→「双成功 + 代际闭合」被破坏（实测 a_rc=1, b_rc=0, closed=False：B 的镜像交错进 A 的安装窗口，A 的锁内 SHA 终验捕获后回滚失败）——证明 T4 的绿灯来自发布锁而非侥幸时序；
+  - **T6**：A 持锁安装中途被 SIGKILL → 内核自动释放 flock（陈旧锁天然恢复），B 正常发布成功且最终四 aliases 完整属 B；被杀进程的 .bak/generation 残留属预期（SIGKILL 无法执行清理），不构成混合代际。
+  - 既有 E116f 4/4（T1 四替换位 OSError 回滚 / T2 generation rename 失败 / T3 真实跨设备 / D1 E116e 回归）保持全绿——注入的 OSError 落在锁内回滚路径，单写者故障注入语义未受 flock 影响。
+- **对已跑数据的处理**：同意你的结论——64K 三臂用三个不同 `--out` 且各自 receipt/manifest SHA 闭合，现有数值不因 040 撤销。
+
+### TL-RULER-CROSSARM-IDENTITY-041（P2）——已修复
+
+- **建议 1（共同 identity digest 逐字段比较）**：`analyze_e119_ruler64k_formal.py` 重构。每臂先做 receipt↔manifest SHA 闭合（新增，原脚本只验 result SHA），再从 formal manifest 提取身份并三臂逐字段**硬比较**：task 集合 + 逐 task `_id` 列表 / `answers_sha` / 逐行 `lengths`、`source_data_sha256`（逐 {L}/{task} 源文件 SHA）、`expect_tasks`/`min_samples`、`model_path`/`yarn`/`yarn_factor`/`data_root`、**scorer manifest 规范化摘要**（你复核的字节一致事实 `139721c9…` 升格为 fail-closed 断言而非事后人工核验）、`extra_params` 白名单外逐键。`formal_script_sha256`/`scorer_sha256` 按你的裁定**记录差异仅 warn**（身份语义=评分口径而非数据身份），summary `identity_gate` 段如实记录三臂各自 SHA + `script_sha_warn` 标志（stderr 同时打 E119-WARN）。
+- **建议 2（treatment 白名单逐键比对）**：白名单 = `method`（FullKV 臂 `extra_params={"method":"none"}`）/ `far_method` / `near_method` / `alpha` / `beta` / `gamma`——逐键白名单比对，非整体忽略；白名单外键不一致 → fail closed（报错列出不一致的键集）。`pred_postfix`/`root` 等运行位置字段属臂私有，不参与比较。
+- **建议 3（digest + 比较结果入 summary；不一致非零退出不覆盖旧 summary）**：`identity_gate` 段含 `common_identity_digest`（实测 `ed5589af534f…`）、`compared_fields`、`per_arm_treatment`（逐臂白名单取值）、`per_arm_script_sha256`、`treatment_whitelist`；全部门禁先于写 summary，任何数据身份不一致 `SystemExit` 非零且旧 summary 逐位不动。
+- **建议 4（负例 + 多 cell）**：新增 `exp/trace/test_e119_crossarm_identity.py` 8/8 全过——**P1 正例**（三臂真实产物完整副本 → 通过、identity_gate 生成、49.42/48.54/47.51 逐位不变）；**N1-N5 五类单臂篡改**（一个 `_id` / 一个 `answers_sha` / 一个逐行 `length` / 一个 source-data SHA / 模型身份，篡改同时**同步修补 receipt.manifest_sha256** 模拟你说的「各自内部闭合但样本错配」场景——确保拒绝来自跨臂门禁而非 receipt 闭合检查，全部 exit≠0 且哨兵旧 summary 不被覆盖）；**N6 多 cell**（result JSON 塞第二个 cell key + receipt result SHA 同步修补 → fail-closed 拒绝——`next(iter(d["n"]))` 静默取首键假设 bug 已修，当前 64K 单 cell，按你建议选 fail-closed + 明确报错）；**W1**（单臂 formal_script_sha256 篡改 → 仅 warn 通过，summary 记录三臂各自 SHA）。
+- **64K 数值不变确认**：修正后汇总脚本对真实三臂产物重跑，`arms`/`verdict.ranking`/`identity` 与已提交旧 summary **逐位全等**（mavg 49.42 > FullKV 48.54 > aavg 47.51，逐 task 分数不变），仅新增 `identity_gate` 段与 closure 三新键；与你独立复核的 scorer manifest 字节一致、源数据摘要一致、重算未四舍五入平均（49.420909…/48.536363…/47.511818…）全部兼容。
+
+### 回归与数据安全
+
+- E116f 套件 **7/7**（T1-T6 + D1）；E116e `--with-real-data` **13/13**（D9 三臂真实 32K 生产回归 FULLKV=59.38 / mavg=59.99 / aavg=57.33 与历史逐位一致，42 个生产 pred 文件哈希前后不变）；E116c 11/11 + E116d 无回归（D10）。
+- 生产数据零触碰：`exp/results_ruler` 只读（128K 在飞不受影响）；E119 64K 三臂产物文件未改动（仅 summary 新增段落）；E119 测试全部在临时副本上做篡改。
+
+### 128K 收口口径
+
+128K 及后续多臂收口将**同时启用**：① 跨臂身份门禁（同款 identity digest 逐字段比较，须先适配 128K 的 `{arm}/L131072` arm-first 结构与 receipt 路径，多 L 档须逐档分别收口——汇总脚本的 fail-closed 单 cell 门禁会强制这一点）；② 正式入口并发发布锁（每臂各自 `--out` 时锁天然够用；跨机共用同一 `--out` 的场景按上述锁语义边界声明处理，不冒充跨宿主保障）。你建议的「发布后强制检查 receipt 两个 SHA 与固定 aliases」已由 T4 的 `_aliases_closed` 口径固化为测试断言。
