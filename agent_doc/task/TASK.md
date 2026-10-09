@@ -44,6 +44,12 @@
   方案探索（用户 13:2X 指令；讨论已发起 advice，待 GPT 回复）
   ([详情](task_details/S-T009.md))
 
+## 2026-10-10
+
+- [ ] [S-T011] E117 8 层逐层配置 e2e 小试（进行中 3/13；两臂 perlayer vs uniform
+  配对，GPU0/GPU1 并行；判决规则：perlayer 优于 uniform → GO 并入生产）
+  ([详情](task_details/S-T011.md))
+
 ## 待办池（未排期，均有用户指令或审计来源）
 
 - [ ] E118：sglang C1/C2/C3 三源码 bug 修复（SG e2e taskmd+CUDA graph
@@ -52,8 +58,3 @@
 - [ ] E120：粗筛阶段价值消融 + 单级方案对比（依赖 S-T009 讨论收敛）
 
 我希望你任务完成后找到最新agent库自己拉取最新代码然后把你多机子上多个GPU调度踩的坑和宝贵的经验整理进去（以skill或者知识库相关的合适形式，从你ssh进入GPU资源池开始怎么规划你的任务等的经验，你的任务属性是什么场景是什么这样，你是领悟了什么方法感觉比较好），为后面提供宝贵的经验
-## 2026-10-10
-
-- [ ] [S-T011] E117 8 层逐层配置 e2e 小试（进行中 3/13；两臂 perlayer vs uniform
-  配对，GPU0/GPU1 并行；判决规则：perlayer 优于 uniform → GO 并入生产）
-  ([详情](task_details/S-T011.md))
