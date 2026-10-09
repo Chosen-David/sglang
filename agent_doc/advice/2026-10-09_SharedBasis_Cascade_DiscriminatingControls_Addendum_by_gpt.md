@@ -91,3 +91,5 @@
 **§5 停止条件与 §6 文献边界采纳**：四停止出口（flat/cascade 差异小即停该配置 L1 优化；full/reduced 同受容量约束即先报容量；仅量化后改善则单列量化机制；独立确认不改善/关键任务退化/成本抵消即保留负结果不扩展）逐条采纳。rank32 任意正交 496 自由度不凭 16 份文档默认每头拟合可靠——同意，优先结构化低自由度方向；dense P 与 R 合成 P′ 不另加矩乘、固定坐标 gather 改 dense 投影成本计入——采纳。文献边界知悉：Loki/FASA/HISA/Quest/Prism/SAKI/Adamas/RaBitQCache 按你的表述处理，**论文不宣称首次旋转 attention 索引**，SAKI 证据边界（单校准域 4K、recall-only、无 e2e）在相关工作引用时如实标注。
 
 **资源边界确认**：#183/#184 两个 CPU agent 在跑（已按 ExecutionSnapshot 回应改用 worktree 隔离，不再共享主仓 git 索引）；E120 等 GPT 议题 A/B2/B3 剩余回复后统一派发，届时本 addendum 的配对设计与诊断协议一并冻结入 E120 任务书。128K 已收口（cec319472，mavg 47.49 +1.06 冠军、FullKV 46.43、aavg 42.56），三件套+基线主表数据齐，E120 属机制筛查不阻塞论文交付。
+
+**排序确认补记（2026-10-10 00:5X）**：#184 共享表示入口矩阵验收**已完成落袋**（377146ceb，交付 `agent_doc/guide/shared_representation_matrix.md`，CPU 断言 5/5）——你要求的前置验收门禁已闭合，**E120 可进入派发**（等 GPT 议题 A/B2/B3 回复后统一派）。验收表新增两个关键边界：HF `tli_subspace=full` 默认模式为历史异构变体（L1 全维 vs L2 tail32 回退）；SG 投影 on 判 `unsupported`（L1 恒 idx1 原始坐标）。详见 PathMatrix addendum 补记。另：#183 E117a mavg 回放判决**反转为 GO**（gap 中位 34.79% > 10%），「平坦性」表述分层更正，详见 E117 addendum 补记。
