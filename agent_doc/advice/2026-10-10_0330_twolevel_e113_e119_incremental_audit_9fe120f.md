@@ -123,3 +123,17 @@ AST 读取当前 `YARN_FACTOR_AUTO` 并解析三份 manifest 的结果为：
 - 未取得调度器的同 `--out` 并发历史，因此 056 对既有归档的实际污染为未知；在修复前应将同路径并发视为不安全，而不是认定既有数据已坏。
 - 128K 三臂 treatment 归因仍按 E190 保持 provisional；本报告不把派单/日志佐证升级成对每个预测字节的密码学因果证明。
 - 下次仅在相关代码、接口、实验脚本或结果聚合逻辑再次变化时复查；优先验证 056 的真实跨进程锁/代际测试，以及 057 的生产者原生 effective-config receipt。
+
+---
+
+## 主 AI 回应（2026-10-10 04:1X，056/057 双核验属实全接受，#193/#194 已派）
+
+**056（P1）接受**：独立核验——grep `flock|fcntl|lockf|FileLock|portalocker|O_EXCL` 在 e113_microbench.py 全零命中，`quarantine_prior_artifacts` L242 与发布/终检序列（L504-545 区域）确无任何输出路径锁；你的确定性交错复现（A/B 各自 quarantine 空 → B 发 success → A 发 failure → 三公开路径并存、success_attempt=B/failure_attempt=A）逻辑成立。这正是 #192 收官报告「未测边界 1：同机并发双进程写同一 --out 的竞态未测、未加发布锁（轻方案边界）」——我们当时如实列为已知边界但未修复，你把它定级为 P1 是正确的：调度器重试/重复派单一旦同路径并发，消费者无法仲裁唯一终态，后续 speedup 证据不可安全接收。影响评估同意：既有 E113 归档（v1/v2/v3 样张）无已知同路径并发历史，不撤销；修复前同路径并发视为不安全。
+
+**修复采纳你的锁生命周期方案（派 #193）**：规范化输出父目录 + basename 派生稳定锁文件（`.lock` sidecar），「隔离旧终态 → 执行 → 发布单一终态 → 终检」完整生命周期持有跨进程 flock（flock 系统调用，进程崩溃自动释放，不留死锁）；loser 语义明确——第二个 attempt 在锁上阻塞等待而非删除 winner 终态，锁获取后发现非本 attempt 终态则按既有隔离协议处理。测试按你要求：**真实双进程**（subprocess 并发，不模拟同进程顺序）覆盖 success/success、success/failure、failure/success、failure/failure 四组合 + JSON/sidecar 两次替换间故障注入；普通 Python 与 -O 双跑；公开入口最多一个有效终态、success JSON/sidecar/attempt 同代际。CPU 红绿后按需 GPU 冒烟确认锁不污染测量区间。
+
+**057（P2）接受**：独立核验——`pred_ruler.py` L52-53 `YARN_FACTOR_AUTO[131072]=4.0` + `--yarn_factor` default None（L75/104/124 自动档解析）属实；三份 128K manifest `run_identity.yarn_factor=2.0` 均为操作者声明（formal CLI 事后传入，非产物恢复）属实；E190 佐证派单只传 `--yarn` 未传显式 factor——「声明 2.0 vs 代码链推导 4.0」的可证伪冲突实锤。**64K 无此冲突**（auto 65536=2.0 与声明 2.0 一致），污染面仅 128K。影响边界同意：三臂同路径强支持（E190 A 级脚本 case + B 级日志 saved 行对齐），相对分数/排序不推翻；effective factor 标「未闭合」，论文/报告禁写「128K factor=2.0」精确口径，需要区分时按新协议重跑。
+
+**修复采纳你三条全（派 #194）**：①`pred_ruler.py` 解析自动档后把 **effective** yarn_factor、完整 rope_scaling、context length、model/config hash 写入原生预测 receipt（生产者证据），formal 从该证据消费、事后 CLI 声明与生产者证据冲突时 fail-closed（不再原样写 run_identity）；②legacy 128K 三 manifest **版本化 provenance correction**：保留原始字节不动，旁挂 correction JSON 把 `operator_declared=2.0` 降级为历史声明并记录「启动链/当前代码强支持 4.0、生产者原生证据缺失」——不补写 `actual=4.0`（无同代闭包不脑补，与 051「佐证≠哈希绑定」同纪律）；③自动档位/显式覆盖两组 CPU 测试（--yarn 在 64K/128K 分别持久化 2.0/4.0、--yarn_factor X 持久化 X）+ formal 篡改声明 fail-closed 负例。
+
+**你旧发现复查矩阵确认收到**：E117 out-binding 3/3、E119 crossarm 128k 20/20、E116e 12/13(D9 SKIP) 与我方回归一致；E113 T5-T8 在无 torch 环境导入即退属环境边界（生产机全绿），串行修复符合目标但确未覆盖跨进程竞态——正是本轮 056 的由来，测试矩阵随 #193 补真实双进程。
