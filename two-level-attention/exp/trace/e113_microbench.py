@@ -37,12 +37,33 @@
     持久化（`wall_ns_*_samples` 整数列表）；
   - median / us_per_token / speedup 全部从**已持久化原始值**派生
     （`median_int` 排序仅用于计算，不落盘排序结果）；
+    µs/token 用 ns→µs 正确换算 `med_ns/(1000*T)`——纳秒化后旧式
+    `1e6*med/T`（秒→µs）把绝对耗时放大 10^9 倍（量纲回归，GPT advice
+    2026-10-09_E113_Nanosecond_Unit_Regression 修复，T7b/T9 常量验收）；
   - python rep=1 vs triton rep=3 如实称「独立重复样本」（非 paired）；
     「逐次原始延迟」表述自 v3 起真正成立（v2 为排序后+舍入的秒值，其持久化
     样本不能逐位重建 speedup——v2 数据边界见设计文档 §2.3 注记）。
   - 红绿验收：`test_e113_state_machine_054_055.py`（T5 旧成功→新失败 /
     T6 旧失败→新成功 / T7 读回复算逐位一致 / T8 隔离原语；python 与
     python -O 双跑安全——全部显式 check，不依赖 assert）。
+
+== 056 修复（TL-E113-ATTEMPT-RACE-056，GPT 审计 2026-10-10_0330）==
+054 的 fail-closed 状态机只保证了**单进程串行**语义；两个同 `--out` attempt
+在发布前都可完成隔离检查，随后交错发布可致 success JSON（B）+ sidecar（B）+
+failure.json（A）三公开路径并存（GPT 用生产发布函数确定性复现）。修复：
+  - 输出路径派生稳定锁文件 `<out>.attempt.lock`（realpath 规范化，不同
+    拼写的同目标输出解析到同一锁文件）；
+  - **生命周期持锁**（fcntl.flock LOCK_EX）：从 quarantine_prior_artifacts
+    之前开始，到成功终检完 / 失败 failure.json 落盘完（进程退出）为止，
+    隔离 → 执行 → 发布 → 终检全程跨进程互斥；
+  - loser 语义：后到者在 flock 上阻塞等待；获得锁后前任终态已就位，照常走
+    同一隔离协议改名 *.attempt-<sha8>.superseded 后继续（与单进程重跑语义
+    一致），隔离记录如实落 manifest/failure receipt，**不删除前任终态**；
+  - flock 属内核锁：持锁进程崩溃即自动释放，不留死锁；
+  - 红绿验收：`test_e113_attempt_lock_056.py`（真实双进程 subprocess.Popen
+    并发跑生产 main() 的隔离/发布路径，覆盖 success/success、success/failure、
+    failure/success、failure/failure 四组合 + JSON/sidecar 两次原子替换间
+    崩溃注入；python 与 python -O 双跑）。串行单进程行为与 054 修复后一致。
 
 GPU 空闲时跑（默认 GPU0，加 --wait 可轮询等待空闲）。
 
@@ -57,6 +78,7 @@ GPU 空闲时跑（默认 GPU0，加 --wait 可轮询等待空闲）。
 CPU-only 红绿单测（身份门/发布协议）：test_e113_microbench_identity.py
 """
 import argparse
+import fcntl
 import hashlib
 import importlib
 import importlib.util
@@ -254,6 +276,46 @@ def quarantine_prior_artifacts(out):
     return records
 
 
+# ---------------------------------------------------------------- 056 attempt 跨进程锁
+def attempt_lock_path(out):
+    """056：规范化输出路径（realpath）派生稳定锁文件 `<out>.attempt.lock`。
+
+    realpath 使不同拼写（相对路径/符号链接中间段）的同目标输出解析到同一
+    锁文件；锁文件名与隔离产物名（*.attempt-<sha8>.superseded）及临时文件
+    名（*.tmp-<pid>）均不冲突，且永不被 quarantine（隔离只认 out /
+    .sha256 / .failure.json 三个可见后缀）。"""
+    return os.path.realpath(out) + ".attempt.lock"
+
+
+def acquire_attempt_output_lock(out):
+    """056：以输出路径为粒度的跨进程互斥（fcntl.flock，LOCK_EX 阻塞等待）。
+
+    生命周期持锁：调用点必须在 quarantine_prior_artifacts 之前，锁覆盖
+    「隔离旧终态 → 执行 → 发布单一终态 → 终检」全程，到成功终检完 /
+    失败 failure.json 落盘完（进程退出）为止。
+
+    loser 语义：后到 attempt 在 flock 上阻塞等待；获得锁时前任终态已完整
+    就位（或为空），照常走同一隔离协议把前任终态改名 *.attempt-<sha8>.
+    superseded 后继续（与单进程重跑语义一致，隔离记录如实落
+    manifest/failure receipt），**不删除前任终态**。
+
+    flock 属内核锁：持锁进程崩溃即自动释放，不留死锁。"""
+    path = attempt_lock_path(out)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
+def release_attempt_output_lock(fd):
+    """056：显式释放（正常路径终检完成后调用；异常/崩溃路径由进程退出或
+    内核自动释放兜底——flock 不持久）。"""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def median_int(samples):
     """055：从持久化原始整数纳秒样本取中位（排序仅用于计算，不落盘）。"""
     s = sorted(samples)
@@ -396,155 +458,172 @@ def main():
         "tri_git": identity["tri"]["git"], "tri_sha": identity["tri"]["impl_sha256"][:16],
     }, ensure_ascii=False), flush=True)
 
-    # ---- 054：attempt 状态机——开跑前隔离同路径旧终态产物（含 --wait 等待期在内，
-    #           保证整个 attempt 生命周期内可见路径不残留旧代际终态）----
+    # ---- 054 attempt 状态机 + 056 输出路径跨进程锁 ----
     attempt_id = make_attempt_id(identity, args.structured_seed, args.singleton_seed, args.Ts)
-    superseded = quarantine_prior_artifacts(args.out)
-    if superseded:
-        print("[ATTEMPT] " + attempt_id + " 已隔离旧产物 -> " +
-              json.dumps([r["superseded_as"] for r in superseded], ensure_ascii=False), flush=True)
+    # 056：锁必须在 quarantine_prior_artifacts 之前获取——生命周期持锁，从隔离
+    # 旧终态 → 执行 → 发布单一终态 → 终检全程互斥（含 --wait 等待期）。
+    # 修复前两个同 --out attempt 各自 quarantine 后交错发布，可致 success JSON（B）
+    # + sidecar（B）+ failure.json（A）三公开路径并存（GPT 用生产函数确定性复现）；
+    # 后到者阻塞在 flock 上，获锁后按同一隔离协议处理前任终态（不删除）。
+    lock_fd = acquire_attempt_output_lock(args.out)
+    try:
+        superseded = quarantine_prior_artifacts(args.out)
+        if superseded:
+            print("[ATTEMPT] " + attempt_id + " 已隔离旧产物 -> " +
+                  json.dumps([r["superseded_as"] for r in superseded], ensure_ascii=False), flush=True)
 
-    if args.wait:
-        while True:
-            free, total = torch.cuda.mem_get_info()
-            if (total - free) / total < 0.5:   # 已用 <50% 视为空闲
-                break
-            print(f"GPU 占用高（free {free/1e9:.0f}GB/{total/1e9:.0f}GB），60s 后重试…", flush=True)
-            time.sleep(60)
+        if args.wait:
+            while True:
+                free, total = torch.cuda.mem_get_info()
+                if (total - free) / total < 0.5:   # 已用 <50% 视为空闲
+                    break
+                print(f"GPU 占用高（free {free/1e9:.0f}GB/{total/1e9:.0f}GB），60s 后重试…", flush=True)
+                time.sleep(60)
 
-    H, dd = CASE_MATRIX["H"], CASE_MATRIX["dd"]   # Qwen3-8B kv-head × tail32 口径
-    results = {"meta": {
-        "probe": "E113 microbench：sim_greedy Python 循环 vs Triton kernel",
-        "gpu": torch.cuda.get_device_name(0),
-        "timing": ("cuda synchronize wall；time.perf_counter_ns() 整数纳秒（055 修复），"
-                   "样本按执行顺序持久化、不排序不舍入，median/us_per_token/speedup "
-                   "全部由已持久化原始样本派生；python 臂 warmup=0 rep=1、triton 臂 "
-                   "warmup=1 rep=3——两臂为独立重复样本（非 paired）；Triton 预热含去 JIT"),
-        "warmup_rep": {"python": {"warmup": 0, "rep": 1},
-                       "triton": {"warmup": 1, "rep": 3}},
-        "attempt": {
-            "attempt_id": attempt_id,
-            "protocol": ("e113-attempt-v3（054 修复）：新 attempt 开始时隔离同路径旧 "
-                         "out/sidecar/failure 为 *.attempt-<sha8>.superseded（历史保留），"
-                         "成功发布清理同路径 failure 并终检可见终态唯一且属于本 attempt"),
-            "superseded_files": superseded,
-        },
-        "warmup_rep": {"python": {"warmup": 0, "rep": 1},
-                       "triton": {"warmup": 1, "rep": 3}},
-        "e108_probe_ref": "Python 循环 T≈16K 实测 ~5.8s/层（sim=0.9 时 27s）",
-        "versions": collect_versions(),
-        "identity": identity,
-        "generators": {
-            "structured_c8": {"kind": "base+noise 混合簇", "n_base_rule": "max(T//8,1)",
-                              "noise": 0.10, "seed": args.structured_seed,
-                              "device": "cuda"},
-            "singleton": {"kind": "纯高斯单例", "seed": args.singleton_seed,
-                          "device": "cuda",
-                          "note": "050 修复 4：显式固定 generator/seed"},
-        },
-        "correctness_gate": {"mode": "fail-closed（050 修复 3）",
-                             "checks": ["assign 逐位", "k_live 相等", "cnt/sq/簇心容差"],
-                             "tolerances": GATE_TOLERANCES,
-                             "on_fail": "非零退出 + <out>.failure.json（含输入 hash），性能 JSON 不发布"},
-        "started": time.strftime("%F %T"),
-    }, "cases": []}
+        H, dd = CASE_MATRIX["H"], CASE_MATRIX["dd"]   # Qwen3-8B kv-head × tail32 口径
+        results = {"meta": {
+            "probe": "E113 microbench：sim_greedy Python 循环 vs Triton kernel",
+            "gpu": torch.cuda.get_device_name(0),
+            "timing": ("cuda synchronize wall；time.perf_counter_ns() 整数纳秒（055 修复），"
+                       "样本按执行顺序持久化、不排序不舍入，median/us_per_token/speedup "
+                       "全部由已持久化原始样本派生；python 臂 warmup=0 rep=1、triton 臂 "
+                       "warmup=1 rep=3——两臂为独立重复样本（非 paired）；Triton 预热含去 JIT"),
+            "warmup_rep": {"python": {"warmup": 0, "rep": 1},
+                           "triton": {"warmup": 1, "rep": 3}},
+            "attempt": {
+                "attempt_id": attempt_id,
+                "protocol": ("e113-attempt-v4（054+056 修复）：新 attempt 在输出路径跨进程锁 "
+                             "（<out>.attempt.lock，flock 生命周期持锁）内隔离同路径旧 "
+                             "out/sidecar/failure 为 *.attempt-<sha8>.superseded（历史保留），"
+                             "成功发布清理同路径 failure 并终检可见终态唯一且属于本 attempt；"
+                             "同 --out 并发 attempt 串行化，后到者获锁后按同一隔离协议处理"
+                             "前任终态（不删除）"),
+                "superseded_files": superseded,
+            },
+            "warmup_rep": {"python": {"warmup": 0, "rep": 1},
+                           "triton": {"warmup": 1, "rep": 3}},
+            "e108_probe_ref": "Python 循环 T≈16K 实测 ~5.8s/层（sim=0.9 时 27s）",
+            "versions": collect_versions(),
+            "identity": identity,
+            "generators": {
+                "structured_c8": {"kind": "base+noise 混合簇", "n_base_rule": "max(T//8,1)",
+                                  "noise": 0.10, "seed": args.structured_seed,
+                                  "device": "cuda"},
+                "singleton": {"kind": "纯高斯单例", "seed": args.singleton_seed,
+                              "device": "cuda",
+                              "note": "050 修复 4：显式固定 generator/seed"},
+            },
+            "correctness_gate": {"mode": "fail-closed（050 修复 3）",
+                                 "checks": ["assign 逐位", "k_live 相等", "cnt/sq/簇心容差"],
+                                 "tolerances": GATE_TOLERANCES,
+                                 "on_fail": "非零退出 + <out>.failure.json（含输入 hash），性能 JSON 不发布"},
+            "started": time.strftime("%F %T"),
+        }, "cases": []}
 
-    for T in args.Ts:
-        for sim, tag, gen in ((0.9, "structured_c8", lambda: gen_structured(T, H, dd, args.structured_seed)),
-                              (0.9, "singleton", lambda: gen_singleton(T, H, dd, args.singleton_seed))):
-            x = gen()
-            in_sha = tensor_sha256(x)   # 050：逐 case 输入内容闭包
+        for T in args.Ts:
+            for sim, tag, gen in ((0.9, "structured_c8", lambda: gen_structured(T, H, dd, args.structured_seed)),
+                                  (0.9, "singleton", lambda: gen_singleton(T, H, dd, args.singleton_seed))):
+                x = gen()
+                in_sha = tensor_sha256(x)   # 050：逐 case 输入内容闭包
 
-            def run_ref():
-                return greedy_ref(x, sim, x.new_zeros(H, T, dd), x.new_zeros(H, T),
-                                  x.new_zeros(H, T),
-                                  torch.zeros(H, dtype=torch.long, device="cuda"))
+                def run_ref():
+                    return greedy_ref(x, sim, x.new_zeros(H, T, dd), x.new_zeros(H, T),
+                                      x.new_zeros(H, T),
+                                      torch.zeros(H, dtype=torch.long, device="cuda"))
 
-            def run_tri():
-                return greedy_build_triton(x, sim, chunk=16384)
-            # Python 参考（慢，只跑 1 次且兼做正确性基准）；055：原始整数纳秒样本
-            ref_samples = bench(run_ref, warmup=0, rep=1)
-            # Triton（预热去 JIT；chunk=16384 为 E113 调优最优）
-            tri_samples = bench(run_tri, warmup=1, rep=3)
-            # ---- 050 fail-closed 正确性门（任一失败即中断，不发布性能 JSON）----
-            r = run_ref()
-            t = run_tri()
-            errs = check_pair(r, t, f"T={T}/{tag}")
-            mism = int((r[4] != t[4]).sum())
-            live = int(r[3].max().item())
-            rec = {"T": T, "H": H, "dd": dd, "sim": sim, "data": tag,
-                   "input_sha256": in_sha,
-                   "clusters_max_head": live, "C_over_N": round(live / T, 4),
-                   "assign_mismatch": mism,
-                   # 055：整数纳秒原始样本按执行顺序持久化（不排序、不舍入）
-                   "wall_ns_python_samples": list(ref_samples),
-                   "wall_ns_triton_samples": list(tri_samples)}
-            # ---- 055：median/us_per_token/speedup 全部从「已持久化原始值」派生
-            #           （读回 JSON 复算逐位一致的来源；排序仅计算用不落盘）----
-            med_py = median_int(rec["wall_ns_python_samples"])
-            med_tri = median_int(rec["wall_ns_triton_samples"])
-            rec["wall_ns_python_median"] = med_py
-            rec["wall_ns_triton_median"] = med_tri
-            rec["us_per_token_python"] = round(1e6 * med_py / T, 2)
-            rec["us_per_token_triton"] = round(1e6 * med_tri / T, 2)
-            rec["speedup"] = round(med_py / med_tri, 1)
-            if errs:
-                # fail-closed：失败日志落盘（含输入 hash + 身份 + attempt ID），非零退出，
-                # 性能 JSON 不发布（054：旧产物已在 attempt 开始时隔离改名，
-                # 消费者按可见文件只能解析出本 attempt 的 failure 终态）
-                rec["gate_errors"] = errs
-                fail_doc = {"status": "failed",
-                            "gate": "fail-closed（TL-E113-BENCH-PROVENANCE-050 修复 3）",
-                            "attempt": {"attempt_id": attempt_id,
-                                        "superseded_files": superseded},
-                            "identity": identity,
-                            "started": results["meta"]["started"],
-                            "timestamp": time.strftime("%F %T"),
-                            "failed_case": rec, "errors": errs}
-                fail_path = args.out + ".failure.json"
-                os.makedirs(os.path.dirname(fail_path), exist_ok=True)
-                atomic_write_bytes(fail_path, json.dumps(
-                    fail_doc, indent=1, ensure_ascii=False).encode("utf-8"))
-                # 054 终检：fail-closed 后可见路径不得残留任何成功终态（_fail 非 assert，
-                # python -O 下同样生效）
-                if os.path.exists(args.out) or os.path.exists(args.out + ".sha256"):
-                    _fail("fail-closed 后可见路径仍残留成功 JSON/sidecar（状态机失效）")
-                if not os.path.exists(fail_path):
-                    _fail("failure.json 未落盘（不应发生）")
-                print("[GATE-FAIL] " + json.dumps(errs, ensure_ascii=False), flush=True)
-                print(f"correctness 门失败 → 不发布性能 JSON；失败日志 -> {fail_path}", flush=True)
-                sys.exit(1)
-            print(json.dumps(rec, ensure_ascii=False), flush=True)
-            results["cases"].append(rec)
-            del x, r, t
-            torch.cuda.empty_cache()
+                def run_tri():
+                    return greedy_build_triton(x, sim, chunk=16384)
+                # Python 参考（慢，只跑 1 次且兼做正确性基准）；055：原始整数纳秒样本
+                ref_samples = bench(run_ref, warmup=0, rep=1)
+                # Triton（预热去 JIT；chunk=16384 为 E113 调优最优）
+                tri_samples = bench(run_tri, warmup=1, rep=3)
+                # ---- 050 fail-closed 正确性门（任一失败即中断，不发布性能 JSON）----
+                r = run_ref()
+                t = run_tri()
+                errs = check_pair(r, t, f"T={T}/{tag}")
+                mism = int((r[4] != t[4]).sum())
+                live = int(r[3].max().item())
+                rec = {"T": T, "H": H, "dd": dd, "sim": sim, "data": tag,
+                       "input_sha256": in_sha,
+                       "clusters_max_head": live, "C_over_N": round(live / T, 4),
+                       "assign_mismatch": mism,
+                       # 055：整数纳秒原始样本按执行顺序持久化（不排序、不舍入）
+                       "wall_ns_python_samples": list(ref_samples),
+                       "wall_ns_triton_samples": list(tri_samples)}
+                # ---- 055：median/us_per_token/speedup 全部从「已持久化原始值」派生
+                #           （读回 JSON 复算逐位一致的来源；排序仅计算用不落盘）----
+                med_py = median_int(rec["wall_ns_python_samples"])
+                med_tri = median_int(rec["wall_ns_triton_samples"])
+                rec["wall_ns_python_median"] = med_py
+                rec["wall_ns_triton_median"] = med_tri
+                # 量纲修正（GPT advice 2026-10-09_E113_Nanosecond_Unit_Regression）：
+                # med_* 是整数纳秒，µs/token = med_ns / (1000*T)；旧式 1e6*med/T
+                # 是秒→µs 换算，套在纳秒样本上把绝对耗时放大 10^9 倍。
+                # 无量纲 speedup 不受影响；已发布 v2（秒制）数据不涉及本字段。
+                rec["us_per_token_python"] = round(med_py / (1000 * T), 2)
+                rec["us_per_token_triton"] = round(med_tri / (1000 * T), 2)
+                rec["speedup"] = round(med_py / med_tri, 1)
+                if errs:
+                    # fail-closed：失败日志落盘（含输入 hash + 身份 + attempt ID），非零退出，
+                    # 性能 JSON 不发布（054：旧产物已在 attempt 开始时隔离改名，
+                    # 消费者按可见文件只能解析出本 attempt 的 failure 终态）
+                    rec["gate_errors"] = errs
+                    fail_doc = {"status": "failed",
+                                "gate": "fail-closed（TL-E113-BENCH-PROVENANCE-050 修复 3）",
+                                "attempt": {"attempt_id": attempt_id,
+                                            "superseded_files": superseded},
+                                "identity": identity,
+                                "started": results["meta"]["started"],
+                                "timestamp": time.strftime("%F %T"),
+                                "failed_case": rec, "errors": errs}
+                    fail_path = args.out + ".failure.json"
+                    os.makedirs(os.path.dirname(fail_path), exist_ok=True)
+                    atomic_write_bytes(fail_path, json.dumps(
+                        fail_doc, indent=1, ensure_ascii=False).encode("utf-8"))
+                    # 054 终检：fail-closed 后可见路径不得残留任何成功终态（_fail 非 assert，
+                    # python -O 下同样生效）
+                    if os.path.exists(args.out) or os.path.exists(args.out + ".sha256"):
+                        _fail("fail-closed 后可见路径仍残留成功 JSON/sidecar（状态机失效）")
+                    if not os.path.exists(fail_path):
+                        _fail("failure.json 未落盘（不应发生）")
+                    print("[GATE-FAIL] " + json.dumps(errs, ensure_ascii=False), flush=True)
+                    print(f"correctness 门失败 → 不发布性能 JSON；失败日志 -> {fail_path}", flush=True)
+                    sys.exit(1)
+                print(json.dumps(rec, ensure_ascii=False), flush=True)
+                results["cases"].append(rec)
+                del x, r, t
+                torch.cuda.empty_cache()
 
-    results["finished"] = time.strftime("%F %T")
-    # ---- 050 原子发布：临时文件 + fsync + replace；内容 SHA 自洽 + sidecar ----
-    results["output_content_sha256"] = output_content_sha256(results)
-    final_bytes = json.dumps(results, indent=1, ensure_ascii=False).encode("utf-8")
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    atomic_write_bytes(args.out, final_bytes)
-    atomic_write_bytes(args.out + ".sha256",
-                       (hashlib.sha256(final_bytes).hexdigest() + "\n").encode("utf-8"))
-    if not verify_output_sha256(args.out):
-        _fail("发布后内容 SHA 自校验失败（不应发生）")
-    # ---- 054：成功发布原子清理同 attempt 的 failure 文件 + 终态唯一性终检 ----
-    fail_path = args.out + ".failure.json"
-    if os.path.exists(fail_path):
-        # 旧代际 failure 已在 attempt 开始时隔离改名；到达此处即本 attempt 遗留，
-        # 成功终态必须独占可见路径（先删后查，删除失败由下方终检兜底）
-        os.remove(fail_path)
-    with open(args.out, encoding="utf-8") as f:
-        published = json.load(f)
-    pub_attempt = published.get("meta", {}).get("attempt", {}).get("attempt_id")
-    if pub_attempt != attempt_id:
-        _fail(f"可见成功 JSON 的 attempt_id={pub_attempt!r} 与本次 attempt "
-              f"{attempt_id!r} 不匹配（终态不唯一或状态机失效）")
-    if os.path.exists(fail_path):
-        _fail("成功发布后可见路径仍存在 failure.json（终态不唯一）")
-    print(f"\nsaved -> {args.out}（attempt={attempt_id}，"
-          f"content_sha={results['output_content_sha256'][:16]}… + .sha256 sidecar）", flush=True)
+        results["finished"] = time.strftime("%F %T")
+        # ---- 050 原子发布：临时文件 + fsync + replace；内容 SHA 自洽 + sidecar ----
+        results["output_content_sha256"] = output_content_sha256(results)
+        final_bytes = json.dumps(results, indent=1, ensure_ascii=False).encode("utf-8")
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        atomic_write_bytes(args.out, final_bytes)
+        atomic_write_bytes(args.out + ".sha256",
+                           (hashlib.sha256(final_bytes).hexdigest() + "\n").encode("utf-8"))
+        if not verify_output_sha256(args.out):
+            _fail("发布后内容 SHA 自校验失败（不应发生）")
+        # ---- 054：成功发布原子清理同 attempt 的 failure 文件 + 终态唯一性终检 ----
+        fail_path = args.out + ".failure.json"
+        if os.path.exists(fail_path):
+            # 旧代际 failure 已在 attempt 开始时隔离改名；到达此处即本 attempt 遗留，
+            # 成功终态必须独占可见路径（先删后查，删除失败由下方终检兜底）
+            os.remove(fail_path)
+        with open(args.out, encoding="utf-8") as f:
+            published = json.load(f)
+        pub_attempt = published.get("meta", {}).get("attempt", {}).get("attempt_id")
+        if pub_attempt != attempt_id:
+            _fail(f"可见成功 JSON 的 attempt_id={pub_attempt!r} 与本次 attempt "
+                  f"{attempt_id!r} 不匹配（终态不唯一或状态机失效）")
+        if os.path.exists(fail_path):
+            _fail("成功发布后可见路径仍存在 failure.json（终态不唯一）")
+        print(f"\nsaved -> {args.out}（attempt={attempt_id}，"
+              f"content_sha={results['output_content_sha256'][:16]}… + .sha256 sidecar）", flush=True)
+    finally:
+        # 056：锁显式释放（正常完成路径）；异常/SystemExit 路径 finally 同样覆盖，
+        # 崩溃（SIGKILL 等）由内核自动释放 flock 兜底——不留死锁。
+        release_attempt_output_lock(lock_fd)
 
 
 if __name__ == "__main__":

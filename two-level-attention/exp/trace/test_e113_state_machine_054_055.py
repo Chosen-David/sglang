@@ -16,8 +16,14 @@
      断言：stale failure 已从可见路径清理（隔离改名保留历史）、成功发布
      完整（attempt_id 匹配 + 内容 SHA 自洽 + 10 case 全齐）；
   T7（055）读回复算：从发布 JSON 的持久化原始整数纳秒样本复算
-     median / us_per_token / speedup，逐位一致；样本全为整数、乱序注入的
+     median / us_per_token / speedup，逐位一致（µs/token 用 ns→µs 正确换算
+     med_ns/(1000*T)——2026-10-09_E113_Nanosecond_Unit_Regression 量纲修复后，
+     复算式与生产同物理单位）；样本全为整数、乱序注入的
      样本按执行顺序原样落盘（未被排序）；sidecar 与内容 SHA 自洽；
+  T9（055 量纲）us_per_token 独立常量守卫：发布字段的预期值全部硬编码
+     （物理正确值，不用生产表达式反算）——python 臂 123456789ns/T=1024 →
+     120.56、triton 臂 3800000ns/T=1024 → 3.71（GPT advice 原文示例值）；
+     生产若回退旧式 1e6*med/T 会得到 10^11 量级荒谬值，硬编码断言必红。
   T8（055/054 原语）supersede_file：隔离改名 / 不存在返回 None / 同内容
      重复隔离加计数后缀（历史永不覆盖删除）。
 
@@ -267,9 +273,10 @@ def t7_readback_recompute():
                 if med_py != rec["wall_ns_python_median"] or \
                    med_tri != rec["wall_ns_triton_median"]:
                     n_bad += 1
-                # us_per_token / speedup 复算逐位一致（与生产同表达式）
-                if round(1e6 * med_py / rec["T"], 2) != rec["us_per_token_python"] or \
-                   round(1e6 * med_tri / rec["T"], 2) != rec["us_per_token_triton"]:
+                # us_per_token / speedup 复算逐位一致（µs/token = med_ns/(1000*T)，
+                # ns→µs 正确换算；speedup 无量纲不受量纲修复影响）
+                if round(med_py / (1000 * rec["T"]), 2) != rec["us_per_token_python"] or \
+                   round(med_tri / (1000 * rec["T"]), 2) != rec["us_per_token_triton"]:
                     n_bad += 1
                 if round(med_py / med_tri, 1) != rec["speedup"]:
                     n_bad += 1
@@ -322,11 +329,68 @@ def t8_supersede_primitives():
         report(name, False, f"异常: {type(e).__name__}: {e}")
 
 
+# ================================================================ T9 us_per_token 量纲守卫
+def t9_us_token_unit_guard():
+    """（2026-10-09_E113_Nanosecond_Unit_Regression）独立常量守卫：发布字段的
+    预期值全部硬编码物理正确值，**不用生产表达式反算**——生产若回退旧式
+    秒→µs 换算（1e6*med_ns/T）会得到 10^11 量级荒谬值，此处必红。"""
+    name = "T9（055 量纲）us_per_token 独立常量守卫（python/triton 两臂）"
+    try:
+        # 纯算术常量例（GPT advice 原文示例，预期值硬编码）：
+        # 1e9 ns / 1000 token = 1000.00 µs/token；5e8 ns / 1000 token = 500.00；
+        # 3.8e6 ns / 1024 token = 3.71；123456789 ns / 1024 token = 120.56
+        const_bad = 0
+        for med_ns, tok, want in ((1_000_000_000, 1000, 1000.00),
+                                  (500_000_000, 1000, 500.00),
+                                  (3_800_000, 1024, 3.71),
+                                  (123_456_789, 1024, 120.56)):
+            # 正确换算 ns→µs：med_ns / (1000 * tokens)
+            if round(med_ns / (1000 * tok), 2) != want:
+                const_bad += 1
+        # 生产发布字段：stub main 成功发布后按硬编码预期核验（两臂都覆盖）
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "result.json")
+            code, m = run_prod_main(out, fail_mode=False)
+            ok = code is None and const_bad == 0
+            if os.path.exists(out):
+                with open(out, encoding="utf-8") as f:
+                    d = json.load(f)
+                field_bad = 0
+                for rec in d["cases"]:
+                    # python 臂：桩样本单值 123456789 ns；triton 臂：桩样本中位 3800000 ns
+                    if rec["us_per_token_python"] != round(123_456_789 / (1000 * rec["T"]), 2):
+                        field_bad += 1
+                    if rec["us_per_token_triton"] != round(3_800_000 / (1000 * rec["T"]), 2):
+                        field_bad += 1
+                    # T=1024 case 的硬编码字面预期（GPT advice 示例值 3.71）
+                    if rec["T"] == 1024:
+                        if rec["us_per_token_triton"] != 3.71 or \
+                           rec["us_per_token_python"] != 120.56:
+                            field_bad += 1
+                ok = ok and field_bad == 0
+                # 无量纲 speedup 与原始 ns 字段不受量纲修复影响（不回归）
+                for rec in d["cases"]:
+                    if rec["speedup"] != round(123_456_789 / 3_800_000, 1):
+                        ok = False
+                sample = d["cases"][0]
+                report(name, ok,
+                       f"常量例 4/4 {'全过' if const_bad == 0 else '红 ' + str(const_bad)}，"
+                       f"发布字段硬编码预期核验 {'全过' if field_bad == 0 else '红 ' + str(field_bad)}，"
+                       f"10 case speedup/ns 原始字段无回归；"
+                       f"T=1024 实测 python={sample['us_per_token_python']} "
+                       f"triton={sample['us_per_token_triton']} µs/token")
+            else:
+                report(name, False, "发布 JSON 不存在")
+    except Exception as e:
+        report(name, False, f"异常: {type(e).__name__}: {e}")
+
+
 if __name__ == "__main__":
     t5_old_success_new_failure()
     t6_old_failure_new_success()
     t7_readback_recompute()
     t8_supersede_primitives()
+    t9_us_token_unit_guard()
     n_fail = sum(1 for _, ok, _ in RESULTS if not ok)
     print("\n" + "=" * 60)
     print(f"总计 {len(RESULTS)} 项，通过 {len(RESULTS) - n_fail}，失败 {n_fail}")
