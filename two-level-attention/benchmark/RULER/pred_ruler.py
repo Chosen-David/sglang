@@ -26,6 +26,7 @@
 # 实测 bitwise 相等）：131072×151936 vocab bf16 全序列 logits ≈ 39.8GB 纯
 # 浪费（只消费末 token），32K 及以下档路径逐位不变（零扰动纪律）。
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -178,9 +179,17 @@ def main():
         metrics = get_metrics()
         budget = metrics.get_select_tokens()
         metrics.clear()
+        # E116c（GPT 0826 审计 TL-RULER-SAMPLE-GATE-026）：样本身份绑定源行
+        # index（RULER 源 jsonl 自带 0..99 int，比 LB v1 的 data_fp 指纹更直接）
+        # + answers canonical SHA256 前 16 位（与 LongBench manifest 口径一致），
+        # 评分端据此做 fail-closed 集合闭包校验；其余字段与行为零改动。
         fout.write(json.dumps({
             "pred": pred, "answers": row["outputs"],
             "length": row["length"], "budget": budget,
+            "_id": f"{args.task}:{row['index']}",
+            "_answers_sha": hashlib.sha256(json.dumps(
+                row["outputs"], ensure_ascii=False, sort_keys=True)
+                .encode("utf-8")).hexdigest()[:16],
         }, ensure_ascii=False) + "\n")
         fout.flush()
     fout.close()
