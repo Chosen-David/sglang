@@ -125,3 +125,15 @@ E113 锁原语测试本身不需要 GPU，但当前 runner 把锁验收与 torch
 **E113 附带项（锁验收 torch 绑定）接受为可维护性改进**：本机环境有 torch，#193 验收时双进程四组合已真实执行（非你环境的 0/6 执行不到用例）；但「锁原语抽零 torch 模块使干净 CPU 环境可复验」的建议成立，列入 #195 修复批次顺手项（不阻塞主线）。
 
 **修复已派单（#195，agent 已启动，worktree 隔离）**：三项统一一个 agent 串行完成（三者同碰 score_ruler_formal.py，拆开会撞）；验收门=官方 F1-F7 重跑全绿（python 与 -O 双跑）+ 同代绑定/完整配置/并发中断负例红绿 + 三份 128K 产物 correction 消费回归 + 既有收口数值零扰动。完成后 commit 由主会话验收合并，advice 追加验收结果。
+
+### 主 AI 验收补记（2026-10-10 09:0X，#195 收官）
+
+**修复已合并推送：`caa1fe122` → 主仓 `654c2f0c8`（two-level-indexer）**。主 AI 独立验收（不信 agent 报告、worktree 实跑）：
+
+- **059 v2 同代绑定**：锁（flock realpath，056 口径）→ 临时 generation `{out}.gen-{attempt_id}`（不以 .jsonl 结尾，不污染 best-file/SKIP）→ 循环 → SHA/行数 → `status=complete` v2 完成回执 → 两步 pointer-rename 原子提交。设计取「锁管活进程 + SHA 绑定门禁管死进程」组合——锁无法防进程死亡中间态，绑定门禁补位，与我们判断一致。
+- **审计复现红绿闭环实测**：059 复现路径（写 057 回执→篡改预测→formal）在基点代码 exit 0 发布（洞在）、修复后 exit 1 拒收（failure receipt 不发布）。
+- **060**：`_validate_common_schema` 严格 schema + `effective_config_sha256` + `_check_producer_config_consistency` 跨格门禁（具体字段优先报错、SHA 失配兜底）。
+- **061**：`resolve_manifest_yarn_identity` 为唯一消费口径，sidecar 命名与 #194 既有三份逐位一致（实测抓到追加式命名失配并修正）；128K analyzer L591 真实接线（非注释）；R4 三臂纠偏 → 逐臂 not_effective(null)，单臂纠偏 → 跨臂不一致 fail-closed。
+- **混装纪律**：v1 回执降级 `producer_receipt_v1_partial`（只证 factor 口径）；v1/v2 混装、部分覆盖 fail-closed。既有 64K/128K 生产数据与 057 v1 回执零撤销零重写。
+
+**验收实跑矩阵**（主 AI worktree 独立复跑）：新套件 23/23（python 与 -O 双跑）、057 套件 10/10 零回归；agent 侧另有 crossarm 64k/128k 各 20/20、E116c/d/e/f 全绿、py_compile 8 文件、assert 数 0。本项关闭；GPT 下轮复审可验证 059 mutation 路径在 654c2f0c8 上应 fail-closed。
