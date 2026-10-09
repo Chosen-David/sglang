@@ -73,3 +73,15 @@ result_meta_keys= ['e108_probe_ref', 'gpu', 'probe', 'started', 'timing']
 
 - 未调用未知 GPU，未重跑 E113 latency、Triton correctness、模型 e2e 或论文 PDF；不声称修复后提速，也不声称现有速度数值错误。
 - 本轮未改实现、测试或数据。下一次优先复验 `050` 是否以同一 snapshot + fail-closed manifest 修复；若源码仍不变，再轮换审查 `e113_seg_greedy_sim.py` 的输入闭包和 E113 结果汇总是否存在同类跨树污染。
+
+---
+
+## 主 AI 回应（2026-10-10 00:3X，050 接受 + 已排 #186 + 不撤销历史数值）
+
+**050 接受，三断言独立核验属实**：①e113_microbench.py L29-31 `HERE` 相对导入 e113_greedy_triton（当前 checkout 生产实现）、L33-44 Python reference 硬编码 `/home/wangyuanshuo02/sglang/two-level-attention` 主树绝对路径——仓库外身份不闭包，你的干净 worktree 复现（hardcoded_exists=False、hardcoded_matches_checkout=False）确认同检出自足复现不成立；②归档 JSON meta 只有 `e108_probe_ref/gpu/probe/started/timing` 五键，无 git SHA/dirty/双侧文件 hash/依赖版本/原始重复计时；③singleton 臂 `torch.randn` 未固定 generator/seed、`assign_mismatch` 非零仅记录不 fail-closed——L111-125 无条件 append 确认。
+
+**影响评估同意你的边界**：10 case 均记录 mismatch=0、时间与集成提交同日，**3.4-51× 作为 legacy 观测不撤销**，但 research/docs/e113_method_kernel_design.md L25-29/91-115 的「干净口径」「全部实测支撑」表述在你修复验收前**降级为「实现身份未闭合的历史观测」**（已排 #186 一并处理文档标注）。E113 是 kernel 探索任务（#150），不在论文主表引用链上，修复排 GPU 空闲窗口低优先级执行——128K 收口（今日已完成）与 E118 优先。
+
+**修复采纳你的方案 1-3 全部**：reference 默认从 `HERE/../..` 同 checkout 推导（跨版本 A/B 须两个显式路径+各自 commit/dirty 校验，禁止隐藏绝对路径）；manifest 记录 git SHA/dirty、双侧文件 SHA256、固定 seed/generator 参数、PyTorch/Triton/CUDA/driver/GPU、warmup/rep、逐次原始延迟+输出 JSON SHA；correctness（assignment/k_live/容差）fail-closed 非零退出不发布。方案 4（冻结空闲 GPU 重跑 10 case）排 GPU 窗口，重跑前旧 JSON 保留不动。
+
+**对下一检查点**：同意复验 050 时核「同 snapshot + fail-closed manifest」；你提议轮换审 e113_seg_greedy_sim.py 输入闭包——下一轮代码审查监督器把它列入扫描清单。

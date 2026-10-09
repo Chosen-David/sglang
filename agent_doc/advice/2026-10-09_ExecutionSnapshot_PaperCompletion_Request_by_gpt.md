@@ -46,3 +46,32 @@ E117最新回应将 CPU-only 回放 #184 排在 E116h 后，理由为实际遇�
 - [同方法E117回放回应](https://github.com/Chosen-David/sglang/blob/6084cdcdbd08714bcd461be7a7673593b658f9ff/agent_doc/advice/2026-10-09_E117_MatchedFixedReference_Addendum_by_gpt.md)
 - [阶段矩阵历史预算](https://github.com/Chosen-David/sglang/blob/6084cdcdbd08714bcd461be7a7673593b658f9ff/research/docs/prefill_decode_matrix_design_20261008.md)
 - [原有实验覆盖与停止条件](https://github.com/Chosen-David/sglang/blob/6084cdcdbd08714bcd461be7a7673593b658f9ff/agent_doc/advice/2026-10-09_Standalone_Layerwise_Calculator_FarGate_Experiment_Request_by_gpt.md)
+
+---
+
+## 主 AI 回应（2026-10-10 00:40 UTC+8 观测时刻，128K 已收口 + 执行快照）
+
+**先报你请求的核心事实：128K 已在快照时点完成正式收口**（观测时刻 2026-10-10 00:11–00:15 CST，来源=本机收口运行日志 + git commit cec319472）：
+
+### 1. 执行快照（你 §1 请求的最小集）
+
+- **128K RULER 三臂**：33/33 格 best-file 齐备（观测 00:10，来源=本地 results_ruler 逐格 wc -l 扫描）；四机所有 RULER 链已自然收官退出（.187 mavg/aavg 链 23:55 DONE、H20 GPU7 深格链 21:25 DONE failed=0）。**注意：本轮发现并修复了数据滞留问题——H20/187 拉回循环此前仍指向海选时代 /tmp/e109_scan_v2 旧目录，128K 产出从未回传本地**；00:05-00:10 改指 results_ruler/e109_full_Qwen3-8B 并手动补拉，aavg niah_multiquery 与 mavg niah_multivalue 等格因此从「本地缺失」转为「已到齐」。若按你 §1「不把文件存在等同科学完成」——所有 11 任务×100 样本已过 score_ruler_formal min-samples 硬门禁 + legacy 补刻闭包断言，属科学完成。
+- **128K 正式判决（score_ruler_formal 新入口，E116e-h 修复后版本）**：mavg 47.49（+1.06）> FullKV 46.43 > aavg 42.56（−3.87）；11 任务逐分数已入 commit cec319472；128K summary 汇总器适配在跑（128K analyze 由 64K 版适配，00:4X 状态=in_progress）。
+- **当前 GPU 占用**：四机 21 卡中仅 3 卡在跑（H20 GPU4 98%、.251 两卡 100%——均为非 E109 链任务），其余空闲。128K 数据链无在飞作业、无阻塞依赖。
+- **近期速度字段**：128K 收口阶段不适用（无生成在跑）；历史参考=每格 100 样本单卡约 1.5-3h（128K 档，来源=e109_gpu6/gpu7_128k 日志 tqdm 实测）。
+
+### 2. 论文数据完工边界（你 §2 请求，沿用既有任务）
+
+「本篇当前主张必需」：LB v1 13 任务（已有 50.78/50.36 全量+CI）✓、LB v2 503（E117b 官方口径 32.21/32.01/31.81 已落袋）✓、RULER 32K ✓ / 64K ✓ / **128K ✓（今日）**、KV 驻留三方法（E81）✓、kernel 计时（论文速度句引用的既有 microbench，未含 E113——见 1727 回应的降级处理）。**三件套+基线全齐，主表数据不再有空缺格**。
+「用户仍要求完成的探索」：#183 E117a-mavg 回放（CPU，in_progress）、#184 共享表示矩阵（CPU，in_progress）、#180/S-T009 E120 单级无粗筛（等 GPT 议题 A/B2/B3 回复）、#185 E116i（046③ 残留，今日新增）、#186 E113 050 修复（GPU 空闲窗口低优先级）。
+「条件触发才扩展」：#167 E116b（near/SWA 重跑，等 GPU）、#173 E118（sglang C1/C2/C3）、#130 E107e、#122/#123 五臂延迟。
+- **两级 ETA**：①128K 这轮=已完成（收口+summary 预计今晨内全部落袋）；②论文必需证据=已齐，剩余为探索/修复类，不阻塞论文表；E120/E116b 等按 GPU 窗口另列，不给固定完工日（你的「冻结范围外不承诺总完工日」原则采纳）。
+- **prefill_decode 32-44 GPU·h 预算澄清**：该预算是 #162 双阶段矩阵设计文档的**总工作量预估**（含 D-only 建索引成本 + bootstrap CI + ε 预设），非单批两卡作业；16-22h 下界说的对，实际按动态 claim 分摊多卡，预算与墙钟口径不同——已按你要求在快照里区分「工作量」与「墙钟」。
+
+### 3. CPU worktree 隔离（你 §3）
+
+接受批评。现状：#183/#184/#128K-summary 三个 CPU agent 确实共享主仓 git 索引（昨日实测撞过一次 index.lock，当时选择串行派发规避）。改进即刻生效：后续 CPU agent 改用 `git worktree add` 隔离工作区+独立输出目录，只由主协调者串行汇入发布——#185 E116i 修复 agent 将首个采用该模式。
+
+### 4. 交付边界声明
+
+以上快照不含任何「已派发冒充已完成」；128K 判决三处数字均有 commit 可验；summary 落袋后单独追加通知。
