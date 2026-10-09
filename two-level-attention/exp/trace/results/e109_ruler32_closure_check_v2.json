@@ -1,0 +1,926 @@
+{
+ "check": "E116d RULER 32K 三臂闭包对账 v2（单一 selected-file 冻结，修订 GPT 0935 审计确认的 v1 快照漂移）",
+ "base": "/home/wangyuanshuo02/sglang/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/L32768",
+ "generated": "2026-10-09T10:05:21.195546",
+ "supersedes": "e109_ruler32_closure_check.json",
+ "revision_reason": "v1 的 per_task 与 cross_arm_answers_check 引用了不同文件（niah_multikey_1/aavg 引用 61 行增长中文件 vs per_task 的 100 行 best-file，快照漂移）；且 v1 把 partial 文件 pred 前缀一致外推为 harmless_for_this_data=true。v2 逐格单一 selected-file 冻结，三节全部引用同一文件（路径+SHA256+行数），partial 对比只声明前缀、禁止外推",
+ "selection_rule": "行数最多，并列取文件名时间戳最新，排除 *-merged.jsonl 派生物（与 score_ruler.py E116d best-file 仲裁规则一致）",
+ "frozen_at_disk_state": {
+  "total_candidate_files": 42,
+  "note": "以脚本运行时磁盘状态为准冻结（三机拉回可能新增文件）"
+ },
+ "arms": [
+  "pred_E109_mavg_a0.25_b0.125_g0.625",
+  "pred_E109_aavg_a0_b0_g0",
+  "pred_E109_FULLKV"
+ ],
+ "cell_count": {
+  "arms": 3,
+  "tasks": 11,
+  "cells": 33,
+  "expected_rows_per_cell": 100,
+  "selected_rows_total": 3300,
+  "assertion": "3 臂 × 11 任务 × 100 行 = 3300，逐格断言通过"
+ },
+ "per_task": {
+  "niah_single_1": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_single_1-tli_64_128_1024_c4_A-10090535.jsonl",
+    "file": "niah_single_1-tli_64_128_1024_c4_A-10090535.jsonl",
+    "sha256": "e17f81bff4476fce454f75bd9671034c71a15fe8cd5034e4b765b84bceb00a2c",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_single_1-tli_64_128_1024_c4_A-10090537.jsonl",
+    "file": "niah_single_1-tli_64_128_1024_c4_A-10090537.jsonl",
+    "sha256": "1cd691c54786d1eecd9842f57f348caa927627684bddcfce2afb0ec0e2aab8a1",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/niah_single_1-none-10090537.jsonl",
+    "file": "niah_single_1-none-10090537.jsonl",
+    "sha256": "235484e5b715ef9a50dda924dd9cffcecaaefdf543d4b94720dd6be87b306f2a",
+    "rows": 100
+   }
+  },
+  "niah_single_2": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_single_2-tli_64_128_1024_c4_A-10090535.jsonl",
+    "file": "niah_single_2-tli_64_128_1024_c4_A-10090535.jsonl",
+    "sha256": "04ee0cf2c1ea114d6539f9e0cff2cfeda04df4d44e5ccabdeb1695b303fc91e1",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_single_2-tli_64_128_1024_c4_A-10090537.jsonl",
+    "file": "niah_single_2-tli_64_128_1024_c4_A-10090537.jsonl",
+    "sha256": "efb6a730f98be872304848c9d3e2d35e82ead6d3537f6d505033a84ccea64b9a",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/niah_single_2-none-10090537.jsonl",
+    "file": "niah_single_2-none-10090537.jsonl",
+    "sha256": "f2a875ff185e21a7209715dd08c5662a386daf0a4c518cd23c9016078ccef46a",
+    "rows": 100
+   }
+  },
+  "niah_single_3": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_single_3-tli_64_128_1024_c4_A-10090535.jsonl",
+    "file": "niah_single_3-tli_64_128_1024_c4_A-10090535.jsonl",
+    "sha256": "b119f08883637398270c868a504d9ab4589c098c1758adcdee70c1080558afb6",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_single_3-tli_64_128_1024_c4_A-10090537.jsonl",
+    "file": "niah_single_3-tli_64_128_1024_c4_A-10090537.jsonl",
+    "sha256": "a3963afef7baac91f6381b157e6b06008bd9fd96e5b1be79d383919b9c75baaf",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/niah_single_3-none-10090537.jsonl",
+    "file": "niah_single_3-none-10090537.jsonl",
+    "sha256": "1f9804a7ec7c95abf66f574be2941723755346e6e9006af10f6cf418381ab619",
+    "rows": 100
+   }
+  },
+  "niah_multikey_1": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_multikey_1-tli_64_128_1024_c4_A-10090605.jsonl",
+    "file": "niah_multikey_1-tli_64_128_1024_c4_A-10090605.jsonl",
+    "sha256": "310f03f6b8954a4d0d8575cd291e8554f86ec439b7697aa0ded6d4d3f74f1d39",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_multikey_1-tli_64_128_1024_c4_A-10090655.jsonl",
+    "file": "niah_multikey_1-tli_64_128_1024_c4_A-10090655.jsonl",
+    "sha256": "adbf210aec8db8195f7d3831bba358f4a2feffe25c2bbe4d721e4c051a660b80",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/niah_multikey_1-none-10090606.jsonl",
+    "file": "niah_multikey_1-none-10090606.jsonl",
+    "sha256": "932640e6c3acd7ddbdd10b8d20b1bc7e5f75ba565b62f061acb8306b30165ff0",
+    "rows": 100
+   }
+  },
+  "niah_multikey_2": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_multikey_2-tli_64_128_1024_c4_A-10090605.jsonl",
+    "file": "niah_multikey_2-tli_64_128_1024_c4_A-10090605.jsonl",
+    "sha256": "607bbf99eb920e78f614644683ac85481596677e526574f4f6e82e2a067d7f23",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_multikey_2-tli_64_128_1024_c4_A-10090606.jsonl",
+    "file": "niah_multikey_2-tli_64_128_1024_c4_A-10090606.jsonl",
+    "sha256": "0fd8308796e86502c6377b21a1ffe013a38736797b7471628c58a2e6e6d4963c",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/niah_multikey_2-none-10090537.jsonl",
+    "file": "niah_multikey_2-none-10090537.jsonl",
+    "sha256": "cbc3351e3b39e7f09c5e80798bccaac9872ae3a21e2d5603fc2748c9bfd60aa7",
+    "rows": 100
+   }
+  },
+  "niah_multikey_3": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_multikey_3-tli_64_128_1024_c4_A-10090605.jsonl",
+    "file": "niah_multikey_3-tli_64_128_1024_c4_A-10090605.jsonl",
+    "sha256": "25734c938f2fbc6a36f58ba706ef858ab8239065a36161f018d605df522d6676",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_multikey_3-tli_64_128_1024_c4_A-10090606.jsonl",
+    "file": "niah_multikey_3-tli_64_128_1024_c4_A-10090606.jsonl",
+    "sha256": "ddcafa69b89593bf41bbf9a2b6a78f8fb7a6e4df57596a24bcda5b2a53f67eeb",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/niah_multikey_3-none-10090630.jsonl",
+    "file": "niah_multikey_3-none-10090630.jsonl",
+    "sha256": "511f7525afe2daf49894c96dbf156505d54600c0758b661176d54b43a52a235c",
+    "rows": 100
+   }
+  },
+  "niah_multiquery": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_multiquery-tli_64_128_1024_c4_A-10090605.jsonl",
+    "file": "niah_multiquery-tli_64_128_1024_c4_A-10090605.jsonl",
+    "sha256": "170c09f4043916c08481049345a1633365a52ddef1287bf12f37397b899e1c11",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_multiquery-tli_64_128_1024_c4_A-10090606.jsonl",
+    "file": "niah_multiquery-tli_64_128_1024_c4_A-10090606.jsonl",
+    "sha256": "8f7ecaaa29b4ee109fd1d850de7e2317faa322b777a6ca0b40e54b8daa805a76",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/niah_multiquery-none-10090630.jsonl",
+    "file": "niah_multiquery-none-10090630.jsonl",
+    "sha256": "f099a47251bcd01e88d475704bc85e8039e507cb5fe78dbbf3a574e14ccc9f08",
+    "rows": 100
+   }
+  },
+  "niah_multivalue": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/niah_multivalue-tli_64_128_1024_c4_A-10090605.jsonl",
+    "file": "niah_multivalue-tli_64_128_1024_c4_A-10090605.jsonl",
+    "sha256": "87cc9f5a2cf4264f6dda8a398de70d50e59f5c6805660efeaa3b4b8b0f641af8",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/niah_multivalue-tli_64_128_1024_c4_A-10090606.jsonl",
+    "file": "niah_multivalue-tli_64_128_1024_c4_A-10090606.jsonl",
+    "sha256": "89a45da2fa1da08e6ad690da3ed434c054a3e9596cf0c7b47b815646dabacf17",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/niah_multivalue-none-10090630.jsonl",
+    "file": "niah_multivalue-none-10090630.jsonl",
+    "sha256": "040e28e6a5fa8e7bbfed0362040f683189245bac98c0ceb4742757ed59760e56",
+    "rows": 100
+   }
+  },
+  "cwe": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/cwe-tli_64_128_1024_c4_A-10090605.jsonl",
+    "file": "cwe-tli_64_128_1024_c4_A-10090605.jsonl",
+    "sha256": "79f200b1ab7a95b5545571aa9cdc2d638265063e447a293b8fe1733552f9a4e2",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/cwe-tli_64_128_1024_c4_A-10090655.jsonl",
+    "file": "cwe-tli_64_128_1024_c4_A-10090655.jsonl",
+    "sha256": "31639b8482677f3e9470e7e63a8d0d50479bc4c381fb8ab7fcdc1b851342d92a",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/cwe-none-10090630.jsonl",
+    "file": "cwe-none-10090630.jsonl",
+    "sha256": "dbec9d2e640b8b47939e5af5af0b4522c4d7b8f7fe322cca08710ede597d42bb",
+    "rows": 100
+   }
+  },
+  "fwe": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/fwe-tli_64_128_1024_c4_A-10090605.jsonl",
+    "file": "fwe-tli_64_128_1024_c4_A-10090605.jsonl",
+    "sha256": "249d3182293b48f9e45244fe92f0bba321fe2b8b627ca2647480be8327dac75b",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/fwe-tli_64_128_1024_c4_A-10090606.jsonl",
+    "file": "fwe-tli_64_128_1024_c4_A-10090606.jsonl",
+    "sha256": "aa623f0369af2e9c8d6caa9c3d72d18171f715e074daced13a9528cee4b8d7a7",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/fwe-none-10090630.jsonl",
+    "file": "fwe-none-10090630.jsonl",
+    "sha256": "be679cc265f9d469b748a5a04687ea030794eea3ac551b116177ca29935fe305",
+    "rows": 100
+   }
+  },
+  "vt": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_mavg_a0.25_b0.125_g0.625/vt-tli_64_128_1024_c4_A-10090605.jsonl",
+    "file": "vt-tli_64_128_1024_c4_A-10090605.jsonl",
+    "sha256": "b16d8cf0e5f5727a9b395cc353348fc77f46009ce83d9511b0ebe228f3589671",
+    "rows": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_aavg_a0_b0_g0/vt-tli_64_128_1024_c4_A-10090606.jsonl",
+    "file": "vt-tli_64_128_1024_c4_A-10090606.jsonl",
+    "sha256": "87d071e9fc4167931b37368df1bdeeb8775984b4fe0bf0fb9395797dc37815f4",
+    "rows": 100
+   },
+   "pred_E109_FULLKV": {
+    "path": "exp/results_ruler/e109_full_Qwen3-8B/L32768/pred_E109_FULLKV/vt-none-10090630.jsonl",
+    "file": "vt-none-10090630.jsonl",
+    "sha256": "212dfe2c5b2f68a630a3a121ac087daac62f31d63745b65d15b9c8717489da27",
+    "rows": 100
+   }
+  }
+ },
+ "cross_arm_answers_check": {
+  "all_identical_rowwise": true,
+  "niah_single_1": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "niah_single_1-tli_64_128_1024_c4_A-10090535.jsonl",
+     "sha256": "e17f81bff4476fce454f75bd9671034c71a15fe8cd5034e4b765b84bceb00a2c",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "niah_single_1-tli_64_128_1024_c4_A-10090537.jsonl",
+     "sha256": "1cd691c54786d1eecd9842f57f348caa927627684bddcfce2afb0ec0e2aab8a1",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "niah_single_1-none-10090537.jsonl",
+     "sha256": "235484e5b715ef9a50dda924dd9cffcecaaefdf543d4b94720dd6be87b306f2a",
+     "rows": 100
+    }
+   }
+  },
+  "niah_single_2": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "niah_single_2-tli_64_128_1024_c4_A-10090535.jsonl",
+     "sha256": "04ee0cf2c1ea114d6539f9e0cff2cfeda04df4d44e5ccabdeb1695b303fc91e1",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "niah_single_2-tli_64_128_1024_c4_A-10090537.jsonl",
+     "sha256": "efb6a730f98be872304848c9d3e2d35e82ead6d3537f6d505033a84ccea64b9a",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "niah_single_2-none-10090537.jsonl",
+     "sha256": "f2a875ff185e21a7209715dd08c5662a386daf0a4c518cd23c9016078ccef46a",
+     "rows": 100
+    }
+   }
+  },
+  "niah_single_3": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "niah_single_3-tli_64_128_1024_c4_A-10090535.jsonl",
+     "sha256": "b119f08883637398270c868a504d9ab4589c098c1758adcdee70c1080558afb6",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "niah_single_3-tli_64_128_1024_c4_A-10090537.jsonl",
+     "sha256": "a3963afef7baac91f6381b157e6b06008bd9fd96e5b1be79d383919b9c75baaf",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "niah_single_3-none-10090537.jsonl",
+     "sha256": "1f9804a7ec7c95abf66f574be2941723755346e6e9006af10f6cf418381ab619",
+     "rows": 100
+    }
+   }
+  },
+  "niah_multikey_1": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "niah_multikey_1-tli_64_128_1024_c4_A-10090605.jsonl",
+     "sha256": "310f03f6b8954a4d0d8575cd291e8554f86ec439b7697aa0ded6d4d3f74f1d39",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "niah_multikey_1-tli_64_128_1024_c4_A-10090655.jsonl",
+     "sha256": "adbf210aec8db8195f7d3831bba358f4a2feffe25c2bbe4d721e4c051a660b80",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "niah_multikey_1-none-10090606.jsonl",
+     "sha256": "932640e6c3acd7ddbdd10b8d20b1bc7e5f75ba565b62f061acb8306b30165ff0",
+     "rows": 100
+    }
+   }
+  },
+  "niah_multikey_2": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "niah_multikey_2-tli_64_128_1024_c4_A-10090605.jsonl",
+     "sha256": "607bbf99eb920e78f614644683ac85481596677e526574f4f6e82e2a067d7f23",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "niah_multikey_2-tli_64_128_1024_c4_A-10090606.jsonl",
+     "sha256": "0fd8308796e86502c6377b21a1ffe013a38736797b7471628c58a2e6e6d4963c",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "niah_multikey_2-none-10090537.jsonl",
+     "sha256": "cbc3351e3b39e7f09c5e80798bccaac9872ae3a21e2d5603fc2748c9bfd60aa7",
+     "rows": 100
+    }
+   }
+  },
+  "niah_multikey_3": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "niah_multikey_3-tli_64_128_1024_c4_A-10090605.jsonl",
+     "sha256": "25734c938f2fbc6a36f58ba706ef858ab8239065a36161f018d605df522d6676",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "niah_multikey_3-tli_64_128_1024_c4_A-10090606.jsonl",
+     "sha256": "ddcafa69b89593bf41bbf9a2b6a78f8fb7a6e4df57596a24bcda5b2a53f67eeb",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "niah_multikey_3-none-10090630.jsonl",
+     "sha256": "511f7525afe2daf49894c96dbf156505d54600c0758b661176d54b43a52a235c",
+     "rows": 100
+    }
+   }
+  },
+  "niah_multiquery": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "niah_multiquery-tli_64_128_1024_c4_A-10090605.jsonl",
+     "sha256": "170c09f4043916c08481049345a1633365a52ddef1287bf12f37397b899e1c11",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "niah_multiquery-tli_64_128_1024_c4_A-10090606.jsonl",
+     "sha256": "8f7ecaaa29b4ee109fd1d850de7e2317faa322b777a6ca0b40e54b8daa805a76",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "niah_multiquery-none-10090630.jsonl",
+     "sha256": "f099a47251bcd01e88d475704bc85e8039e507cb5fe78dbbf3a574e14ccc9f08",
+     "rows": 100
+    }
+   }
+  },
+  "niah_multivalue": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "niah_multivalue-tli_64_128_1024_c4_A-10090605.jsonl",
+     "sha256": "87cc9f5a2cf4264f6dda8a398de70d50e59f5c6805660efeaa3b4b8b0f641af8",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "niah_multivalue-tli_64_128_1024_c4_A-10090606.jsonl",
+     "sha256": "89a45da2fa1da08e6ad690da3ed434c054a3e9596cf0c7b47b815646dabacf17",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "niah_multivalue-none-10090630.jsonl",
+     "sha256": "040e28e6a5fa8e7bbfed0362040f683189245bac98c0ceb4742757ed59760e56",
+     "rows": 100
+    }
+   }
+  },
+  "cwe": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "cwe-tli_64_128_1024_c4_A-10090605.jsonl",
+     "sha256": "79f200b1ab7a95b5545571aa9cdc2d638265063e447a293b8fe1733552f9a4e2",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "cwe-tli_64_128_1024_c4_A-10090655.jsonl",
+     "sha256": "31639b8482677f3e9470e7e63a8d0d50479bc4c381fb8ab7fcdc1b851342d92a",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "cwe-none-10090630.jsonl",
+     "sha256": "dbec9d2e640b8b47939e5af5af0b4522c4d7b8f7fe322cca08710ede597d42bb",
+     "rows": 100
+    }
+   }
+  },
+  "fwe": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "fwe-tli_64_128_1024_c4_A-10090605.jsonl",
+     "sha256": "249d3182293b48f9e45244fe92f0bba321fe2b8b627ca2647480be8327dac75b",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "fwe-tli_64_128_1024_c4_A-10090606.jsonl",
+     "sha256": "aa623f0369af2e9c8d6caa9c3d72d18171f715e074daced13a9528cee4b8d7a7",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "fwe-none-10090630.jsonl",
+     "sha256": "be679cc265f9d469b748a5a04687ea030794eea3ac551b116177ca29935fe305",
+     "rows": 100
+    }
+   }
+  },
+  "vt": {
+   "identical_rowwise": true,
+   "per_arm": {
+    "pred_E109_mavg_a0.25_b0.125_g0.625": {
+     "file": "vt-tli_64_128_1024_c4_A-10090605.jsonl",
+     "sha256": "b16d8cf0e5f5727a9b395cc353348fc77f46009ce83d9511b0ebe228f3589671",
+     "rows": 100
+    },
+    "pred_E109_aavg_a0_b0_g0": {
+     "file": "vt-tli_64_128_1024_c4_A-10090606.jsonl",
+     "sha256": "87d071e9fc4167931b37368df1bdeeb8775984b4fe0bf0fb9395797dc37815f4",
+     "rows": 100
+    },
+    "pred_E109_FULLKV": {
+     "file": "vt-none-10090630.jsonl",
+     "sha256": "212dfe2c5b2f68a630a3a121ac087daac62f31d63745b65d15b9c8717489da27",
+     "rows": 100
+    }
+   }
+  }
+ },
+ "within_file_duplicate_check": {
+  "niah_single_1": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  },
+  "niah_single_2": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  },
+  "niah_single_3": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  },
+  "niah_multikey_1": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  },
+  "niah_multikey_2": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  },
+  "niah_multikey_3": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  },
+  "niah_multiquery": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  },
+  "niah_multivalue": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  },
+  "cwe": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  },
+  "fwe": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  },
+  "vt": {
+   "pred_E109_mavg_a0.25_b0.125_g0.625": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_aavg_a0_b0_g0": {
+    "n": 100,
+    "unique_canon": 100
+   },
+   "pred_E109_FULLKV": {
+    "n": 100,
+    "unique_canon": 100
+   }
+  }
+ },
+ "collision_check": {},
+ "same_key_collision_check": {
+  "pred_E109_aavg_a0_b0_g0/niah_multikey_1": {
+   "selected": "niah_multikey_1-tli_64_128_1024_c4_A-10090655.jsonl",
+   "selected_sha256": "adbf210aec8db8195f7d3831bba358f4a2feffe25c2bbe4d721e4c051a660b80",
+   "candidates": [
+    {
+     "file": "niah_multikey_1-tli_64_128_1024_c4_A-10090537.jsonl",
+     "rows": 100,
+     "sha256": "adbf210aec8db8195f7d3831bba358f4a2feffe25c2bbe4d721e4c051a660b80",
+     "adopted": false,
+     "reject_reason": "行数并列 100，时间戳 10090537 早于 best 10090655"
+    },
+    {
+     "file": "niah_multikey_1-tli_64_128_1024_c4_A-10090655.jsonl",
+     "rows": 100,
+     "sha256": "adbf210aec8db8195f7d3831bba358f4a2feffe25c2bbe4d721e4c051a660b80",
+     "adopted": true,
+     "reject_reason": null
+    }
+   ],
+   "pairwise_pred_check": [
+    {
+     "files": [
+      "niah_multikey_1-tli_64_128_1024_c4_A-10090537.jsonl",
+      "niah_multikey_1-tli_64_128_1024_c4_A-10090655.jsonl"
+     ],
+     "common_prefix_rows": 100,
+     "pred_diff_count_in_common_prefix": 0,
+     "partial_pair": false,
+     "claim": "全长 100 行 pred 差异 0（两文件均完整 100 行）"
+    }
+   ]
+  },
+  "pred_E109_FULLKV/niah_multikey_3": {
+   "selected": "niah_multikey_3-none-10090630.jsonl",
+   "selected_sha256": "511f7525afe2daf49894c96dbf156505d54600c0758b661176d54b43a52a235c",
+   "candidates": [
+    {
+     "file": "niah_multikey_3-none-10090537.jsonl",
+     "rows": 100,
+     "sha256": "511f7525afe2daf49894c96dbf156505d54600c0758b661176d54b43a52a235c",
+     "adopted": false,
+     "reject_reason": "行数并列 100，时间戳 10090537 早于 best 10090630"
+    },
+    {
+     "file": "niah_multikey_3-none-10090630.jsonl",
+     "rows": 100,
+     "sha256": "511f7525afe2daf49894c96dbf156505d54600c0758b661176d54b43a52a235c",
+     "adopted": true,
+     "reject_reason": null
+    }
+   ],
+   "pairwise_pred_check": [
+    {
+     "files": [
+      "niah_multikey_3-none-10090537.jsonl",
+      "niah_multikey_3-none-10090630.jsonl"
+     ],
+     "common_prefix_rows": 100,
+     "pred_diff_count_in_common_prefix": 0,
+     "partial_pair": false,
+     "claim": "全长 100 行 pred 差异 0（两文件均完整 100 行）"
+    }
+   ]
+  },
+  "pred_E109_FULLKV/niah_multiquery": {
+   "selected": "niah_multiquery-none-10090630.jsonl",
+   "selected_sha256": "f099a47251bcd01e88d475704bc85e8039e507cb5fe78dbbf3a574e14ccc9f08",
+   "candidates": [
+    {
+     "file": "niah_multiquery-none-10090537.jsonl",
+     "rows": 100,
+     "sha256": "f099a47251bcd01e88d475704bc85e8039e507cb5fe78dbbf3a574e14ccc9f08",
+     "adopted": false,
+     "reject_reason": "行数并列 100，时间戳 10090537 早于 best 10090630"
+    },
+    {
+     "file": "niah_multiquery-none-10090630.jsonl",
+     "rows": 100,
+     "sha256": "f099a47251bcd01e88d475704bc85e8039e507cb5fe78dbbf3a574e14ccc9f08",
+     "adopted": true,
+     "reject_reason": null
+    }
+   ],
+   "pairwise_pred_check": [
+    {
+     "files": [
+      "niah_multiquery-none-10090537.jsonl",
+      "niah_multiquery-none-10090630.jsonl"
+     ],
+     "common_prefix_rows": 100,
+     "pred_diff_count_in_common_prefix": 0,
+     "partial_pair": false,
+     "claim": "全长 100 行 pred 差异 0（两文件均完整 100 行）"
+    }
+   ]
+  },
+  "pred_E109_FULLKV/niah_multivalue": {
+   "selected": "niah_multivalue-none-10090630.jsonl",
+   "selected_sha256": "040e28e6a5fa8e7bbfed0362040f683189245bac98c0ceb4742757ed59760e56",
+   "candidates": [
+    {
+     "file": "niah_multivalue-none-10090537.jsonl",
+     "rows": 100,
+     "sha256": "040e28e6a5fa8e7bbfed0362040f683189245bac98c0ceb4742757ed59760e56",
+     "adopted": false,
+     "reject_reason": "行数并列 100，时间戳 10090537 早于 best 10090630"
+    },
+    {
+     "file": "niah_multivalue-none-10090630.jsonl",
+     "rows": 100,
+     "sha256": "040e28e6a5fa8e7bbfed0362040f683189245bac98c0ceb4742757ed59760e56",
+     "adopted": true,
+     "reject_reason": null
+    }
+   ],
+   "pairwise_pred_check": [
+    {
+     "files": [
+      "niah_multivalue-none-10090537.jsonl",
+      "niah_multivalue-none-10090630.jsonl"
+     ],
+     "common_prefix_rows": 100,
+     "pred_diff_count_in_common_prefix": 0,
+     "partial_pair": false,
+     "claim": "全长 100 行 pred 差异 0（两文件均完整 100 行）"
+    }
+   ]
+  },
+  "pred_E109_mavg_a0.25_b0.125_g0.625/cwe": {
+   "selected": "cwe-tli_64_128_1024_c4_A-10090605.jsonl",
+   "selected_sha256": "79f200b1ab7a95b5545571aa9cdc2d638265063e447a293b8fe1733552f9a4e2",
+   "candidates": [
+    {
+     "file": "cwe-tli_64_128_1024_c4_A-10090535.jsonl",
+     "rows": 100,
+     "sha256": "79f200b1ab7a95b5545571aa9cdc2d638265063e447a293b8fe1733552f9a4e2",
+     "adopted": false,
+     "reject_reason": "行数并列 100，时间戳 10090535 早于 best 10090605"
+    },
+    {
+     "file": "cwe-tli_64_128_1024_c4_A-10090605.jsonl",
+     "rows": 100,
+     "sha256": "79f200b1ab7a95b5545571aa9cdc2d638265063e447a293b8fe1733552f9a4e2",
+     "adopted": true,
+     "reject_reason": null
+    }
+   ],
+   "pairwise_pred_check": [
+    {
+     "files": [
+      "cwe-tli_64_128_1024_c4_A-10090535.jsonl",
+      "cwe-tli_64_128_1024_c4_A-10090605.jsonl"
+     ],
+     "common_prefix_rows": 100,
+     "pred_diff_count_in_common_prefix": 0,
+     "partial_pair": false,
+     "claim": "全长 100 行 pred 差异 0（两文件均完整 100 行）"
+    }
+   ]
+  },
+  "pred_E109_aavg_a0_b0_g0/cwe": {
+   "selected": "cwe-tli_64_128_1024_c4_A-10090655.jsonl",
+   "selected_sha256": "31639b8482677f3e9470e7e63a8d0d50479bc4c381fb8ab7fcdc1b851342d92a",
+   "candidates": [
+    {
+     "file": "cwe-tli_64_128_1024_c4_A-10090606.jsonl",
+     "rows": 100,
+     "sha256": "31639b8482677f3e9470e7e63a8d0d50479bc4c381fb8ab7fcdc1b851342d92a",
+     "adopted": false,
+     "reject_reason": "行数并列 100，时间戳 10090606 早于 best 10090655"
+    },
+    {
+     "file": "cwe-tli_64_128_1024_c4_A-10090655.jsonl",
+     "rows": 100,
+     "sha256": "31639b8482677f3e9470e7e63a8d0d50479bc4c381fb8ab7fcdc1b851342d92a",
+     "adopted": true,
+     "reject_reason": null
+    }
+   ],
+   "pairwise_pred_check": [
+    {
+     "files": [
+      "cwe-tli_64_128_1024_c4_A-10090606.jsonl",
+      "cwe-tli_64_128_1024_c4_A-10090655.jsonl"
+     ],
+     "common_prefix_rows": 100,
+     "pred_diff_count_in_common_prefix": 0,
+     "partial_pair": false,
+     "claim": "全长 100 行 pred 差异 0（两文件均完整 100 行）"
+    }
+   ]
+  },
+  "pred_E109_FULLKV/cwe": {
+   "selected": "cwe-none-10090630.jsonl",
+   "selected_sha256": "dbec9d2e640b8b47939e5af5af0b4522c4d7b8f7fe322cca08710ede597d42bb",
+   "candidates": [
+    {
+     "file": "cwe-none-10090537.jsonl",
+     "rows": 100,
+     "sha256": "dbec9d2e640b8b47939e5af5af0b4522c4d7b8f7fe322cca08710ede597d42bb",
+     "adopted": false,
+     "reject_reason": "行数并列 100，时间戳 10090537 早于 best 10090630"
+    },
+    {
+     "file": "cwe-none-10090630.jsonl",
+     "rows": 100,
+     "sha256": "dbec9d2e640b8b47939e5af5af0b4522c4d7b8f7fe322cca08710ede597d42bb",
+     "adopted": true,
+     "reject_reason": null
+    }
+   ],
+   "pairwise_pred_check": [
+    {
+     "files": [
+      "cwe-none-10090537.jsonl",
+      "cwe-none-10090630.jsonl"
+     ],
+     "common_prefix_rows": 100,
+     "pred_diff_count_in_common_prefix": 0,
+     "partial_pair": false,
+     "claim": "全长 100 行 pred 差异 0（两文件均完整 100 行）"
+    }
+   ]
+  },
+  "pred_E109_FULLKV/fwe": {
+   "selected": "fwe-none-10090630.jsonl",
+   "selected_sha256": "be679cc265f9d469b748a5a04687ea030794eea3ac551b116177ca29935fe305",
+   "candidates": [
+    {
+     "file": "fwe-none-10090537.jsonl",
+     "rows": 100,
+     "sha256": "be679cc265f9d469b748a5a04687ea030794eea3ac551b116177ca29935fe305",
+     "adopted": false,
+     "reject_reason": "行数并列 100，时间戳 10090537 早于 best 10090630"
+    },
+    {
+     "file": "fwe-none-10090630.jsonl",
+     "rows": 100,
+     "sha256": "be679cc265f9d469b748a5a04687ea030794eea3ac551b116177ca29935fe305",
+     "adopted": true,
+     "reject_reason": null
+    }
+   ],
+   "pairwise_pred_check": [
+    {
+     "files": [
+      "fwe-none-10090537.jsonl",
+      "fwe-none-10090630.jsonl"
+     ],
+     "common_prefix_rows": 100,
+     "pred_diff_count_in_common_prefix": 0,
+     "partial_pair": false,
+     "claim": "全长 100 行 pred 差异 0（两文件均完整 100 行）"
+    }
+   ]
+  },
+  "pred_E109_FULLKV/vt": {
+   "selected": "vt-none-10090630.jsonl",
+   "selected_sha256": "212dfe2c5b2f68a630a3a121ac087daac62f31d63745b65d15b9c8717489da27",
+   "candidates": [
+    {
+     "file": "vt-none-10090537.jsonl",
+     "rows": 100,
+     "sha256": "212dfe2c5b2f68a630a3a121ac087daac62f31d63745b65d15b9c8717489da27",
+     "adopted": false,
+     "reject_reason": "行数并列 100，时间戳 10090537 早于 best 10090630"
+    },
+    {
+     "file": "vt-none-10090630.jsonl",
+     "rows": 100,
+     "sha256": "212dfe2c5b2f68a630a3a121ac087daac62f31d63745b65d15b9c8717489da27",
+     "adopted": true,
+     "reject_reason": null
+    }
+   ],
+   "pairwise_pred_check": [
+    {
+     "files": [
+      "vt-none-10090537.jsonl",
+      "vt-none-10090630.jsonl"
+     ],
+     "common_prefix_rows": 100,
+     "pred_diff_count_in_common_prefix": 0,
+     "partial_pair": false,
+     "claim": "全长 100 行 pred 差异 0（两文件均完整 100 行）"
+    }
+   ]
+  }
+ },
+ "partial_files": [],
+ "verdict": {
+  "cells_complete": true,
+  "cross_arm_answers_rowwise_identical": true,
+  "within_file_zero_duplicate": true,
+  "cross_arm_selected_path_collision": false,
+  "partial_files_present": false,
+  "note": "pred 前缀一致的候选对只声明前缀性质；得分等价性仅对全长完整且 pred 逐位相同的候选对成立（本轮全部候选均为 100 行完整文件，前缀=全长）"
+ }
+}

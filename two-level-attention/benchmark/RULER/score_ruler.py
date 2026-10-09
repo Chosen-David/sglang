@@ -17,6 +17,18 @@
 #   ③ --expect-tasks N：每个方法 key 必须覆盖预期任务集合，缺任一任务 →
 #      非零退出，不输出正式结果
 #   ④ 评分结果 JSON 每格记录源文件名 + 文件 SHA256（结果可追溯）
+# E116d（GPT 0935 审计三 P1，TL-RULER-GATE-INTEGRATION-027 / -028 / -029）：
+#   ① 空 root 真空通过：--expect-tasks>0 但收集到 0 个方法键（目录拼错/
+#      挂载缺失/postfix 错/只有无关文件）→ 非零退出，不写任何输出文件
+#   ② manifest schema 前置校验（读任何预测文件之前）：每 task 的 ids 非空
+#      且唯一；answers_sha 键集合与 ids 完全相等（缺失/多出任一 ID 都 fail
+#      closed）；摘要为合法 hex（长度 ≥16）——杜绝 answers_sha 映射缺失时
+#      静默跳过该项校验
+#   ③ merged 规范文件是派生物，不参与 best-file 候选竞争（原 _ts_of 返回
+#      'merged' 字典序恒大于数字时间戳，一旦生成 merged 同长度新原始文件
+#      永远无法胜出）。每次从原始候选全集重新仲裁（行数最多，并列取时间戳
+#      最新），canonical 原子写（临时文件 + os.replace）；幂等语义 =
+#      「同一原始候选集产生同一 canonical」，不是「canonical 压过新文件」
 # 兼容：无 manifest 且同键单文件时行为与旧版一致（老数据不带 _id 不强制）。
 import argparse
 import glob
@@ -66,16 +78,70 @@ def _nlines(path):
 
 
 def _ts_of(fname):
-    """文件名最后一段（时间戳）；merged 规范文件返回 'merged'（字典序 >
-    纯数字时间戳，行数并列时天然胜出）。"""
+    """文件名最后一段（时间戳），用于行数并列时取最新。
+    E116d：merged 规范文件已被排除出候选集（见 _resolve_group），本函数
+    只会对原始 run 文件的数字时间戳调用。"""
     return fname[:-len(".jsonl")].rsplit("-", 1)[-1]
 
 
+def _validate_manifest_schema(manifest):
+    """E116d（TL-RULER-MANIFEST-HASH-028）manifest schema 前置校验：
+    在读任何预测文件之前执行，任一违规 → fail closed。
+    - 每 task 的 ids 非空且无重复
+    - answers_sha 键集合与 ids 集合完全相等（缺任一/多任一都拒）
+    - 每个摘要值是合法 hex 字符串且长度 ≥16"""
+    if not isinstance(manifest, dict):
+        raise SystemExit("[GATE-FAIL] manifest 顶层必须是 {task: {...}} 字典")
+    hexset = set("0123456789abcdefABCDEF")
+    for task, m in manifest.items():
+        if not isinstance(m, dict) or "ids" not in m or "answers_sha" not in m:
+            raise SystemExit(
+                f"[GATE-FAIL] manifest[{task}]: 缺 ids/answers_sha 键"
+                f"——fail closed（schema 前置校验），不读预测文件"
+            )
+        ids = m["ids"]
+        if not isinstance(ids, list) or not ids:
+            raise SystemExit(
+                f"[GATE-FAIL] manifest[{task}]: ids 为空或非列表"
+                f"——fail closed，不写结果"
+            )
+        if len(ids) != len(set(ids)):
+            dup = sorted({i for i in ids if ids.count(i) > 1})[:5]
+            raise SystemExit(
+                f"[GATE-FAIL] manifest[{task}]: ids 存在重复（示例 {dup}）"
+                f"——fail closed，不写结果"
+            )
+        sha = m["answers_sha"]
+        if not isinstance(sha, dict) or set(sha) != set(ids):
+            missing = sorted(set(ids) - set(sha))[:5]
+            extra = sorted(set(sha) - set(ids))[:5]
+            raise SystemExit(
+                f"[GATE-FAIL] manifest[{task}]: answers_sha 键集合与 ids "
+                f"不等（缺 {len(set(ids) - set(sha))} 个 {missing}；多 "
+                f"{len(set(sha) - set(ids))} 个 {extra}）——fail closed"
+                f"（拒绝 answers_sha 映射缺失时静默跳过该项校验），不写结果"
+            )
+        for i, v in sha.items():
+            if not isinstance(v, str) or len(v) < 16 or \
+                    not set(v) <= hexset:
+                raise SystemExit(
+                    f"[GATE-FAIL] manifest[{task}]: _id={i} 的 answers_sha "
+                    f"摘要非法（须合法 hex 且长度 ≥16，得到 {v!r}）"
+                    f"——fail closed，不写结果"
+                )
+
+
 def _resolve_group(files, task, method, key, merge_best):
-    """同 (L, task, method) 键的文件集合 → 单一评分文件。
+    """同 (L, task, method) 键的原始候选文件集合 → 单一评分文件。
+    E116d：调用方保证 files 已排除 *-merged.jsonl 派生物（它是上一轮仲裁
+    的产物，不是原始 run；若参与竞争，其 _ts_of='merged' 字典序恒大于数字
+    时间戳，同长度新原始文件永远无法胜出——TL-RULER-MERGED-STALE-029）。
     >1 文件且未开 --merge-best → fail closed；
-    开 --merge-best → best-file（行数最多，并列取时间戳最新），并复制为
-    单一规范文件 {task}-{method}-merged.jsonl 落盘（打印选择依据）。"""
+    开 --merge-best → 每次从原始候选全集重新仲裁 best-file（行数最多，
+    并列取时间戳最新），复制为规范文件 {task}-{method}-merged.jsonl 原子
+    落盘（临时文件 + os.replace）。幂等语义 = 「同一原始候选集产生同一
+    canonical」——新原始文件加入后重跑会重新仲裁并刷新 canonical，绝不
+    允许旧 canonical 压过新文件。"""
     if len(files) == 1:
         return files[0]
     listing = "\n".join(
@@ -89,19 +155,18 @@ def _resolve_group(files, task, method, key, merge_best):
             f"请先显式合并（--merge-best：行数最多、并列取时间戳最新）或清理"
             f"重复文件后重跑。"
         )
-    # --merge-best：best-file 选择 + 规范文件落盘
+    # --merge-best：原始候选全集重新仲裁 + 规范文件原子落盘
     best = max(files, key=lambda f: (_nlines(f), _ts_of(os.path.basename(f))))
     canon = os.path.join(os.path.dirname(best),
                          f"{task}-{method}-merged.jsonl")
-    if os.path.exists(canon) and os.path.samefile(best, canon):
-        pass  # 幂等重跑：best 恰为已落盘规范文件本身，无需拷贝
-    else:
-        shutil.copyfile(best, canon)
+    tmp = canon + ".tmp"
+    shutil.copyfile(best, tmp)
+    os.replace(tmp, canon)  # 原子替换：读者永不看到半写文件
     skipped = [f for f in files if f != best]
-    print(f"[merge-best] {key}/{task}: 选择 best-file "
-          f"{os.path.basename(best)} (n={_nlines(best)}, "
+    print(f"[merge-best] {key}/{task}: 从 {len(files)} 个原始候选重新仲裁 "
+          f"best-file {os.path.basename(best)} (n={_nlines(best)}, "
           f"sha256={_file_sha256(best)}) → 规范文件 "
-          f"{os.path.basename(canon)}；跳过 "
+          f"{os.path.basename(canon)}（原子写）；跳过 "
           f"{[os.path.basename(f) for f in skipped]}")
     return canon
 
@@ -160,9 +225,11 @@ def _score_cell(path, task, key, manifest):
                 f"不等（缺 {len(exp_ids - got_ids)} 例 {missing}；多 "
                 f"{len(got_ids - exp_ids)} 例 {extra}）——fail closed，不写结果"
             )
-        exp_sha = m_task.get("answers_sha", {})
+        exp_sha = m_task["answers_sha"]  # schema 校验保证键集 == ids
         for d, i, a in zip(records, ids, refs):
-            if i in exp_sha and _answers_sha16(a) != exp_sha[i][:16]:
+            # E116d：schema 前置校验保证 exp_sha 覆盖全部 ids 且为合法 hex，
+            # 此处逐行硬校验——answers_sha 映射缺失不再可能静默跳过
+            if _answers_sha16(a) != exp_sha[i][:16]:
                 raise SystemExit(
                     f"[GATE-FAIL] {os.path.basename(path)}: _id={i} 的 "
                     f"answers hash 与 manifest 不一致（答案错配/混行）"
@@ -191,6 +258,10 @@ def main():
     args = ap.parse_args()
 
     manifest = json.load(open(args.manifest)) if args.manifest else None
+    if manifest is not None:
+        # E116d（TL-RULER-MANIFEST-HASH-028）：schema 前置校验——在读任何
+        # 预测文件之前，杜绝 answers_sha 映射缺失时静默跳过该项校验
+        _validate_manifest_schema(manifest)
     if args.expect_tasks > NTASK:
         raise SystemExit(f"[GATE-FAIL] --expect-tasks {args.expect_tasks} > "
                          f"任务总数 {NTASK}")
@@ -206,6 +277,10 @@ def main():
         for task in TASKS:
             files = sorted(glob.glob(
                 os.path.join(pred_dir, f"{task}-*.jsonl")))
+            # E116d（TL-RULER-MERGED-STALE-029）：merged 规范文件是上轮仲裁
+            # 的派生物，排除出 best-file 候选集；每次从原始 run 全集重新仲裁
+            files = [f for f in files
+                     if not os.path.basename(f).endswith("-merged.jsonl")]
             if not files:
                 continue
             # 同 task 下按 method-key 分组（同键多文件 = 多机重复跑/残留轮次）
@@ -232,6 +307,15 @@ def main():
 
     # ---- 门禁 3：--expect-tasks 任务闭包（缺任一任务 fail closed）----
     if args.expect_tasks > 0:
+        # E116d（TL-RULER-GATE-INTEGRATION-027）：空 root 真空通过——
+        # expect>0 但收集到 0 个方法键（目录拼错/挂载缺失/postfix 错/只有
+        # 无关文件/全部被 manifest 跳过）→ 非零退出，不写任何输出文件
+        if not res:
+            raise SystemExit(
+                f"[GATE-FAIL] --expect-tasks {args.expect_tasks} 但 root "
+                f"{args.root}（pred-postfix {args.pred_postfix}）下收集到 "
+                f"0 个方法键——fail closed，不写任何输出文件"
+            )
         exp_set = set(TASKS[:args.expect_tasks])
         for key in sorted(res):
             missing = sorted(exp_set - set(res[key]))
