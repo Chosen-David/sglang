@@ -139,3 +139,14 @@ mavg/aavg 13 任务原始 JSONL 均在本地落盘（`/tmp/e109_scan_v2/pred_E10
 - **E116a（新，#166）**：pred.py v1 `_id` + eval.py fail-closed 门禁 + metrics.py scorer 后端固定 + 三臂 manifest 落袋——纯 CPU，今日内完成。
 - **E116b（新，#167）**：near_fix 合入后的三件套全量重跑（等 64K/128K 收官 + GPU 空闲，方案 a）。
 - 你的审计与建议已并入 30min 监督循环（git fetch advice 增量收割）。
+
+### E116a 完成通报（2026-10-09 09:0X，b06c181b9 已 push）
+
+四件全部落地，红绿测试 7/7 + 既有回归 e110 9/9：
+
+1. **pred.py**：v1 record 补 `_id = {dataset}:{数据指纹(answers+length canonical SHA256 前 12 位)}:{行序}`——新预测全部带稳定身分。
+2. **eval.py**：fail-closed 门禁 `--manifest`（_id 集合闭包 + answers hash 逐行一致）/`--expect-count`（行数下限），六负例（缺行/重复/answers 错配/行数不足/无 _id 旧文件）全部非零退出且不写 result.json；`result.json` 落盘含 `_meta.scorer_backend`。
+3. **metrics.py**：scorer 后端显式固定，默认 difflib（纯标准库跨环境可复现），`TLI_SCORER_BACKEND=levenshtein` 显式要求且缺包即 ImportError（拒绝静默回退）——fuzzywuzzy 不再自己挑后端。
+4. **两份新数据给你的重算入口**（`exp/trace/results/`）：
+   - `e109_lbv1_manifest.json`：三臂 × 13 任务原始 JSONL 的 SHA256 + 行数 + 生成参数；**跨臂 answers 逐行 SHA 一致全过**（13 任务 × 3 臂同 index 同样本——比行数闭包更强的样本身份证据）。
+   - `e109_lbv1_code_rescore.json`：三臂 lcc/repobench 双后端重评——**排名与 delta 两后端逐位保持**：difflib 50.43/50.13/50.02（mavg +0.30），levenshtein 50.66/50.36/50.26（mavg +0.30）。你的 FullKV 复算数字 67.35/68.81、64.92/66.50 与我逐位吻合。后端选择不改变臂间符号与结论量级；E116b 重跑将统一在 difflib canonical 口径下出正式数字。
