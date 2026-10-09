@@ -3,8 +3,10 @@
 > 定位：本文档是 **kernel 化设计文档的实证篇**，与主树设计篇
 > `/home/wangyuanshuo02/sglang/research/docs/sim_greedy_kernel_design.md`（#150，CUDA C++ persistent
 > kernel V1 主线）互补：该文档给「应该怎么设计」，本文档给「已落地的 Triton 原型逐位等价实证 +
-> 方案2 界验证仿真否决 + microbench 数据」（速度数据 2026-10-10 起降级为**实现身份未闭合的
-> 历史观测**，见 §2.3 的 050 注记），其结论直接校准设计篇的 V1/V2 决策门。
+> 方案2 界验证仿真否决 + microbench 数据」（速度数据已于 **2026-10-10 按 050 修复版在空闲
+> GPU 上重跑闭包**，正式证据为 `results/e113_microbench_v2.json`，见 §2.3 的 v2 注记；旧
+> `results/e113_microbench.json` 降级为**实现身份未闭合的历史观测**存档，保留不动），其结论
+> 直接校准设计篇的 V1/V2 决策门。
 >
 > 关联：#128（overlap kernel 设计）/ #146（E109 v2 远程 sim 臂，13h/臂 直接动因）/ #147（E110
 > ccluster e2e）/ #150（E113 设计篇）。全部代码与数据在本 worktree
@@ -23,11 +25,11 @@
 
 ## 0. 结论速览
 
-| 问题 | 判决（正确性列全部实测支撑；**速度列为实现身份未闭合的历史观测**，见 §2.3 的 050 注记） |
+| 问题 | 判决（正确性列全部实测支撑；速度列为 **v2 正式实测**——050 修复版重跑、身份闭包，见 §2.3） |
 |---|---|
-| **方案1 Triton 单 kernel 顺序化** | **GO（立即可用）**：与 Python 参考 100% 逐位一致（T2：8 seed × 3 sim × 393216 token 位 0 mismatch），增量续跑 ≡ 全量重放（T3，E110 铁律过）；**4.9-83 μs/token**（随 K 扫描量；legacy 观测），生产口径（K̄≈2.3K@T=16K）~17 μs/token，vs Python 循环 **3.4-51× 加速**（legacy 观测，修复版重跑后方可作正式性能证据） |
+| **方案1 Triton 单 kernel 顺序化** | **GO（立即可用）**：与 Python 参考 100% 逐位一致（T2：8 seed × 3 sim × 393216 token 位 0 mismatch；v2 重跑 10/10 case `assign_mismatch=0` 复证），增量续跑 ≡ 全量重放（T3，E110 铁律过）；**2.0-64.9 μs/token**（随 K 扫描量；v2 实测），生产口径（K̄≈2.3K@T=16K）~8.3 μs/token，vs Python 循环 **3.7-211× 加速**（v2 实测；legacy 旧值 3.4-51×，身份未闭合且疑受当时在跑扫描干扰，见 §2.3 新旧对照） |
 | **方案2 段式推测 + Cauchy-Schwarz 界验证（SEG-GREEDY）** | **NO-GO（仿真否决）**：算法本身决策级精确（assign_mismatch=0 全 case），但**可证明跳过率仅 0.29-2.9%**、候选集 28-86% 活簇——界在单例密集的贪心态上太松，加速无来源 |
-| **方案3 终态路线** | Triton 原型 = **立即止血**（13h/臂 → 估 ~1-2.5h/臂）；CUDA persistent V1（设计篇主线，2-3 μs/token 目标）= 终态——Triton 实测 17 μs/token 证实了设计篇「8 program/78 SM + 每 token 归约延迟」的担忧，但 Triton 版零语义风险、当天可上线 |
+| **方案3 终态路线** | Triton 原型 = **立即止血**（13h/臂 → 估 ~0.6-1.3h/臂，v2 口径）；CUDA persistent V1（设计篇主线，2-3 μs/token 目标）= 终态——Triton v2 实测 ~8.3 μs/token（生产 K̄ 口径）证实了设计篇「8 program/78 SM + 每 token 归约延迟」的担忧（与 V1 差距收窄到 ~3-4×），但 Triton 版零语义风险、当天可上线 |
 | method 矩阵 | §4 全表：规则稠密段（块统计/GEMM/kmeans）→ cuBLAS/Triton 已有或低风险；**唯一 launch-bound 段就是 sim_greedy 贪心链**，本原型已解决 |
 
 ---
@@ -69,11 +71,12 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
   `sq` 增量维护 `sq[dst] += 2·dot_a + ‖x‖²`，`dot_a` 从扫描期 dot 直接取（规避 -inf×0=NaN 污染 sq 的
   E108 实测坑）；归并时 per-token `+= x` 与参考实现**天然同累加序**（铁律 2 fp 纪律不触碰）。
 - **容量**：wrapper 保证 K ≥ max(k_live)+T（最坏每 token 新建），F.pad 扩容点与参考一致。
-- **调优（E113 实测，GPU1 空闲，T=16384；μs/token 数值为实现身份未闭合的历史观测，见 §2.3 050 注记）**：BT=128/nw=8 → 41.0 μs/token；
+- **调优（E113 实测，GPU1 空闲，T=16384；μs/token 绝对值为 legacy 观测，见 §2.3）**：BT=128/nw=8 → 41.0 μs/token；
   **BT=512/nw=4 → 9.8 μs/token（4.2×）**；BT=1024 持平、K=16K 单例臂 512 略优 → 默认 BT=512/nw=4。
   BT 不改语义：dot 归约沿 dd 维（行内 32 元素与 BT 无关），跨 tile 严格 > 链与 BT 无关——调参后
   单测 5/5 逐位全同复验过。chunk 单 launch 越大越快（16384 vs 8192：9.8 vs 17.1 μs/token，
-  launch 间隙效应），默认 chunk=16384。
+  launch 间隙效应），默认 chunk=16384。v2 重跑（§2.3）绝对值更快（T=16384 结构簇臂
+  7.5 μs/token），但 BT/chunk 的**相对优劣结论不受影响**（身份闭包前后同一 kernel 源码）。
 
 ### 2.2 语义等价实证（`test_e113_greedy_triton.py`，5/5 PASS）
 
@@ -89,45 +92,73 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
 > 零覆盖。**贪心类单测必须用 base+noise 混合簇结构数据**（同 base 的 token 间 cos≈0.9+），
 > 否则测试无鉴别力。
 
-### 2.3 性能（microbench，GPU1 空闲，`results/e113_microbench.json`）
+### 2.3 性能（microbench v2：正式证据 `results/e113_microbench_v2.json`）
 
-> **050 注记（2026-10-10，GPT 审计 `TL-E113-BENCH-PROVENANCE-050`，
-> `agent_doc/advice/2026-10-09_1727_twolevel_e113_microbench_audit_e2d51d5.md`）**：
-> 生成本表 JSON 的旧版 `e113_microbench.py` 把 Python reference 固定为仓库外绝对路径
-> `/home/wangyuanshuo02/sglang/two-level-attention` 主树动态导入，且结果 manifest 未记录
-> git SHA/dirty、双侧实现文件 hash 与依赖版本——运行时无法证明双侧实现同源，干净独立
-> 检出自足复现不成立。本表速度数据与 §2.4 的 e2e 量级推算据此**降级为「实现身份未闭合的
-> 历史观测」**：数值本身无算错证据（10 case `assign_mismatch` 均为 0），但论文或正式性能表
-> 继续引用前必须用 050 修复版（同 checkout 双侧加载 + fail-closed manifest）重跑；
-> 修复已落地（`exp/trace/e113_microbench.py` + 红绿单测
-> `test_e113_microbench_identity.py`），旧 JSON 保留不动。
+> **v2 注记（2026-10-10 01:45，GPT 审计 `TL-E113-BENCH-PROVENANCE-050` 方案 4 验收完成）**：
+> 旧版四缺陷（Python reference 硬编码仓库外绝对路径 / manifest 无身份 / 无 correctness 门 /
+> singleton 无固定 seed）已按 050 修复（commit 1d17c3dba），并于 2026-10-10 在**空闲 GPU0
+> （无并发扫描的无干扰窗口）**用修复版重跑 10 case，产出 v2 正式证据：
+> - **身份闭包**：干净 worktree checkout `6bdb7eb3b`（双侧 git dirty=False、same_root=True），
+>   tli_indexer.py SHA `c5dfc215…` / greedy_triton.py SHA `a7c38986…`、torch 2.8.0+cu128 /
+>   triton 3.4.0 / CUDA 12.8 / driver 550.127.08 / H20-3e、generator seed=7、逐 case 输入
+>   SHA256、逐次原始延迟、输出内容 SHA + `.sha256` sidecar 全落 manifest；
+> - **correctness fail-closed**：10/10 case `assign_mismatch=0`（assign 逐位 + k_live + cnt/sq/
+>   簇心 sums 全过）；GPU 侧注入验收（篡改 assignment 一位 → 非零退出 + failure.json 落盘 +
+>   性能 JSON 不发布）PASS，可复现脚本 `exp/trace/e113_failclosed_inject.py`；
+> - **噪声检查**：Triton 臂 rep=3 样本内极差 ≤0.65%（9/10 case；首 case 7.4% 对应待机
+>   345 MHz→1980 MHz 升频过渡，<10% 不构成顺序漂移）；运行窗口 GPU 温度 33→38°C、SM clock
+>   稳定 1980 MHz、无降频漂移。
+>
+> **050 历史注记**（背景，保留）：旧 `results/e113_microbench.json`（2026-10-07 14:31 产生）的
+> 旧版脚本把 Python reference 固定为仓库外绝对路径动态导入且 manifest 无身份——运行时无法
+> 证明双侧实现同源，**降级为「实现身份未闭合的历史观测」存档，保留不动**；其数值本身无算错
+> 证据（10 case `assign_mismatch` 均为 0）。
 
-| 数据臂 | T | K_live | Python μs/token | Triton μs/token | 加速比 |
-|---|---|---|---|---|---|
-| 结构簇 C/N=0.125 | 8192 | 1024 | 242.5 | **4.87** | 49.8× |
-| 结构簇 C/N=0.125 | 16384 | 2048 | 262.7 | **16.9** | 15.5× |
-| 结构簇 C/N=0.125 | 32768 | 4094 | 244.4 | **32.1** | 7.6× |
-| 单例极端 C/N=1.0 | 8192 | 8192 | 243.1 | **21.4** | 11.4× |
-| 单例极端 C/N=1.0 | 32768 | 32768 | 283.7 | **82.9** | 3.4× |
+**v2 实测表**（10 case 全表见 v2 JSON；下表为 legacy 表同五格 + 新旧对照）：
 
-- **每 token 延迟 ∝ K 扫描量**（~6.8 ns/簇行·head）：K=1K → 4.9 μs；K=2K → 17 μs；K=16K → 71 μs。
-- 生产口径（E108：sim0.9 跨层 C/N≈0.2776 → T=16K 时 K̄≈2.3K / K_max≈4.6K）→ **~17 μs/token
-  （K̄）/ ~32 μs（K_max 尾段）**。
-- Python 基线两口径如实并报：本机 `_greedy_cluster_pass` 原版 240-280 μs/token；E108 probe
-  口径 79-84 μs/token（实现略异）。保守取 E108 口径，生产 K̄ 下加速 **~5×**；本机口径 **~15×**。
+| 数据臂 | T | K_live | Python μs/token | Triton μs/token | 加速比（v2） | 加速比（legacy 旧值） |
+|---|---|---|---|---|---|---|
+| 结构簇 C/N=0.125 | 8192 | 1024 | 239.7 | **3.46** | 69.3× | 49.8× |
+| 结构簇 C/N=0.125 | 16384 | 2048 | 238.7 | **7.47** | 32.0× | 15.5× |
+| 结构簇 C/N=0.125 | 32768 | 4094 | 237.4 | **14.57** | 16.3× | 7.6× |
+| 单例极端 C/N=1.0 | 8192 | 8192 | 238.7 | **16.56** | 14.4× | 11.4× |
+| 单例极端 C/N=1.0 | 32768 | 32768 | 237.1 | **64.85** | 3.7× | 3.4× |
 
-### 2.4 e2e 量级推算（保守，用 E108 口径换算）
+（v2 全量 10 case 加速比 3.7-211.2×；T=1024/4096 结构簇臂高达 120-211×——小 T 时 Python 循环
+launch 开销占比最大，Triton 单 kernel 优势最极端。）
 
-> 注：本节推算以 §2.3 的速度数据为输入，同受 050 注记约束——降级为**实现身份未闭合的历史
-> 观测**推算值，修复版重跑后方可作正式依据。
+**新旧差异如实并报**：Triton 侧 v2 普遍快 2-4.5×（如 T=16384 结构簇 16.9→7.5 μs/token），
+Python 侧基本一致（240-283 → 237-240 μs/token），差异集中在 Triton 侧。可能原因：① 旧值产生于
+2026-10-07 14:31，正值四机 20 卡 E109 全量扫描满载期，旧 manifest 不记录并发/占用状态（这正是
+050 指出的可复现性缺口），若同卡或同机存在在跑负载，Triton 计时段会被抬高；② v2 在确认
+GPU0 空闲（1 MiB / 0%）且无任何在跑扫描进程的窗口执行。旧值身份未闭合，**正式引用以 v2 为准**；
+若引用 legacy 值须注明其身份边界。
 
-- 贪心段（现状 ~5h/任务，16K token 主导）：17 μs/token → 0.28 s/层 × 36 层 ≈ **10 s/样本** →
-  200 样本 ≈ 33 min/任务（原 2.7h prefill 贪心段 → **~5×**）；32K 任务 ×2（带宽/延迟而非 launch）。
-- ccluster_sim 臂（far+near 双池 + 2 任务，现状 ~13h）→ **估 ~1-2.5h/臂**。
-- 与设计篇 V1 CUDA 目标（1.2-1.7 s/样本@16K，2-3 μs/token）差距 ~6-8×：差距来源 = ①8
-  program 只占 78 SM 中的 8 个（SM 利用率 10%）；②每 token 跨 tile 归约串行依赖链。这正是设计篇
-  §5.1「为什么不是 Triton」论断的实测注脚——**Triton 版不是终态最优，但它是零语义风险、当天可
-  上线的止血方案**，且为 V1 铺平了 Kcap 预分配/live-mask 状态改造（两版共享同一套状态布局）。
+- **每 token 延迟 ∝ K 扫描量**（v2：结构簇臂 ~3.6 ns/簇行·head、单例臂 ~2.0 ns）：K=1K →
+  2.0-3.0 μs；K=2K → 7.5-8.9 μs；K=32K → 64.9 μs。
+- 生产口径（E108：sim0.9 跨层 C/N≈0.2776 → T=16K 时 K̄≈2.3K / K_max≈4.6K）→ **~8.3 μs/token
+  （K̄）/ ~17 μs（K_max 尾段）**（v2 校准，legacy 估 17/32 μs 偏保守）。
+- Python 基线两口径如实并报：本机 `_greedy_cluster_pass` v2 实测 236.7-240.2 μs/token（T≥4096
+  稳态；首 case 436.6 含进程冷启动膨胀，不采用）；E108 probe 口径 79-84 μs/token（实现略异）。
+  保守取 E108 口径，生产 K̄ 下加速 **~10×**；本机口径 **~28×**。
+- **microbench ≠ e2e**：上表为贪心段 kernel microbench 层证据，不表述为 e2e 加速（e2e 层
+  另测，双口径纪律）。
+
+### 2.4 e2e 量级推算（保守，用 E108 口径换算；v2 校准）
+
+> 注：本节推算以 §2.3 的 **v2 正式速度数据**为输入（身份闭包后口径）。推算值为 microbench
+> 层换算的量级估计，非 e2e 实测。
+
+- 贪心段（现状 ~5h/任务，16K token 主导）：8.3 μs/token → 0.136 s/层 × 36 层 ≈ **4.9 s/样本** →
+  200 样本 ≈ 16 min/任务（原 2.7h prefill 贪心段 → vs E108 口径 Python 79-84 μs/token **~10×**）；
+  32K 任务 ×2（带宽/延迟而非 launch）。
+- ccluster_sim 臂（far+near 双池 + 2 任务，现状 ~13h）→ **估 ~0.6-1.3h/臂**（v2 口径；legacy
+  推算为 1-2.5h/臂，偏保守）。
+- 与设计篇 V1 CUDA 目标（1.2-1.7 s/样本@16K，2-3 μs/token）差距 **~3-4×**（8.3 vs 2-3 μs/token）：
+  差距来源 = ①8 program 只占 78 SM 中的 8 个（SM 利用率 10%）；②每 token 跨 tile 归约串行依赖链。
+  这正是设计篇 §5.1「为什么不是 Triton」论断的实测注脚——**Triton 版不是终态最优，但它是零语义
+  风险、当天可上线的止血方案**，且为 V1 铺平了 Kcap 预分配/live-mask 状态改造（两版共享同一套
+  状态布局）。
 
 ---
 
@@ -191,9 +222,10 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
 要点：
 - **5 个组合里唯一 launch-bound 的段就是 sim_greedy**（其余都是规则 GEMM/reduction，cuBLAS/torch
   已高效或 #128 已覆盖）——本原型落掉这块，全 method 矩阵的 GPU 化路径就齐了；
-- decode 阶段贪心段开销（kernel 化后，沿用设计篇 §5.5 口径）：far 续跑每 64 步 64×17μs×36 层 ≈
-  39ms → 0.6 ms/步摊销；near 重建（ccluster_sim，Tn≈1.9K）1.9K×17μs×36 层 ≈ 1.2s → **18 ms/步
-  摊销，重——须 E107f 侧流 overlap 或 V1（2-3μs/token 后降到 ~3ms/步）**。
+- decode 阶段贪心段开销（kernel 化后，沿用设计篇 §5.5 口径，v2 校准 8.3 μs/token）：far 续跑
+  每 64 步 64×8.3μs×36 层 ≈ 19 ms → 0.3 ms/步摊销；near 重建（ccluster_sim，Tn≈1.9K）
+  1.9K×8.3μs×36 层 ≈ 0.57 s → **~9 ms/步摊销，重——须 E107f 侧流 overlap 或 V1（2-3μs/token
+  后降到 ~1.5-3ms/步）**。
 
 ---
 
@@ -204,15 +236,16 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
 | 项 | 量级 | 判读 |
 |---|---|---|
 | 点积 FLOPs（2·dd·ΣK_t） | 0.70 TFLOP/样本（36 层×8 头） | @FFMA 44T = **16 ms 理想下界** |
-| Triton 实测（K̄ 臂） | 0.28 s/层 → 10 s/样本 | 距下界 ~17×：**延迟主导非算力**（8 program/78 SM + 跨 tile 归约串行链） |
+| Triton 实测（K̄ 臂，v2） | 0.136 s/层 → 4.9 s/样本 | 距下界 ~300×（16 ms 为**每样本 36 层合计**理想下界；legacy 表「~17×」系层/样本口径混用，v2 校正）：**延迟主导非算力**（8 program/78 SM + 跨 tile 归约串行链） |
 | sums 读（L2 流量） | 4.8 GB/head @16K → 38 GB/层 | @L2 ~8TB/s ≈ 5 ms/层——**非瓶颈** |
 | sums 驻留 | K_max×dd×4 = 0.59MB/head → 4.7MB/层 | **L2 完全驻留**（shared 228KB 放不下全 K） |
-| 每 token 延迟拆解 | K=2K：4 tile×(load 64KB + 归约) ≈ 17μs | tile 间串行依赖链 = 主延迟源 |
-| vs Python 现状 | 79-84 μs/token（E108）/ 240-280（本机原版） | **5×（保守）/ 15×（本机口径）** |
-| CUDA V1 目标（设计篇） | 2-3 μs/token → 1.2-1.7 s/样本 | Triton 与之差 6-8× = V1 立项依据 |
+| 每 token 延迟拆解 | K=2K：4 tile×(load 64KB + 归约) ≈ 8.3μs（v2 结构簇臂实测 7.5μs@K=2K） | tile 间串行依赖链 = 主延迟源 |
+| vs Python 现状 | 79-84 μs/token（E108）/ 237-240（本机 v2 实测） | **~10×（保守）/ ~28×（本机口径）** |
+| CUDA V1 目标（设计篇） | 2-3 μs/token → 1.2-1.7 s/样本 | Triton 与之差 ~3-4×（v2 校准）= V1 立项依据 |
 
-- **Triton 版 e2e 形态**：hotpotqa 200 样本贪心段 2.7h → **~30-35 min**；ccluster_sim 13h/臂 →
-  **估 ~1-2.5h/臂**。E109 v2 后续补臂（0.85/0.95 sim、13 任务全量）从「过夜不可行」变「当天可跑」。
+- **Triton 版 e2e 形态**：hotpotqa 200 样本贪心段 2.7h → **~16 min**（v2 口径推算；legacy 推算
+  30-35 min 偏保守）；ccluster_sim 13h/臂 → **估 ~0.6-1.3h/臂**。E109 v2 后续补臂（0.85/0.95 sim、
+  13 任务全量）从「过夜不可行」变「当天可跑」。（推算值为 §2.4 换算，非 e2e 实测。）
 - V1 后（设计篇口径）：贪心段 ≤1.7 s/样本 → 单臂 ≤1h，13 任务全量过夜可跑。
 
 ---
@@ -238,17 +271,19 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
 | Triton 原型 kernel | `exp/trace/e113_greedy_triton.py` | 5/5 单测逐位全过；BT=512/nw=4 调优默认 |
 | 对拍单测 | `exp/trace/test_e113_greedy_triton.py` | T1-T5 全 PASS（含增量≡重放铁律） |
 | SEG-GREEDY 仿真 | `exp/trace/e113_seg_greedy_sim.py` + `results/e113_seg_greedy_sim.json` | 决策级等价实证 + NO-GO 判决落袋 |
-| microbench | `exp/trace/e113_microbench.py`（050 修复版）+ `results/e113_microbench.json`（**legacy：实现身份未闭合的历史观测，重跑落新 JSON 前不作正式性能证据**） | 10 case 落袋（含逐位抽验 0 mismatch）；修复版重跑排 GPU 空闲窗口，红绿单测 `test_e113_microbench_identity.py` 4/4 |
+| microbench | `exp/trace/e113_microbench.py`（050 修复版）+ `results/e113_microbench_v2.json`（**v2 正式证据**）+ `results/e113_microbench.json`（**legacy：实现身份未闭合的历史观测存档，保留不动**） | v2 已于 2026-10-10 空闲 GPU0 重跑：10/10 case 0 mismatch、身份闭包（checkout 6bdb7eb3b dirty=False、双侧同 checkout、impl SHA/seed/逐次延迟/内容 SHA+sidecar）、噪声检查过（温度 33→38°C 无降频、样本内极差 ≤0.65%）；GPU 侧 fail-closed 注入验收 PASS（`e113_failclosed_inject.py`）；红绿单测 `test_e113_microbench_identity.py` 4/4 |
 | 本设计文档 | `research/docs/e113_method_kernel_design.md` | 本文 |
 
 **后续动作**（对齐设计篇 §9 计划，本文档补充实证校准）：
 
 1. **P0.5（新增，本实证的直接推论）**：把 `greedy_pass_triton` 经 rsync 增量推送远程，替换
    E109 v2 后续 sim 臂的 `_greedy_cluster_pass` 调用（接口同签名，含 Kcap 预分配改造）——门 1
-   dump 重放对拍 + 门 3 单测（本 worktree T1-T5 直接复用）过了即可上线。预期 13h/臂 → ~1-2.5h/臂；
-2. V1 CUDA persistent kernel（设计篇 P2）判据更新：Triton 实测 17 μs/token 已把贪心段压到
-   e2e ~10% 以内边缘——**V1 优先级可降为 P2 后置**（先 C1/C2 采完 E109/E110 数据再投入），
-   除非 32K 长任务臂（narrativeqa/gov_report，Triton 下 32-83 μs/token）成为臂内瓶颈；
+   dump 重放对拍 + 门 3 单测（本 worktree T1-T5 直接复用）过了即可上线。预期 13h/臂 →
+   ~0.6-1.3h/臂（v2 口径）；
+2. V1 CUDA persistent kernel（设计篇 P2）判据更新：Triton v2 实测 ~8.3 μs/token（生产 K̄ 口径）
+   把贪心段压到 e2e ~10% 以内——**V1 优先级可降为 P2 后置**（先 C1/C2 采完 E109/E110 数据再
+   投入），除非 32K 长任务臂（narrativeqa/gov_report，Triton v2 下 14.6-64.9 μs/token）成为
+   臂内瓶颈；
 3. 方案2 档案化：正确性框架（决策级等价构造）留档，高计数簇态（kmeans 后处理）场景可复用；
    贪心态 NO-GO 结论入 negative result 资产。
 
@@ -260,14 +295,18 @@ for i in 0..T-1:                       # token 维：串行（贪心定义）
   （`CUDA_VISIBLE_DEVICES=<idle> python3 test_e113_greedy_triton.py`，<1 min）
 - SEG-GREEDY：`CUDA_VISIBLE_DEVICES=<idle> python3 e113_seg_greedy_sim.py --T 8192`（~15 min，
   真实 trace /tmp/trace/qwen3-8b）
-- microbench（050 修复版）：`CUDA_VISIBLE_DEVICES=<idle> python3 e113_microbench.py`（~5 min，
+- microbench（050 修复版）：`CUDA_VISIBLE_DEVICES=<idle> python3 e113_microbench.py`（~2 min，
   Python 臂占大头；`--wait` 可轮询等空闲）。默认双侧实现都从**当前 checkout** 加载；跨版本
   A/B 须显式 `--ref-root`/`--tri-root`，两侧 git SHA/dirty 与实现文件 SHA256 全落 manifest；
   correctness 门 fail-closed（任一超容差非零退出、不发布性能 JSON）；发布为临时文件 +
   fsync + 原子 replace，manifest 含 torch/triton/CUDA/driver 版本、逐次原始延迟与输出内容
-  SHA（+ `.sha256` sidecar）。已落袋的 `results/e113_microbench.json` 是修复前旧协议产物
-  （**实现身份未闭合的历史观测**），修复版重跑落新 JSON 前保留不动；
-  CPU-only 红绿单测 `test_e113_microbench_identity.py`（4/4）。
+  SHA（+ `.sha256` sidecar）。**v2 正式证据**（`results/e113_microbench_v2.json` +
+  sidecar，2026-10-10）产生方式：`git worktree add --detach /tmp/e113_clean_wt <HEAD>` 干净
+  checkout（保证 manifest dirty=False）后从 worktree 运行、`--out` 指回主树 results 目录——
+  延迟测量须在空闲 GPU 无并发扫描窗口执行（硬纪律）。fail-closed 注入验收复现：
+  `CUDA_VISIBLE_DEVICES=<idle> python3 e113_failclosed_inject.py`（退出 0 = 门生效）。
+  已落袋的 `results/e113_microbench.json` 是修复前旧协议产物（**实现身份未闭合的历史观测**，
+  保留不动）；CPU-only 红绿单测 `test_e113_microbench_identity.py`（4/4）。
 - 参考实现：`two-level-attention/sparse_attn/indexer/tli_indexer.py::_greedy_cluster_pass_python`
   （050：microbench 默认从当前 checkout 同源加载，不再引用仓库外绝对路径主树；
   `sys.dont_write_bytecode` 防落盘）

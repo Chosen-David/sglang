@@ -1,0 +1,333 @@
+{
+ "meta": {
+  "probe": "E113 microbench：sim_greedy Python 循环 vs Triton kernel",
+  "gpu": "NVIDIA H20-3e",
+  "timing": "cuda synchronize wall；python 臂 warmup=0 rep=1（单次），triton 臂 warmup=1 rep=3 取中位；Triton 预热含去 JIT",
+  "warmup_rep": {
+   "python": {
+    "warmup": 0,
+    "rep": 1
+   },
+   "triton": {
+    "warmup": 1,
+    "rep": 3
+   }
+  },
+  "e108_probe_ref": "Python 循环 T≈16K 实测 ~5.8s/层（sim=0.9 时 27s）",
+  "versions": {
+   "torch": "2.8.0+cu128",
+   "cuda": "12.8",
+   "triton": "3.4.0",
+   "driver": "550.127.08",
+   "gpu": "NVIDIA H20-3e"
+  },
+  "identity": {
+   "ref_root": "/tmp/e113_clean_wt/two-level-attention",
+   "tri_root": "/tmp/e113_clean_wt/two-level-attention",
+   "same_root": true,
+   "ref": {
+    "git": {
+     "git_sha": "6bdb7eb3b9f6b2543e247b9002e97b3c680cd655",
+     "git_dirty": false,
+     "dirty_files": []
+    },
+    "impl_file": "/tmp/e113_clean_wt/two-level-attention/sparse_attn/indexer/tli_indexer.py",
+    "impl_sha256": "c5dfc215a9ddd3161b7ef2918954cbf61916c5e42b9e35515d3c93d8b5b03a62"
+   },
+   "tri": {
+    "git": {
+     "git_sha": "6bdb7eb3b9f6b2543e247b9002e97b3c680cd655",
+     "git_dirty": false,
+     "dirty_files": []
+    },
+    "impl_file": "/tmp/e113_clean_wt/two-level-attention/sparse_attn/indexer/greedy_triton.py",
+    "impl_sha256": "a7c38986a539ab41c07cc4a6cf09129f62a37d8a1e187b5d4496e23ac98beaa1"
+   },
+   "microbench_script_sha256": "b7e50d1644eb024146de22d6b6e92084548da6035c117ec2f373d3910a5b7d90",
+   "note": "050：双侧实现文件 SHA + git 身份全记录；跨版本 A/B 须显式 root 且核验各自 commit/dirty"
+  },
+  "generators": {
+   "structured_c8": {
+    "kind": "base+noise 混合簇",
+    "n_base_rule": "max(T//8,1)",
+    "noise": 0.1,
+    "seed": 7,
+    "device": "cuda"
+   },
+   "singleton": {
+    "kind": "纯高斯单例",
+    "seed": 7,
+    "device": "cuda",
+    "note": "050 修复 4：显式固定 generator/seed"
+   }
+  },
+  "correctness_gate": {
+   "mode": "fail-closed（050 修复 3）",
+   "checks": [
+    "assign 逐位",
+    "k_live 相等",
+    "cnt/sq/簇心容差"
+   ],
+   "tolerances": {
+    "assign": "逐位相等",
+    "k_live": "逐位相等",
+    "cnt": {
+     "atol": 1e-06
+    },
+    "sq": {
+     "rtol": 1e-05,
+     "atol": 1e-05
+    },
+    "sums": {
+     "atol": 1e-05
+    }
+   },
+   "on_fail": "非零退出 + <out>.failure.json（含输入 hash），性能 JSON 不发布"
+  },
+  "started": "2026-10-10 01:45:34"
+ },
+ "cases": [
+  {
+   "T": 1024,
+   "H": 8,
+   "dd": 32,
+   "sim": 0.9,
+   "data": "structured_c8",
+   "input_sha256": "2fac2bf0df0e26239be9fd2951bf549843a7434b29c92c13289cf0aec7f0a4d3",
+   "clusters_max_head": 128,
+   "C_over_N": 0.125,
+   "assign_mismatch": 0,
+   "wall_s_python": 0.447,
+   "wall_s_python_samples": [
+    0.4471
+   ],
+   "wall_s_triton": 0.0021,
+   "wall_s_triton_samples": [
+    0.0021,
+    0.00212,
+    0.00226
+   ],
+   "us_per_token_python": 436.64,
+   "us_per_token_triton": 2.07,
+   "speedup": 211.2
+  },
+  {
+   "T": 1024,
+   "H": 8,
+   "dd": 32,
+   "sim": 0.9,
+   "data": "singleton",
+   "input_sha256": "a61af6ee3865ae74b720a2c8203a4769571efb406d2d84661ef6fac358ea83f7",
+   "clusters_max_head": 1024,
+   "C_over_N": 1.0,
+   "assign_mismatch": 0,
+   "wall_s_python": 0.246,
+   "wall_s_python_samples": [
+    0.2458
+   ],
+   "wall_s_triton": 0.0031,
+   "wall_s_triton_samples": [
+    0.00309,
+    0.0031,
+    0.00311
+   ],
+   "us_per_token_python": 240.01,
+   "us_per_token_triton": 3.03,
+   "speedup": 79.2
+  },
+  {
+   "T": 4096,
+   "H": 8,
+   "dd": 32,
+   "sim": 0.9,
+   "data": "structured_c8",
+   "input_sha256": "ff31fd02399fd5b217148349bc16dbb7fb24e4e90df779d1904775d4ff788f8d",
+   "clusters_max_head": 512,
+   "C_over_N": 0.125,
+   "assign_mismatch": 0,
+   "wall_s_python": 0.984,
+   "wall_s_python_samples": [
+    0.9838
+   ],
+   "wall_s_triton": 0.0082,
+   "wall_s_triton_samples": [
+    0.00816,
+    0.00818,
+    0.00819
+   ],
+   "us_per_token_python": 240.19,
+   "us_per_token_triton": 2.0,
+   "speedup": 120.3
+  },
+  {
+   "T": 4096,
+   "H": 8,
+   "dd": 32,
+   "sim": 0.9,
+   "data": "singleton",
+   "input_sha256": "008986992fb8d330e89c123b09cb9d24c091f735a7a4ecb2833b01299f0734cf",
+   "clusters_max_head": 4096,
+   "C_over_N": 1.0,
+   "assign_mismatch": 0,
+   "wall_s_python": 0.978,
+   "wall_s_python_samples": [
+    0.9784
+   ],
+   "wall_s_triton": 0.0363,
+   "wall_s_triton_samples": [
+    0.03629,
+    0.03633,
+    0.03634
+   ],
+   "us_per_token_python": 238.86,
+   "us_per_token_triton": 8.87,
+   "speedup": 26.9
+  },
+  {
+   "T": 8192,
+   "H": 8,
+   "dd": 32,
+   "sim": 0.9,
+   "data": "structured_c8",
+   "input_sha256": "3a9d58f47333eff72d30c2b26eadba7d618e46847057711ff48cd4473f4b2747",
+   "clusters_max_head": 1024,
+   "C_over_N": 0.125,
+   "assign_mismatch": 0,
+   "wall_s_python": 1.964,
+   "wall_s_python_samples": [
+    1.9636
+   ],
+   "wall_s_triton": 0.0283,
+   "wall_s_triton_samples": [
+    0.02833,
+    0.02834,
+    0.0285
+   ],
+   "us_per_token_python": 239.69,
+   "us_per_token_triton": 3.46,
+   "speedup": 69.3
+  },
+  {
+   "T": 8192,
+   "H": 8,
+   "dd": 32,
+   "sim": 0.9,
+   "data": "singleton",
+   "input_sha256": "1b01184d6d3584c32cd548b275d902a881e090e9f0e87fb8043ff2434a5384bd",
+   "clusters_max_head": 8192,
+   "C_over_N": 1.0,
+   "assign_mismatch": 0,
+   "wall_s_python": 1.955,
+   "wall_s_python_samples": [
+    1.955
+   ],
+   "wall_s_triton": 0.1357,
+   "wall_s_triton_samples": [
+    0.13569,
+    0.1357,
+    0.1357
+   ],
+   "us_per_token_python": 238.65,
+   "us_per_token_triton": 16.56,
+   "speedup": 14.4
+  },
+  {
+   "T": 16384,
+   "H": 8,
+   "dd": 32,
+   "sim": 0.9,
+   "data": "structured_c8",
+   "input_sha256": "349429c666aefa3d566ff7fb9cd5c0ea5351134aed9f1f6ad09916343cbb474d",
+   "clusters_max_head": 2048,
+   "C_over_N": 0.125,
+   "assign_mismatch": 0,
+   "wall_s_python": 3.911,
+   "wall_s_python_samples": [
+    3.9113
+   ],
+   "wall_s_triton": 0.1224,
+   "wall_s_triton_samples": [
+    0.1223,
+    0.12236,
+    0.12237
+   ],
+   "us_per_token_python": 238.73,
+   "us_per_token_triton": 7.47,
+   "speedup": 32.0
+  },
+  {
+   "T": 16384,
+   "H": 8,
+   "dd": 32,
+   "sim": 0.9,
+   "data": "singleton",
+   "input_sha256": "7173bcc5e4d51bb6fd71d091fd1dd0cfb69f6254dbb3fd4cc64668ae6a6fc1af",
+   "clusters_max_head": 16384,
+   "C_over_N": 1.0,
+   "assign_mismatch": 0,
+   "wall_s_python": 3.878,
+   "wall_s_python_samples": [
+    3.8782
+   ],
+   "wall_s_triton": 0.5242,
+   "wall_s_triton_samples": [
+    0.52394,
+    0.52418,
+    0.52437
+   ],
+   "us_per_token_python": 236.7,
+   "us_per_token_triton": 31.99,
+   "speedup": 7.4
+  },
+  {
+   "T": 32768,
+   "H": 8,
+   "dd": 32,
+   "sim": 0.9,
+   "data": "structured_c8",
+   "input_sha256": "d3c6326aad44c3739995fcddfb8916245f298d985e8d25e3d719dff2e6affb20",
+   "clusters_max_head": 4094,
+   "C_over_N": 0.1249,
+   "assign_mismatch": 0,
+   "wall_s_python": 7.779,
+   "wall_s_python_samples": [
+    7.7789
+   ],
+   "wall_s_triton": 0.4774,
+   "wall_s_triton_samples": [
+    0.47728,
+    0.47742,
+    0.4775
+   ],
+   "us_per_token_python": 237.39,
+   "us_per_token_triton": 14.57,
+   "speedup": 16.3
+  },
+  {
+   "T": 32768,
+   "H": 8,
+   "dd": 32,
+   "sim": 0.9,
+   "data": "singleton",
+   "input_sha256": "cdaef7836dc6135112d9dd105cb624bb0a68ea03717341b8f516866620150a46",
+   "clusters_max_head": 32768,
+   "C_over_N": 1.0,
+   "assign_mismatch": 0,
+   "wall_s_python": 7.77,
+   "wall_s_python_samples": [
+    7.7702
+   ],
+   "wall_s_triton": 2.125,
+   "wall_s_triton_samples": [
+    2.1247,
+    2.12495,
+    2.12511
+   ],
+   "us_per_token_python": 237.13,
+   "us_per_token_triton": 64.85,
+   "speedup": 3.7
+  }
+ ],
+ "finished": "2026-10-10 01:46:52",
+ "output_content_sha256": "6d99f11bea958678a1e4a3c10f1bd96c27115951eac4fe0d002a2f81814f046f"
+}

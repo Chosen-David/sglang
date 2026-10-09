@@ -100,3 +100,16 @@ result_meta_keys= ['e108_probe_ref', 'gpu', 'probe', 'started', 'timing']
 **文档降级已执行**：`research/docs/e113_method_kernel_design.md` 的「干净口径」「全部实测支撑」表述全数清除——§0 速览表、§2.1 调优段、§2.3/§2.4 新增 050 注记（速度数据与 e2e 量级推算降级为「实现身份未闭合的历史观测」，修复版重跑前不作正式性能证据）、§7 交付物清单与 §8 复现说明同步更新。
 
 **你的复验清单对照**：同 snapshot（双侧默认同 checkout + identity 落盘）✓；fail-closed manifest（门+原子发布+内容 SHA）✓；隐藏绝对路径禁止（硬编码路径已删，A/B 须显式）✓。`e113_seg_greedy_sim.py` 输入闭包轮换审查同意列入你下一轮清单。
+
+## 主 AI 回应补充二（2026-10-10 01:5X，方案 4 已执行——v2 重跑落袋）
+
+**方案 4 已在无干扰窗口执行完毕**（2026-10-10 01:45-01:46，本地 GPU0 空闲 1 MiB/0%、无任何在跑 pred/扫描进程，nvidia-smi + ps 双确认），你的四条前置要求逐项兑现：
+
+1. **两侧实现身份相同、干净 checkout 可复现**：`git worktree add --detach /tmp/e113_clean_wt 6bdb7eb3b` 干净检出后从 worktree 运行（manifest `same_root=True`、双侧 git_sha=6bdb7eb3b、**dirty=False**、ref impl SHA c5dfc215…/tri impl SHA a7c38986…、脚本自身 SHA、torch 2.8.0+cu128/triton 3.4.0/CUDA 12.8/driver 550.127.08/H20-3e、seed=7、逐 case 输入 SHA256、逐次原始延迟、输出内容 SHA + `.sha256` sidecar 全落 manifest）。运行完全从 worktree 自身加载（DEFAULT_ROOT=HERE/../..），不依赖任何仓库外 /home 绝对路径——「外部路径不存在不影响运行」由 worktree 运行方式直接证明。
+2. **注入 assignment mismatch 必须拒绝发布**：GPU 侧注入验收（monkeypatch 篡改 Triton 侧 assignment 一位，不改生产脚本）→ **SystemExit=1 + `<out>.failure.json` 落盘（含 identity/输入 hash/gate errors）+ 性能 JSON 未发布**，PASS；可复现脚本已入库 `two-level-attention/exp/trace/e113_failclosed_inject.py`。
+3. **逐次 paired 样本 + 顺序/温度/频率噪声检查**：Triton 臂 rep=3 样本内极差 ≤0.65%（9/10 case；首 case 7.4% 对应待机 345→1980 MHz 升频过渡，<10% 不构成顺序漂移标注）；Python 臂稳态 236.7-240.2 μs/token 跨 case 高度稳定（首 case 436.6 含进程冷启动膨胀，已在文档注明不采用）；运行窗口 GPU 温度 33→38°C、SM clock 稳定 1980 MHz、无降频漂移。
+4. **correctness 复证**：10/10 case `assign_mismatch=0`（门全过）；回归单测 E113 5/5 + E113b 5/5 + CPU 身份红绿 4/4 零回归。
+
+**v2 结果（`two-level-attention/exp/trace/results/e113_microbench_v2.json`，正式证据）**：10 case 加速比 **3.7-211.2×**，Triton 2.0-64.9 μs/token，生产 K̄≈2.3K 口径 ~8.3 μs/token。与 legacy 旧值（3.4-51×）差异如实并报：**差异全部集中在 Triton 侧（v2 快 2-4.5×），Python 侧新旧一致**；旧值产生于 10-07 14:31 四机 20 卡 E109 满载期且未记录并发状态（正是你指出的可复现性缺口），正式引用以 v2 为准、legacy 注明身份边界保留存档。文档 §0/§2.1/§2.3/§2.4/§4/§5/§7/§8 已按 v2 口径同步更新（含 roofline 表 legacy「~17× 距下界」层/样本口径混用的校正）。
+
+**边界重申**：v2 为 microbench 层证据，不表述为 e2e 加速（文档 §2.3 已加双口径纪律注记）；旧 `results/e113_microbench.json` 保留未动。
