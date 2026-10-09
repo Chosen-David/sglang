@@ -29,6 +29,29 @@
 #       自动释放（无陈旧锁），另一方正常发布成功且最终四 aliases
 #       完整属于后者（被杀进程的 .bak/generation 残留属预期——
 #       SIGKILL 无法执行清理，不构成混合代际）。
+#   T7（kimi3 1404）：发布成功提交后报告型 OSError（broken pipe 语义）
+#       → 不回滚、不删 generation、rc=0，failure receipt 记
+#       publish_committed=True。
+# ===== E116h（GPT 1429 审计 042/043/044/048②）=====
+#   T8（042）：四条发布目标（out/manifest-out 等）任一为符号链接 →
+#       fail-closed 拒绝（symlink 原样保留、目标文件零触碰）；正例：
+#       symlink 父目录别名路径（alias/out.json vs real/out.json）
+#       归一到同一锁键——A 经 alias 持锁慢速发布、B 经 real 路径并发
+#       → 串行化，锁文件落在 real 父目录（不在 alias 侧）；
+#   T9（043）：不同 --out 共享 --manifest-out 的并发发布 → 完整写集
+#       锁（out/md/manifest/receipt 各一把）串行化，两进程均成功且
+#       后到者 receipt 与最终共享 manifest 闭合；红例：flock 禁用
+#       同一调度 → B 的 manifest 被 A 覆写、B 的 success receipt 立即
+#       失真（审计 043 的双成功病态复现）；
+#   T10（044）：4 个备份删除位置逐一注入 OSError → committed 先于
+#       清理置位 → 不回滚、rc=0、新代际四件闭合、失败清理的备份
+#       残留并记 gc_pending warning（审计 043/044 的混合代际不可达）；
+#   T10b（044）：镜像安装失败 + 回滚 replace 二次失败 → 混合代际
+#       loudly 拒绝——rc!=0、failure receipt 记录未还原镜像与保留的
+#       备份（可恢复路径不删除）、note 不再声称「已回滚全部镜像」；
+#   048②：T1 的 failure receipt 选择从 sorted(glob)[-1] 改为按本轮
+#       运行 stderr 打印的落盘路径精确定位（run_id 字典序≠时间序，
+#       旧写法首跑可能取到旧 failure receipt）。
 # 用法:
 #   PYTHONPATH=$PWD python3 -m benchmark.RULER.test_e116f_publish_atomic
 import glob
@@ -36,6 +59,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -122,18 +146,21 @@ def _copy_fixture(base, name):
 
 # ---- E116g（040）：并发发布交错测试辅助 ----
 
-def _formal_bg(root, out):
+def _formal_bg(root, out, manifest_out=None):
     """普通（无注入）正式入口后台子进程。"""
     argv = [sys.executable, "-u", "-m", "benchmark.RULER.score_ruler_formal",
             "--root", root, "--pred-postfix", "_fx",
             "--data-root", os.path.join(TESTDATA, "data_root"),
             "--out", out, "--min-samples", "2"]
+    if manifest_out is not None:
+        argv += ["--manifest-out", manifest_out]
     return subprocess.Popen(argv, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, cwd=REPO,
                             env={**os.environ, "PYTHONPATH": REPO})
 
 
-def _formal_inject_bg(root, out, delay=0.0, marker=None, no_lock=False):
+def _formal_inject_bg(root, out, delay=0.0, marker=None, no_lock=False,
+                      manifest_out=None):
     """带发布阶段延迟/锁禁用的正式入口后台子进程（040 交错测试）。
 
     注入语义：os.replace 先执行真实替换、再写 marker、再 sleep(delay)
@@ -144,6 +171,8 @@ def _formal_inject_bg(root, out, delay=0.0, marker=None, no_lock=False):
     formal_argv = ["--root", root, "--pred-postfix", "_fx",
                    "--data-root", os.path.join(TESTDATA, "data_root"),
                    "--out", out, "--min-samples", "2"]
+    if manifest_out is not None:
+        formal_argv += ["--manifest-out", manifest_out]
     code = (
         "import os, sys, time\n"
         "sys.argv = ['score_ruler_formal'] + " + repr(formal_argv) + "\n"
@@ -174,21 +203,23 @@ def _formal_inject_bg(root, out, delay=0.0, marker=None, no_lock=False):
                             env={**os.environ, "PYTHONPATH": REPO})
 
 
-def _aliases_closed(out):
+def _aliases_closed(out, manifest=None):
     """四个固定 aliases 是否同一代际闭合：receipt success + receipt
     result/manifest SHA 与固定文件逐位一致 + manifest.run_id 与
     receipt.run_id 相同 + generation 目录真实存在。混合代际（040 的
-    持久病态）在该口径下必表现为 False。"""
+    持久病态）在该口径下必表现为 False。manifest=共享 --manifest-out
+    路径时按该路径校验（默认 <out>.manifest.json）。"""
+    manifest = manifest or (out + ".manifest.json")
     try:
         rc = json.load(open(out + ".receipt.json"))
-        mf = json.load(open(out + ".manifest.json"))
+        mf = json.load(open(manifest))
     except (OSError, ValueError):
         return False
     if rc.get("status") != "success":
         return False
     try:
         return (rc.get("result_sha256") == _sha(out) and
-                rc.get("manifest_sha256") == _sha(out + ".manifest.json")
+                rc.get("manifest_sha256") == _sha(manifest)
                 and mf.get("run_id") == rc.get("run_id") and
                 os.path.isdir(rc["outputs"]["derived_dir"]))
     except OSError:
@@ -348,6 +379,310 @@ def test_T7_post_publish_io_error(base):
           "publish_committed=True（kimi3 1404 修复）")
 
 
+def _formal_inject_gc(root, out, fail_bak_nth):
+    """E116h（044）：对第 fail_bak_nth 个 `.bak-` 备份的 os.remove 注入
+    OSError（只计数 .bak 路径的删除，其余 os.remove 调用不受影响）。"""
+    formal_argv = ["--root", root, "--pred-postfix", "_fx",
+                   "--data-root", os.path.join(TESTDATA, "data_root"),
+                   "--out", out, "--min-samples", "2"]
+    code = (
+        "import os, sys\n"
+        "sys.argv = ['score_ruler_formal'] + " + repr(formal_argv) + "\n"
+        "nth = " + repr(fail_bak_nth) + "\n"
+        "_rm = os.remove\n"
+        "_cnt = {'n': 0}\n"
+        "def _remove(p):\n"
+        "    if isinstance(p, str) and '.bak-' in os.path.basename(p):\n"
+        "        _cnt['n'] += 1\n"
+        "        if _cnt['n'] == nth:\n"
+        "            raise OSError('INJECTED backup GC failure #%s' % nth)\n"
+        "    return _rm(p)\n"
+        "os.remove = _remove\n"
+        "import benchmark.RULER.score_ruler_formal as m\n"
+        "m.main()\n"
+    )
+    return subprocess.run([sys.executable, "-c", code],
+                          capture_output=True, text=True, cwd=REPO,
+                          env={**os.environ, "PYTHONPATH": REPO})
+
+
+def _formal_inject_replace_set(root, out, fail_on):
+    """E116h（044/T10b）：对第 fail_on 集合内序号的 os.replace 调用注入
+    OSError（安装与回滚共用 os.replace，按全局调用序号计数）。"""
+    formal_argv = ["--root", root, "--pred-postfix", "_fx",
+                   "--data-root", os.path.join(TESTDATA, "data_root"),
+                   "--out", out, "--min-samples", "2"]
+    code = (
+        "import os, sys\n"
+        "sys.argv = ['score_ruler_formal'] + " + repr(formal_argv) + "\n"
+        "fail_on = " + repr(sorted(fail_on)) + "\n"
+        "_rp = os.replace\n"
+        "_cnt = {'n': 0}\n"
+        "def _replace(a, b):\n"
+        "    _cnt['n'] += 1\n"
+        "    if _cnt['n'] in fail_on:\n"
+        "        raise OSError('INJECTED os.replace #%s' % _cnt['n'])\n"
+        "    return _rp(a, b)\n"
+        "os.replace = _replace\n"
+        "import benchmark.RULER.score_ruler_formal as m\n"
+        "m.main()\n"
+    )
+    return subprocess.run([sys.executable, "-c", code],
+                          capture_output=True, text=True, cwd=REPO,
+                          env={**os.environ, "PYTHONPATH": REPO})
+
+
+def _failure_receipt_of(r):
+    """048②：从本轮运行 stderr 精确定位 failure receipt 落盘路径
+    （main 失败路径必打印「[formal] failure receipt 落盘: <path>」；
+    run_id 含 PID/随机数，字典序≠时间序，sorted(glob)[-1] 可能取到
+    旧运行的 receipt）。"""
+    m = re.search(r"failure receipt 落盘: (\S+)", r.stderr)
+    assert m, ("未在 stderr 中找到 failure receipt 落盘路径",
+               r.stderr[-800:])
+    fpath = m.group(1)
+    assert os.path.isfile(fpath), fpath
+    return fpath
+
+
+def test_T8_symlink_targets(base):
+    """T8（042）：四条发布目标任一为符号链接 → fail-closed。
+    负例：--out 为 symlink（以及 --manifest-out 为 symlink）→ 非零
+    退出、symlink 原样保留、指向文件零触碰、无任何镜像/锁文件副作用；
+    正例：symlink 父目录别名（alias/out.json vs real/out.json）归一到
+    同一锁键——A 经 alias 持锁慢速发布、B 经 real 路径并发 → 串行化
+    （后到者覆盖），锁文件落在 real 父目录而非 alias 侧。"""
+    root = _copy_fixture(base, "t8_root")
+    real_dir = os.path.join(base, "t8_real")
+    os.makedirs(real_dir)
+    # ---- 负例 1：--out 为 symlink ----
+    out_target = os.path.join(real_dir, "t8_target.json")
+    json.dump({"old": True}, open(out_target, "w"))
+    out_link = os.path.join(base, "t8_link.json")
+    os.symlink(out_target, out_link)
+    r = _formal(root, out_link)
+    assert r.returncode != 0, (r.returncode, r.stdout[-800:])
+    assert "符号链接" in (r.stdout + r.stderr), \
+        (r.returncode, r.stdout[-500:], r.stderr[-500:])
+    assert os.path.islink(out_link) and \
+        os.readlink(out_link) == out_target, "symlink 被改动（042 修复失效）"
+    assert json.load(open(out_target)) == {"old": True}, \
+        "symlink 指向的目标文件被触碰"
+    assert not os.path.exists(out_link + ".manifest.json") and \
+        not os.path.exists(out_link + ".receipt.json"), "symlink 路径旁装了镜像"
+    assert not os.path.exists(out_link + ".lock") and \
+        not os.path.exists(out_target + ".lock"), "symlink 拒绝路径不应产生锁文件"
+    assert _failure_receipt_of(r)
+    # ---- 负例 2：--manifest-out 为 symlink ----
+    mout_target = os.path.join(real_dir, "t8_shared.manifest.json")
+    mout_link = os.path.join(base, "t8_mlink.json")
+    os.symlink(mout_target, mout_link)
+    out2 = os.path.join(base, "t8_out2.json")
+    r = _formal(root, out2, manifest_out=mout_link)
+    assert r.returncode != 0 and "符号链接" in (r.stdout + r.stderr), \
+        (r.returncode, r.stdout[-500:], r.stderr[-500:])
+    assert os.path.islink(mout_link)
+    assert not os.path.exists(mout_target), "symlink 指向路径被创建/触碰"
+    # ---- 正例：symlink 父目录别名 → 锁键归一（realpath(父目录)）----
+    root_a = _copy_fixture(base, "t8_root_a")
+    root_b = _copy_fixture(base, "t8_root_b")
+    _tamper_vt_pred(root_a, "T8-A")
+    _tamper_vt_pred(root_b, "T8-B")
+    alias_dir = os.path.join(base, "t8_alias")
+    os.symlink(real_dir, alias_dir)
+    out_via_alias = os.path.join(alias_dir, "t8_pub.json")
+    out_via_real = os.path.join(real_dir, "t8_pub.json")
+    out_b_ref = os.path.join(base, "t8_b_ref.json")
+    r = _formal(root_b, out_b_ref)
+    assert r.returncode == 0 and "DONE" in r.stdout, r.stdout[-800:]
+    a = _formal_inject_bg(root_a, out_via_alias, delay=1.0)
+    time.sleep(0.3)          # A 先进入发布临界区（持锁安装中）
+    b = _formal_bg(root_b, out_via_real)
+    a_out, a_err = a.communicate(timeout=180)
+    b_out, b_err = b.communicate(timeout=180)
+    assert a.returncode == 0 and "DONE" in a_out, \
+        (a.returncode, a_out[-800:], a_err[-500:])
+    assert b.returncode == 0 and "DONE" in b_out, \
+        (b.returncode, b_out[-800:], b_err[-500:])
+    assert _aliases_closed(out_via_real), \
+        "父目录别名路径并发发布后代际不闭合（042 锁键未归一）"
+    assert _sha(out_via_real) == _sha(out_b_ref), \
+        "最终 JSON ≠ 后到者 B 的单独发布（alias/real 交错残留）"
+    # 锁键经 realpath(父目录) 归一：锁文件落在 real 父目录（alias 与
+    # real 是同一物理目录，两侧必然共享同一把锁——这正是归一性的体现）
+    assert os.path.isfile(os.path.join(real_dir, "t8_pub.json.lock")), \
+        "锁文件未落在 realpath 解析后的父目录"
+    print("T8 PASS  symlink 目标（out/manifest-out）fail-closed 拒绝、"
+          "原样保留零触碰；symlink 父目录别名归一锁键 → alias/real 双"
+          "路径并发发布串行化、锁文件落 real 父目录（042 修复）")
+
+
+def test_T9_writeset_lock(base):
+    """T9（043）：不同 --out 共享 --manifest-out 的并发发布。
+    绿例：完整写集锁（out/md/manifest/receipt 各一把）→ A 持锁慢速
+    发布期间 B 阻塞在共享 manifest 的锁上，串行化：两进程均成功，
+    最终共享 manifest = 后到者 B 的，B 的 receipt 与之闭合；
+    红例：flock 禁用 + 同一调度 → B 的 manifest 先落、被 A 覆写，
+    B 的 success receipt 立即失真（双成功病态，审计 043 复现）。"""
+    # ---- 绿例 ----
+    root_a = _copy_fixture(base, "t9_root_a")
+    root_b = _copy_fixture(base, "t9_root_b")
+    _tamper_vt_pred(root_a, "T9-A")
+    _tamper_vt_pred(root_b, "T9-B")
+    shared = os.path.join(base, "t9_shared.manifest.json")
+    out_a = os.path.join(base, "t9_a.json")
+    out_b = os.path.join(base, "t9_b.json")
+    a = _formal_inject_bg(root_a, out_a, delay=1.5, manifest_out=shared)
+    time.sleep(0.3)
+    b = _formal_bg(root_b, out_b, manifest_out=shared)
+    a_out, a_err = a.communicate(timeout=180)
+    b_out, b_err = b.communicate(timeout=180)
+    assert a.returncode == 0 and "DONE" in a_out, \
+        (a.returncode, a_out[-1000:], a_err[-500:])
+    assert b.returncode == 0 and "DONE" in b_out, \
+        (b.returncode, b_out[-1000:], b_err[-500:])
+    rc_a = json.load(open(out_a + ".receipt.json"))
+    rc_b = json.load(open(out_b + ".receipt.json"))
+    sha_shared = _sha(shared)
+    # 串行化 ⇒ 后到者 B 的 manifest 是共享文件的最终内容，receipt 闭合
+    assert rc_b["manifest_sha256"] == sha_shared, \
+        "B（后到者）的 receipt 与最终共享 manifest 不闭合——B 未被串行化"
+    assert rc_a["manifest_sha256"] != sha_shared, \
+        "A 的 manifest 未被 B 覆盖？调度未按预期（A 应先发布）"
+    # A 先完整发布：其 receipt 与自己 generation 内的 manifest 逐位闭合
+    # （共享 manifest 被后到者覆盖是共享写集的 last-writer 语义；A 的
+    #  四镜像本身无任何交错/混合——这正是写集锁保证的：A 发布期间 B
+    #  未能写入 shared）
+    assert rc_a["manifest_sha256"] == _sha(
+        os.path.join(rc_a["outputs"]["derived_dir"], "manifest.json")), \
+        "A 的 receipt 与自己 generation 的 manifest 不闭合（交错污染）"
+    assert rc_a["result_sha256"] == _sha(out_a) and \
+        rc_b["result_sha256"] == _sha(out_b), "各自 out 镜像被对方污染"
+    assert os.path.isdir(rc_a["outputs"]["derived_dir"]) and \
+        os.path.isdir(rc_b["outputs"]["derived_dir"])
+    # ---- 红例：同一调度 + flock 禁用 ----
+    root_a2 = _copy_fixture(base, "t9_root_a2")
+    root_b2 = _copy_fixture(base, "t9_root_b2")
+    _tamper_vt_pred(root_a2, "T9-A2")
+    _tamper_vt_pred(root_b2, "T9-B2")
+    shared2 = os.path.join(base, "t9_shared2.manifest.json")
+    out_a2 = os.path.join(base, "t9_a2.json")
+    out_b2 = os.path.join(base, "t9_b2.json")
+    a2 = _formal_inject_bg(root_a2, out_a2, delay=1.5, no_lock=True,
+                           manifest_out=shared2)
+    time.sleep(0.3)
+    b2 = _formal_inject_bg(root_b2, out_b2, no_lock=True,
+                           manifest_out=shared2)
+    a2_out, a2_err = a2.communicate(timeout=180)
+    b2_out, b2_err = b2.communicate(timeout=180)
+    assert a2.returncode == 0 and b2.returncode == 0, \
+        (a2.returncode, b2.returncode, a2_out[-500:], b2_out[-500:])
+    rc_a2 = json.load(open(out_a2 + ".receipt.json"))
+    rc_b2 = json.load(open(out_b2 + ".receipt.json"))
+    sha2 = _sha(shared2)
+    # 无锁交错 ⇒ A 的 manifest 覆写 B（A 的共享 manifest 安装晚于 B），
+    # B 的 success receipt 已失真——正是 043 要消除的双成功病态
+    assert sha2 == rc_a2["manifest_sha256"] and \
+        sha2 != rc_b2["manifest_sha256"], \
+        (f"红例失效：最终共享 manifest 与 receipt 的关系不符合无锁"
+         f"交错预期（A={rc_a2['manifest_sha256'][:8]} "
+         f"B={rc_b2['manifest_sha256'][:8]} final={sha2[:8]}）——"
+         f"若 B 仍闭合说明调度未构造出交错窗口")
+    print("T9 PASS  不同 --out 共享 --manifest-out → 写集锁串行化，后到"
+          "者 receipt 与最终共享 manifest 闭合；flock 禁用红例复现「双成"
+          "功 + B receipt 失真」病态（043 修复）")
+
+
+def test_T10_backup_gc_failure(base):
+    """T10（044）：4 个备份删除位置逐一注入 OSError。
+    committed 在备份清理之前置位 → 清理失败不回滚：rc=0、DONE、新代际
+    四件完整闭合、失败清理的备份残留并记 gc_pending warning——任何
+    混合代际（[False,True,...]）不可达。"""
+    root = _copy_fixture(base, "t10_root")
+    out = os.path.join(base, "t10.json")
+    r = _formal(root, out)
+    assert r.returncode == 0 and "DONE" in r.stdout, r.stdout[-1500:]
+    _tamper_vt_pred(root, "T10")
+    for nth in (1, 2, 3, 4):
+        prev_rc = json.load(open(out + ".receipt.json"))
+        r = _formal_inject_gc(root, out, fail_bak_nth=nth)
+        assert r.returncode == 0 and "DONE" in r.stdout, \
+            (nth, r.returncode, r.stdout[-1500:], r.stderr[-800:])
+        # 新代际四件完整闭合（不是旧代际、不是混合代际）
+        rc = json.load(open(out + ".receipt.json"))
+        assert rc["status"] == "success" and rc["run_id"] != prev_rc["run_id"]
+        assert rc["result_sha256"] == _sha(out) and \
+            rc["manifest_sha256"] == _sha(out + ".manifest.json")
+        mf = json.load(open(out + ".manifest.json"))
+        assert mf["run_id"] == rc["run_id"] and \
+            os.path.isdir(rc["outputs"]["derived_dir"])
+        # 备份清理失败 → gc_pending warning（stderr），提交语义不受影响
+        assert "备份清理失败" in r.stderr and \
+            f"INJECTED backup GC failure #{nth}" in r.stderr, \
+            (nth, r.stderr[-500:])
+        # 第 nth 个备份删除失败 → 恰好 nth 个 .bak 残留（每轮失败一个，
+        # 其余备份正常 GC）
+        baks = sorted(glob.glob(out + ".bak-*") +
+                      glob.glob(out[:-len(".json")] + ".md.bak-*") +
+                      glob.glob(out + ".manifest.json.bak-*") +
+                      glob.glob(out + ".receipt.json.bak-*"))
+        assert len(baks) == nth, (nth, baks)
+        # 无 staging/tmp 残留（bak 残留属 gc_pending 预期，不算失败残留）
+        assert not glob.glob(out + ".staging-*")
+        for p in _products(out):
+            assert not glob.glob(p + ".tmp-*"), (nth, p)
+    print("T10 PASS  4 个备份删除位置逐一注入 OSError → committed 先于"
+          "清理置位：rc=0、新代际四件闭合、失败备份残留记 gc_pending "
+          "warning（044：清理失败不触发回滚，混合代际不可达）")
+
+
+def test_T10b_rollback_second_failure(base):
+    """T10b（044）：镜像安装失败 + 回滚 replace 二次失败 → 混合代际
+    loudly 拒绝。rc!=0；failure receipt 记录未还原镜像（rollback.errors）
+    与保留的备份（可恢复路径不删除）；note 不再声称「已回滚全部镜像」。
+    磁盘上 md/manifest/receipt = 旧代际、json = 新内容（混合），但运行
+    以失败告终且 json 的备份仍在 → 可人工恢复，不存在静默成功。"""
+    root = _copy_fixture(base, "t10b_root")
+    out = os.path.join(base, "t10b.json")
+    r = _formal(root, out)
+    assert r.returncode == 0 and "DONE" in r.stdout, r.stdout[-1500:]
+    old = {p: _sha(p) for p in _products(out)}
+    _tamper_vt_pred(root, "T10B")
+    # os.replace 全局调用序：#1 装 JSON、#2 装 MD（注入失败）→
+    # published=[json]，#3 = 锁内回滚 replace(bak_json, json)（二次失败）
+    r = _formal_inject_replace_set(root, out, fail_on={2, 3})
+    assert r.returncode != 0, (r.returncode, r.stdout[-1000:])
+    fpath = _failure_receipt_of(r)
+    fr = json.load(open(fpath))
+    assert fr["status"] == "failed" and \
+        fr["publish_committed"] is False
+    assert fr["rollback"]["attempted"] is True and \
+        fr["rollback"]["in_publish_lock"] is True
+    assert any(out in e for e in fr["rollback"]["errors"]), \
+        fr["rollback"]      # json 未还原，须逐条记录
+    assert fr["rollback"]["n_restored"] == 0
+    assert "未完整回滚" in fr["note"], \
+        "failure receipt note 不应声称已回滚全部镜像（044 修正）"
+    # 旧代际的 json 备份保留（可恢复），并记录在 receipt
+    baks = glob.glob(out + ".bak-*")
+    assert baks and all(b in fr.get("retained_backups", []) for b in baks), \
+        (baks, fr.get("retained_backups"))
+    # 磁盘状态如实为混合代际，但运行 loudly 失败（无 DONE、非零退出）：
+    # md/manifest/receipt = 旧代际，json = 新内容
+    md_p = out[:-len(".json")] + ".md"
+    mf_p = out + ".manifest.json"
+    rc_p = out + ".receipt.json"
+    assert _sha(md_p) == old[md_p] and _sha(mf_p) == old[mf_p] and \
+        _sha(rc_p) == old[rc_p], "未触碰的镜像被改动"
+    assert _sha(out) != old[out], \
+        "json 应回滚失败保持新内容（测试前提：注入 #3 使回滚失败）"
+    # json 的备份仍在 → 旧代际可人工恢复（不存在不可恢复的混合态）
+    assert os.path.exists(baks[0])
+    print("T10b PASS  安装失败+回滚二次失败 → 混合代际 loudly 拒绝："
+          "rc!=0、failure receipt 记录未还原镜像与保留备份、note 如实"
+          "（044：任何混合代际不静默成功，可恢复路径不删除）")
+
+
 def _tamper_vt_pred(root, tag):
     """篡改 vt 行 0 的 pred（_id/answers 身份不变）→ 重跑结果可辨。"""
     tgt = os.path.join(root, "L32768", "pred_fx", "vt-fxm-01010000.jsonl")
@@ -414,10 +749,14 @@ def test_T1_replace_injection(base):
         # 旧 generation 目录规范四件仍完整
         for p in _gen_files(old_runs[0]):
             assert os.path.isfile(p), f"注入 #{nth}: {p} 缺失"
-        # failure receipt 落盘（每轮一条）且 error 含注入标记
+        # failure receipt 落盘（每轮一条）且 error 含注入标记；
+        # 048②：按本轮 stderr 打印的落盘路径精确定位（run_id 含
+        # PID/随机数，字典序≠时间序，sorted(glob)[-1] 可能取到旧 receipt）
         fails = sorted(glob.glob(out + ".failure-*.json"))
         assert len(fails) == nth, (nth, fails)
-        fr = json.load(open(fails[-1]))
+        fpath = _failure_receipt_of(r)
+        assert fpath in fails, (fpath, fails)
+        fr = json.load(open(fpath))
         assert fr["status"] == "failed" and \
             f"INJECTED os.replace #{nth}" in fr["error"]
         # 无新 generation / staging / tmp / bak 残留
@@ -548,11 +887,19 @@ def main():
         PASS += 1
         test_T7_post_publish_io_error(base)
         PASS += 1
+        test_T8_symlink_targets(base)
+        PASS += 1
+        test_T9_writeset_lock(base)
+        PASS += 1
+        test_T10_backup_gc_failure(base)
+        PASS += 1
+        test_T10b_rollback_second_failure(base)
+        PASS += 1
         test_D1_no_regression()
         PASS += 1
     finally:
         shutil.rmtree(base, ignore_errors=True)
-    total = 8 if t3 else 7
+    total = 12 if t3 else 11
     skip = "" if t3 else "，T3 SKIP（无第二设备）"
     print(f"\nE116f ALL PASS ({PASS}/{total}{skip})")
 

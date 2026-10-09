@@ -1,0 +1,39 @@
+{
+ "scores": {
+  "L65536/none": {
+   "niah_single_1": 35.0,
+   "niah_multiquery": 35.0,
+   "cwe": 35.0,
+   "vt": 35.0
+  }
+ },
+ "n": {
+  "L65536/none": {
+   "niah_single_1": 3,
+   "niah_multiquery": 3,
+   "cwe": 3,
+   "vt": 3
+  }
+ },
+ "incomplete_cells": [],
+ "sources": {
+  "L65536/none": {
+   "niah_single_1": {
+    "file": "niah_single_1-none-merged.jsonl",
+    "sha256": "47003e1d66ddbbb36ddf55377f11531bbaf22d2a1e13a0d3c1e4c71afa547adf"
+   },
+   "niah_multiquery": {
+    "file": "niah_multiquery-none-merged.jsonl",
+    "sha256": "d3541b2c46a4174af282aa67191c619a3050d0fb6fb5ecada5062e9dea85df2d"
+   },
+   "cwe": {
+    "file": "cwe-none-merged.jsonl",
+    "sha256": "002ec6021ffa8c65499c421b1318f8ebc0ae5f1d7993c4a05147046f2690918f"
+   },
+   "vt": {
+    "file": "vt-none-merged.jsonl",
+    "sha256": "a2b5b1a3340eb5c1593dc5f904faa25055120aa556fcf6bd19a8804d90924f5d"
+   }
+  }
+ }
+}

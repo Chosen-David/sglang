@@ -64,6 +64,24 @@
 #       由内核自动释放，无陈旧锁需人工清理；仅验证过本机文件系统，
 #       跨宿主共享文件系统（NFS 等）的 flock 语义未验证，不构成跨宿主
 #       互斥承诺。
+# ===== E116h（GPT 1429 审计 042/043/044 三项修复）=====
+#   TL-RULER-LOCK-SYMLINK-042（锁键 realpath(out) 在 out 初始为 symlink 时
+#       首次 replace 后漂移，第二发布者取得另一把锁）→ ①四条目标
+#       （out/MD/manifest/receipt）任一为 symlink 即 fail-closed（锁内
+#       lstat 复核二次）；②锁键改为 realpath(父目录) + lexical basename
+#       ——最终分量会被 replace 改写，只解析父目录，键不随发布漂移；
+#   TL-RULER-LOCK-WRITESET-043（锁只按 out，--manifest-out 可独立共享
+#       → 不同 out 的两次发布并发覆盖同一 manifest 且均返回成功）→
+#       完整写集锁：out/md/manifest/receipt 四条目标各取一把锁，全局
+#       按锁键排序有序获取、逆序释放（任意两个发布写集只要共享任一
+#       目标即共享该目标的锁 → 串行化；统一排序序获取避免死锁）；
+#       写集内两条目标解析到同一锁键（symlink 父目录别名）→ fail-closed；
+#   TL-RULER-ROLLBACK-RECOVERY-044（备份清理在 committed=True 之前，
+#       清理 OSError 触发锁外部分回滚删除仅存备份 → 混合代际不可恢复）→
+#       时序重排：四镜像安装 + SHA 终验完成后先在锁内置 committed=True
+#       再做备份清理；清理降级为提交后 best-effort GC（失败只记
+#       rollback_state["gc_pending"] + stderr warning，不回滚、不影响
+#       提交语义；进程后续若落 failure receipt 则 gc_pending 一并记录）。
 # 用法（单臂单 root）：
 #   python -u benchmark/RULER/score_ruler_formal.py \
 #     --root exp/results_ruler/e109_full_Qwen3-8B/L32768 \
@@ -179,20 +197,44 @@ def _atomic_install(src, dst, run_id):
         raise
 
 
+def _lock_file_for(target):
+    """E116h（042/043）：单目标的稳定锁键 = realpath(父目录) + lexical
+    basename + ".lock"。最终分量（文件名）会被发布的 os.replace 改写，
+    realpath(整个路径) 在「目标初始是 symlink / 不存在」与「发布后是
+    普通文件」两种状态之间会漂移（042 的锁键漂移根因），故只解析父
+    目录——symlink 父目录的别名路径（alias/out.json 与 real/out.json）
+    归一到同一把锁，而文件名本身不受任何发布操作影响。"""
+    return os.path.join(
+        os.path.realpath(os.path.dirname(os.path.abspath(target)) or "."),
+        os.path.basename(target)) + ".lock"
+
+
 def _locked_publish(mirrors, run_id, out_path, backups, published,
                     rollback_state):
-    """E116g（040）：同一 --out 的并发发布互斥（进程间独占锁）。
+    """E116g（040）+ E116h（042/043/044）：完整写集的并发发布互斥。
 
-    以 realpath(abspath(--out)) 为稳定键建立排他锁：fcntl.flock
-    LOCK_EX（阻塞等待），锁文件 {out}.lock 与目标同目录。锁覆盖完整
-    发布事务——「读取/建立备份 → 四镜像安装 → SHA 终验 → 备份清理
-    或回滚」；备份必须在获得锁之后才创建（审计建议 1：备份与安装
-    不可分割，否则另一发布者可在备份与安装之间完成整轮发布，留下
-    持久混合代际）。
+    锁协议（040 起覆盖、042/043 修正键与写集）：
+      - 锁覆盖完整发布事务——「读取/建立备份 → 四镜像安装 → SHA 终验
+        → 提交置位 → 备份 GC」；备份必须在获得锁之后才创建（审计建议
+        1：备份与安装不可分割）；
+      - 042：四条目标（out/MD/manifest/receipt）任一为符号链接 →
+        fail-closed（获锁前拒绝一次，获锁后 lstat 复核一次）；锁键只
+        解析父目录（见 _lock_file_for），不随首次 replace 漂移；
+      - 043：完整写集锁——每条目标各取一把 fcntl.flock LOCK_EX 排他
+        锁（阻塞等待），全局按锁键排序有序获取、逆序释放。任意两个
+        发布写集只要共享任一目标（同 --out、不同 --out 共享
+        --manifest-out、symlink 父目录别名）即共享该目标的锁 → 串行
+        化；统一排序序获取避免死锁。写集内两条目标解析到同一锁键 →
+        别名冲突，fail-closed；
+      - 044：四镜像安装 + SHA 终验成功即事务提交（committed=True 在
+        锁内、备份清理之前置位）；备份清理是提交后的 best-effort GC，
+        失败只记 gc_pending + stderr warning，不回滚已提交代际。
 
-    安装后新增 SHA 终验：每个已安装镜像与 generation 规范文件逐位
-    一致；终验失败 → 锁内回滚（旧产物逐位还原，首轮则删除新镜像）
-    后向上抛出，由外层 except 统一写 failure receipt。
+    安装后 SHA 终验：每个已安装镜像与 generation 规范文件逐位一致；
+    终验失败 → 锁内回滚（旧产物逐位还原，首轮则删除新镜像；回滚二次
+    失败的镜像记入 rollback_state["errors"] 并使整体以非零退出 loudly
+    失败——不静默声称成功）后向上抛出，由外层 except 统一写 failure
+    receipt。
 
     锁语义边界（如实声明，不冒充跨宿主保障）：
       - flock 是咨询锁，仅约束同样走本入口的发布者；
@@ -202,13 +244,34 @@ def _locked_publish(mirrors, run_id, out_path, backups, published,
         （NFS 等）的 flock 语义有坑且未验证，本锁不构成跨宿主互斥
         承诺（多机发布到共享路径须另行协调）。
     """
-    lock_path = os.path.realpath(out_path) + ".lock"
-    d = os.path.dirname(lock_path)
-    if d:
-        os.makedirs(d, exist_ok=True)
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    # ---- 042：发布前 symlink 拒绝（任何一条目标是符号链接都不允许
+    #      发布——锁键 canonicalization 依赖「最终分量不是 symlink」，
+    #      且对 symlink 的 replace 语义本身有歧义）----
+    for _, dst in mirrors:
+        if os.path.islink(dst):
+            _fail(f"发布目标 {dst} 是符号链接——fail closed（042：symlink "
+                  f"目标会使锁键漂移且替换语义歧义；请发布到普通文件路径）")
+    # ---- 043：完整写集锁键（out/md/manifest/receipt 各一把，去重排序）----
+    lock_paths = sorted({_lock_file_for(dst) for _, dst in mirrors})
+    if len(lock_paths) != len(mirrors):
+        _fail(f"发布写集存在路径别名：{len(mirrors)} 条目标解析到 "
+              f"{len(lock_paths)} 把锁键（symlink 父目录/路径别名指向同一"
+              f"物理文件）——两条镜像会写同一目标，fail closed（043）")
+    fds = []
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)   # 阻塞等待；内核级自动释放
+        for lp in lock_paths:
+            d = os.path.dirname(lp)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            fd = os.open(lp, os.O_CREAT | os.O_RDWR, 0o644)
+            fds.append(fd)
+            fcntl.flock(fd, fcntl.LOCK_EX)   # 阻塞等待；内核级自动释放
+        # ---- 042：获锁后 lstat 复核（锁外窗口内外部实体可能已把目标
+        #      换成 symlink）----
+        for _, dst in mirrors:
+            if os.path.islink(dst):
+                _fail(f"获锁后复核发现发布目标 {dst} 是符号链接——"
+                      f"fail closed（042）")
         # ---- 备份必须在获得锁后创建（040）----
         for _, dst in mirrors:
             backups[dst] = _backup_public(dst, run_id)
@@ -242,22 +305,35 @@ def _locked_publish(mirrors, run_id, out_path, backups, published,
                 done=True, n_restored=len(published) - len(errors),
                 errors=errors)
             raise
-        # ---- 全部镜像安装 + 终验成功 → 提交完成，锁内清理备份 ----
+        # ---- 044：四镜像安装 + SHA 终验成功 → 事务即提交。committed
+        #      在锁内、备份清理之前置位——备份删除属提交后的垃圾回收，
+        #      其失败不得触发回滚（旧顺序：清理失败 → committed 仍
+        #      False → 锁外部分回滚删除仅存备份 → 混合代际不可恢复）。
+        #      同时该标记使锁释放后 main() 的报告型 I/O 失败（stdout
+        #      broken pipe 等）不会被误判为发布失败（kimi3 1404）----
+        rollback_state["committed"] = True
+        # ---- 备份清理 = 提交后 best-effort GC（044）：失败只记
+        #      gc_pending + stderr warning，不回滚、不影响提交语义 ----
+        gc_pending = []
         for dst, bak in backups.items():
             if bak is not None:
                 try:
                     os.remove(bak)
                 except FileNotFoundError:
                     pass
-        # ---- 事务已提交（kimi3 1404）：置 committed 标记，使锁释放后
-        #      main() 的报告型 I/O 失败（stdout broken pipe 等）不会被
-        #      误判为发布阶段失败而回滚/删除已发布产物与 generation ----
-        rollback_state["committed"] = True
+                except OSError as oe:
+                    gc_pending.append(f"{bak}: {oe}")
+        if gc_pending:
+            rollback_state["gc_pending"] = gc_pending
+            print(f"[formal] WARN 备份清理失败（发布已提交，残留待 GC）: "
+                  f"{gc_pending}", file=sys.stderr)
     finally:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        finally:
-            os.close(fd)
+        # ---- 043：逆序释放全部写集锁 ----
+        for fd in reversed(fds):
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
 
 
 def _stamp_or_copy(src, dst, task, stamp):
@@ -743,10 +819,17 @@ def main():
                 except OSError as oe:
                     rollback_errors.append(f"{dst}: {oe}")
         # 残留备份/临时文件清理（_atomic_install 失败时已自清理 tmp，
-        # 这里对全部公开路径兜底）
+        # 这里对全部公开路径兜底）。044：回滚存在错误（混合代际被
+        # loudly 拒绝）时，剩余备份是旧代际的唯一恢复路径——保留并在
+        # failure receipt 记录 retained_backups，不得删除
+        keep_backups = bool(rollback_errors)
         for dst in backups:
             bak = backups[dst]
             if bak is not None and os.path.exists(bak):
+                if keep_backups:
+                    rollback_state.setdefault(
+                        "retained_backups", []).append(bak)
+                    continue
                 try:
                     os.remove(bak)
                 except OSError:
@@ -773,6 +856,9 @@ def main():
                 # 本 failure receipt 记录的是发布后的报告型错误而非发布
                 # 失败——产物与 generation 均已保留，消费以 receipt 为准
                 "publish_committed": bool(rollback_state.get("committed")),
+                "gc_pending": rollback_state.get("gc_pending", []),
+                # 044：回滚有错误时保留的备份（旧代际唯一恢复路径）
+                "retained_backups": rollback_state.get("retained_backups", []),
                 "rollback": {
                     "attempted": bool(published) and
                     not rollback_state.get("committed"),
@@ -792,10 +878,13 @@ def main():
                     "broken pipe）——产物已保留，请以最新 *.receipt.json "
                     "为准"
                     if rollback_state.get("committed") else
-                    "本轮失败，未发布任何产物（发布阶段失败时已回滚"
-                    "全部已替换的公开镜像至旧代际）；输出路径下既有"
-                    "产物（如有）属于上一轮成功运行，请以最新 "
-                    "*.receipt.json 为准"),
+                    ("本轮失败且未完整回滚，以下公开镜像未还原到旧代际"
+                     f"（混合代际，loudly 拒绝，须人工核对）: {rollback_errors}"
+                     if rollback_errors else
+                     "本轮失败，未发布任何产物（发布阶段失败时已回滚"
+                     "全部已替换的公开镜像至旧代际）；输出路径下既有"
+                     "产物（如有）属于上一轮成功运行，请以最新 "
+                     "*.receipt.json 为准")),
                 "staging_cleaned": True,
                 "generation_cleaned": not bool(
                     rollback_state.get("committed")),

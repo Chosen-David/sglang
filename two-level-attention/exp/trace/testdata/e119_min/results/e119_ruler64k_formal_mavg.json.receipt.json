@@ -1,0 +1,112 @@
+{
+ "run_id": "20261009120000-000001-0001",
+ "status": "success",
+ "generated": "2026-10-09T12:00:00",
+ "formal": {
+  "script": "benchmark/RULER/score_ruler_formal.py",
+  "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+ },
+ "scorer": {
+  "script": "benchmark/RULER/score_ruler.py",
+  "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+ },
+ "inputs": {
+  "root": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/pred_root/mavg",
+  "pred_postfix": "_1024",
+  "data_root": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root",
+  "expect_tasks": 4,
+  "min_samples": 3,
+  "run_identity": {
+   "data_root": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root",
+   "model_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/Qwen3-8B-fixture",
+   "yarn": true,
+   "yarn_factor": 2.0,
+   "extra_params": {
+    "far_method": "minmax",
+    "near_method": "avg",
+    "alpha": "0.25",
+    "beta": "0.125",
+    "gamma": "0.625"
+   },
+   "formal_script_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+   "scorer_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+   "note": "synthetic fixture：E119 最小脱敏产物（048①），全部行为合成数据；结构与真实 legacy 产物逐字段同构"
+  }
+ },
+ "outputs": {
+  "json": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/results/e119_ruler64k_formal_mavg.json",
+  "md": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/results/e119_ruler64k_formal_mavg.md",
+  "manifest": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/results/e119_ruler64k_formal_mavg.json.manifest.json",
+  "derived_dir": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/results/e119_ruler64k_formal_mavg.json.run-20261009120000-000001-0001"
+ },
+ "manifest_sha256": "f3cf9ce53e260ee00482a88a973de93e895439100f04ef7375ae3cfba6ace418",
+ "result_sha256": "ed66f38165579a4d4a65987843603ac711343524a1cef725ea2e706261197577",
+ "source_data_sha256": {
+  "65536/niah_single_1": {
+   "path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root/65536/niah_single_1.jsonl",
+   "sha256": "6c25227dd66a098b8c4ccd9bda7267aa18053f33e46424bd3308ec956d6c60fd"
+  },
+  "65536/niah_multiquery": {
+   "path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root/65536/niah_multiquery.jsonl",
+   "sha256": "46dd0c857b34c7074afc766647504286e062fe37e448f0939f7dc36512fc7d14"
+  },
+  "65536/cwe": {
+   "path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root/65536/cwe.jsonl",
+   "sha256": "5ac408ac45d334c4568019305d200e2acdf4e7a42bc5dfe7f3a13fd96afca1c0"
+  },
+  "65536/vt": {
+   "path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root/65536/vt.jsonl",
+   "sha256": "bf4cce2b47d7e675996119a295ffef157005c6e46d6e1fb45060c411e4bd9144"
+  }
+ },
+ "cells": {
+  "L65536/tli_64_128_1024_c4_A": {
+   "length_dir": 65536,
+   "identity_mode": "legacy-partial",
+   "tasks": {
+    "niah_single_1": {
+     "n": 3,
+     "best_file": "niah_single_1-tli_64_128_1024_c4_A-10090633.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/pred_root/mavg/L65536/pred_1024/niah_single_1-tli_64_128_1024_c4_A-10090633.jsonl",
+     "source_sha256": "299262471d8e860de4737035fc9f920d46fcb2377250d32a8b19dff0e8b762cb",
+     "derived_sha256": "6172f56eb59e1158d857934c19e5ef927080021f73ac822f21f53a1d35334685"
+    },
+    "niah_multiquery": {
+     "n": 3,
+     "best_file": "niah_multiquery-tli_64_128_1024_c4_A-10090633.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/pred_root/mavg/L65536/pred_1024/niah_multiquery-tli_64_128_1024_c4_A-10090633.jsonl",
+     "source_sha256": "59003ca1a75939e2a96292ff5a7585c805fd50e3683147a5ce91d79f7cd1e132",
+     "derived_sha256": "ba8b873ea5729cbbb249ce0af7e40b1e8a0447badf3789595b948c28ec0c9dea"
+    },
+    "cwe": {
+     "n": 3,
+     "best_file": "cwe-tli_64_128_1024_c4_A-10090633.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/pred_root/mavg/L65536/pred_1024/cwe-tli_64_128_1024_c4_A-10090633.jsonl",
+     "source_sha256": "2aba1ab10976c2035667c2abed49a9a31f415481944969c1fb148177a7d35258",
+     "derived_sha256": "45a9323ee6f6a7bb081b25122837399f3c266334245ae63094c9bc128902091f"
+    },
+    "vt": {
+     "n": 3,
+     "best_file": "vt-tli_64_128_1024_c4_A-10090633.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/pred_root/mavg/L65536/pred_1024/vt-tli_64_128_1024_c4_A-10090633.jsonl",
+     "source_sha256": "5cd7f4a89e7ee8fee9c797531e851f2e7922c09bcac128a31abb16c83eb3c663",
+     "derived_sha256": "cb007b9b69ba26eba741bb0ccaa1fe6d8ae227a14545a2072f513655d1c021cf"
+    }
+   }
+  }
+ },
+ "avg": {
+  "L65536/tli_64_128_1024_c4_A": 40.0
+ },
+ "legacy_stamp": {
+  "n_stamped": 4,
+  "invariant_fields": [
+   "pred",
+   "answers",
+   "length",
+   "budget"
+  ],
+  "invariant_asserted": true,
+  "note": "synthetic fixture：补刻只发生在派生副本；源文件 SHA256 记录于 cells[].tasks[].source_sha256"
+ }
+}

@@ -32,6 +32,25 @@
       "method",
       "near_method"
     ],
+    "arm_contract": {
+      "mavg": {
+        "far_method": "minmax",
+        "near_method": "avg",
+        "alpha": "0.25",
+        "beta": "0.125",
+        "gamma": "0.625"
+      },
+      "aavg": {
+        "far_method": "avg",
+        "near_method": "avg",
+        "alpha": "0",
+        "beta": "0",
+        "gamma": "0"
+      },
+      "FullKV": {
+        "method": "none"
+      }
+    },
     "per_arm_treatment": {
       "mavg": {
         "alpha": "0.25",
@@ -66,17 +85,41 @@
         "scorer_sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99"
       }
     },
-    "script_sha_policy": "warn-only：formal/scorer 脚本 SHA 的身份语义是评分口径而非数据身份（后续脚本修复会使旧产物 SHA 与新脚本不同），记录差异不硬拒",
-    "script_sha_warn": false,
+    "script_sha_policy": "fail-closed：三臂 formal/scorer 脚本 SHA 必须完全一致才产出排名（评分实现差异可改变得分与排名；旧产物因脚本修复产生 SHA 差异时，须等价迁移证明或同一 scorer 重评）",
+    "script_sha_identical": true,
+    "per_arm_receipt_protocol": {
+      "mavg": {
+        "publish_protocol": null,
+        "legacy_protocol": true,
+        "generation_dir_source": "constructed"
+      },
+      "FullKV": {
+        "publish_protocol": null,
+        "legacy_protocol": true,
+        "generation_dir_source": "constructed"
+      },
+      "aavg": {
+        "publish_protocol": null,
+        "legacy_protocol": true,
+        "generation_dir_source": "constructed"
+      }
+    },
+    "protocol_note": "legacy_protocol=true 表示该臂产物生成于旧发布协议（早于 E116f generation 单指针与 E116g 并发发布锁）；本 summary 声明数据身份门禁已执行并通过，不声称发布锁协议作用于该批数据的生成",
     "all_arms_data_identity_identical": true
   },
   "closure": {
     "three_arm_receipts_success": true,
     "receipt_result_sha_matches": true,
     "receipt_manifest_sha_matches": true,
-    "all_cells_n100": true,
+    "n_ids_lengths_answers_sha_closure": true,
+    "task_set_closure": true,
+    "min_samples_enforced": true,
+    "arm_contract_enforced": true,
+    "publish_protocol_bound": true,
+    "scorer_script_sha_identical": true,
     "single_cell_enforced": true,
     "source_sha_stable": true,
+    "derived_sha_stable": true,
     "crossarm_identity_gate": true
   },
   "arms": {
@@ -98,7 +141,8 @@
         "vt": 32.0
       },
       "delta_vs_fullkv": 0.88,
-      "ruler32_official": 59.99
+      "ruler32_official": 59.99,
+      "legacy_protocol": true
     },
     "FullKV": {
       "avg": 48.54,
@@ -118,7 +162,8 @@
         "vt": 32.8
       },
       "delta_vs_fullkv": 0.0,
-      "ruler32_official": 59.38
+      "ruler32_official": 59.38,
+      "legacy_protocol": true
     },
     "aavg": {
       "avg": 47.51,
@@ -138,11 +183,12 @@
         "vt": 28.6
       },
       "delta_vs_fullkv": -1.03,
-      "ruler32_official": 57.33
+      "ruler32_official": 57.33,
+      "legacy_protocol": true
     }
   },
   "verdict": {
     "ruler64k_ranking": "mavg 49.42 > FullKV 48.54 > aavg 47.51",
-    "conclusion": "64K 正式口径下 mavg(+0.88) 超 FullKV、aavg(−1.03) 落后；与 32K 正式排序（mavg 59.99 > FullKV 59.38 > aavg 57.33）方向一致——RULER 32K/64K 两档 mavg 冠军稳定，128K 待全齐后同口径收口（E116g 起收口同时启用跨臂身份门禁 + 正式入口并发发布锁）。"
+    "conclusion": "64K 正式口径下 mavg（vs FullKV +0.88）居首、aavg（-1.03）居末，完整排序 mavg 49.42 > FullKV 48.54 > aavg 47.51；与 32K 正式排序（mavg 59.99 > FullKV 59.38 > aavg 57.33）方向一致——RULER 32K/64K 两档 mavg 冠军稳定，128K 待全齐后同口径收口（三臂 receipt 均为 legacy 发布协议（生成早于 E116f/E116g 发布锁），本 summary 只声明：数据身份门禁（task/ID/答案/源数据 SHA/评分口径闭包）已对这些文件执行并通过；不声称发布锁协议作用于该批数据的生成）。"
   }
 }

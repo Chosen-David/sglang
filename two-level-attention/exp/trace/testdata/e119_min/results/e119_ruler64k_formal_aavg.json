@@ -1,0 +1,39 @@
+{
+ "scores": {
+  "L65536/tli_64_128_1024_c4_A": {
+   "niah_single_1": 30.0,
+   "niah_multiquery": 30.0,
+   "cwe": 30.0,
+   "vt": 30.0
+  }
+ },
+ "n": {
+  "L65536/tli_64_128_1024_c4_A": {
+   "niah_single_1": 3,
+   "niah_multiquery": 3,
+   "cwe": 3,
+   "vt": 3
+  }
+ },
+ "incomplete_cells": [],
+ "sources": {
+  "L65536/tli_64_128_1024_c4_A": {
+   "niah_single_1": {
+    "file": "niah_single_1-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "9aedace3bf66b5795100587818733674a5b707d502ac8758718dca38c0e60636"
+   },
+   "niah_multiquery": {
+    "file": "niah_multiquery-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "a4067834c9bac5fcee1a59449c14f5f4d7a9b7652c237dde030341fac9a5d027"
+   },
+   "cwe": {
+    "file": "cwe-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "741ffca2457c25b22a7d8e93e86dc5ddd209bb39c9e096456e2d289adb0ed8fe"
+   },
+   "vt": {
+    "file": "vt-tli_64_128_1024_c4_A-merged.jsonl",
+    "sha256": "c8e46894e76f75ff2b6493c743dd0b21ef0558e9024fe00dc2ab9404601d89e9"
+   }
+  }
+ }
+}

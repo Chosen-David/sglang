@@ -1,30 +1,41 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""E116g 红绿测试（GPT 1326 审计 TL-RULER-CROSSARM-IDENTITY-041）。
+"""E119 跨臂身份门禁红绿测试（041 + E116h 045/046/047/048①）。
 
-041：E119 汇总逐臂验 SHA/n 但不比较三臂样本 ID、答案、长度和源数据
-身份——三份各自「内部闭合」但样本不同的结果仍会被输出为公平排名。
+048① 可移植性：本测试不再依赖仓库外的生产 prediction JSONL——改用已入库
+的全合成最小 fixture（exp/trace/testdata/e119_min/，由
+gen_e119_min_fixture.py 生成：4 任务 × 3 行/任务、三臂 treatment 与
+ARM_CONTRACT 逐字段一致、全部 SHA 闭合、legacy receipt），干净检出即可
+运行。analyzer 通过 --results-dir/--pred-root 只读指向临时副本，fixture
+与生产数据零写入。
 
-测试策略：把已提交的 64K 三臂真实产物（result/manifest/receipt +
-generation 派生目录）复制到临时目录，在副本上做「单臂篡改 + 同步修补
-receipt 闭合」模拟审计场景（每臂内部闭合但跨臂身份错配）：
+用例矩阵：
 
-  P1 正例    三臂真实产物原样副本 → 汇总通过，summary 生成且含
-             identity_gate 段，数值 49.42/48.54/47.51 逐位不变；
-  N1 _id     篡改单臂 manifest 一个 task 的 ids[0] → 拒绝（exit≠0）；
-  N2 answers 篡改单臂 manifest 一个 answers_sha 值 → 拒绝；
-  N3 length  篡改单臂 manifest 一个 lengths[k] → 拒绝；
-  N4 源数据  篡改单臂 manifest source_data_sha256 一个 SHA → 拒绝；
-  N5 模型    篡改单臂 manifest run_identity.model_path（+receipt 同步）
-             → 拒绝；
-  N6 多 cell 单臂 result JSON 塞入第二个 cell key（+receipt result
-             SHA 同步）→ fail-closed 拒绝（next(iter) 静默取首键修复）；
-  W1 脚本SHA 篡改单臂 manifest formal_script_sha256 → 仅 warn 不拒
-             （评分口径非数据身份），summary 记录三臂各自 SHA。
+  P1 正例      fixture 三臂原样 → 汇总通过，arms 数值 40.0/35.0/30.0，
+               identity_gate 段 + arm_contract + 逐臂 legacy_protocol 标注，
+               结论动态生成（mavg 冠军 +5.00 / aavg 居末 -5.00）；
+  N1 _id       篡改单臂 manifest 一个 task 的 ids[0] → 拒绝（exit≠0）；
+  N2 answers   篡改单臂 manifest 一个 answers_sha 值 → 拒绝；
+  N3 length    篡改单臂 manifest 一个 lengths[k] → 拒绝；
+  N4 源数据    篡改单臂 manifest source_data_sha256 一个 SHA → 拒绝；
+  N5 模型      篡改单臂 manifest run_identity.model_path（+receipt 同步）
+               → 拒绝；
+  N6 多 cell   单臂 result JSON 塞入第二个 cell key（+receipt result
+               SHA 同步）→ fail-closed 拒绝（next(iter) 静默取首键修复）；
+  N7 treatment 交换 mavg/aavg 的 treatment（046②：把 aavg 配置冠到 mavg
+               臂名下，receipt 同步闭合）→ arm 契约 fail-closed 拒绝；
+  N8 脚本SHA   篡改单臂 formal_script_sha256（047：评分口径公平）→
+               fail-closed 拒绝（不再是 warn-only）；
+  P2 结论动态  篡改 aavg result 分数使其反超（+receipt SHA 同步）→
+               通过，但 verdict.ruler64k_ranking/conclusion 必须跟随新
+               排序（aavg 冠军 +10.00），不得残留硬编码 mavg 冠军文本
+               （046④）；
+  O1 python -O 两类篡改（receipt SHA 不一致 / 跨臂 answers_sha）在
+               python -O 下重跑 → 仍非零退出且不覆盖旧 summary
+               （045：门禁全部为显式条件 + _fail，assert 零依赖）。
 
 所有负例还断言「不覆盖旧 summary」：失败运行前放置哨兵 summary 文件，
-失败后内容逐位不变。生产目录全程零写入（--results-dir 指向临时副本；
-③ 的源/派生磁盘 SHA 复核只读生产 pred 目录）。
+失败后内容逐位不变。
 
 用法：
   python3 exp/trace/test_e119_crossarm_identity.py
@@ -39,13 +50,13 @@ import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-RESULTS = os.path.join(REPO, "exp", "trace", "results")
+FIXTURE = os.path.join(REPO, "exp", "trace", "testdata", "e119_min")
+GEN_SCRIPT = os.path.join(FIXTURE, "gen_e119_min_fixture.py")
 SCRIPT = os.path.join(REPO, "exp", "trace",
                       "analyze_e119_ruler64k_formal.py")
-ARMS = {"mavg": "e119_ruler64k_formal_mavg.json",
-        "FullKV": "e119_ruler64k_formal_fullkv.json",
-        "aavg": "e119_ruler64k_formal_aavg.json"}
 SUMMARY = "e119_ruler64k_formal_summary.json"
+# fixture 合成分数（与生产排序方向一致：mavg > FullKV > aavg）
+FIXTURE_AVG = {"mavg": 40.0, "FullKV": 35.0, "aavg": 30.0}
 SENTINEL = {"sentinel": "old-summary-must-not-be-overwritten"}
 
 PASS = 0
@@ -60,34 +71,62 @@ def _sha(path):
     return h.hexdigest()
 
 
-def _copy_fixture(base):
-    """三臂真实产物完整副本（含 generation 派生目录）。"""
-    for fn in ARMS.values():
-        for p in [os.path.join(RESULTS, fn),
-                  os.path.join(RESULTS, fn + ".manifest.json"),
-                  os.path.join(RESULTS, fn + ".receipt.json")]:
-            shutil.copyfile(p, os.path.join(base, os.path.basename(p)))
-        for run_dir in glob.glob(os.path.join(RESULTS, fn + ".run-*")):
-            shutil.copytree(run_dir, os.path.join(
-                base, os.path.basename(run_dir)))
+def _ensure_fixture(root_tmp):
+    """048①：fixture 源目录——已入库则直接用；缺失（异常检出）则用
+    已入库生成器现场重建到临时目录，保证干净路径可跑。"""
+    probe = os.path.join(FIXTURE, "results",
+                         "e119_ruler64k_formal_mavg.json.receipt.json")
+    if os.path.isfile(probe):
+        return FIXTURE
+    dest = os.path.join(root_tmp, "fixture_regen")
+    os.makedirs(dest, exist_ok=True)
+    r = subprocess.run([sys.executable, GEN_SCRIPT, dest],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, (r.returncode, r.stdout[-500:], r.stderr[-500:])
+    return dest
 
 
-def _run(base):
-    """对副本目录跑汇总脚本（--results-dir 指向副本）。"""
-    return subprocess.run(
-        [sys.executable, SCRIPT, "--results-dir", base],
-        capture_output=True, text=True, cwd=REPO)
+def _copy_fixture(base, fixture):
+    """三臂产物完整副本（results 三件套 + generation 派生目录 + 源预测）。"""
+    res = os.path.join(base, "results")
+    shutil.copytree(os.path.join(fixture, "results"), res)
+    shutil.copytree(os.path.join(fixture, "pred_root"),
+                    os.path.join(base, "pred_root"))
+
+
+def _run(base, opt_o=False):
+    """对副本目录跑汇总脚本（--results-dir/--pred-root 只读指向副本）。"""
+    cmd = [sys.executable] + (["-O"] if opt_o else []) + [
+        SCRIPT, "--results-dir", os.path.join(base, "results"),
+        "--pred-root", os.path.join(base, "pred_root")]
+    return subprocess.run(cmd, capture_output=True, text=True, cwd=REPO)
+
+
+def _manifest_path(base, arm):
+    return os.path.join(base, "results",
+                        f"e119_ruler64k_formal_{arm.lower()}.json"
+                        ".manifest.json")
+
+
+def _receipt_path(base, arm):
+    return _manifest_path(base, arm).replace(".manifest.json",
+                                             ".receipt.json")
+
+
+def _result_path(base, arm):
+    return os.path.join(base, "results",
+                        f"e119_ruler64k_formal_{arm.lower()}.json")
 
 
 def _tamper_manifest(base, arm, mutate, also_receipt_identity=None):
     """单臂篡改 + 同步修补 receipt 闭合（模拟「内部闭合但身份错配」）。
 
     mutate(manifest) 就地修改 manifest；随后重写 receipt.manifest_sha256
-    使 receipt↔manifest SHA 闭合——确保拒绝来自跨臂身份门禁而非
+    使 receipt↔manifest SHA 闭合——确保拒绝来自跨臂身份/契约门禁而非
     receipt 闭合检查。also_receipt_identity(receipt) 可同步篡改
     receipt.inputs.run_identity。"""
-    mp = os.path.join(base, ARMS[arm] + ".manifest.json")
-    rp = os.path.join(base, ARMS[arm] + ".receipt.json")
+    mp = _manifest_path(base, arm)
+    rp = _receipt_path(base, arm)
     m = json.load(open(mp))
     mutate(m)
     json.dump(m, open(mp, "w"), indent=1, ensure_ascii=False)
@@ -99,45 +138,67 @@ def _tamper_manifest(base, arm, mutate, also_receipt_identity=None):
 
 
 def _place_sentinel_summary(base):
-    p = os.path.join(base, SUMMARY)
+    p = os.path.join(base, "results", SUMMARY)
     json.dump(SENTINEL, open(p, "w"))
     return p
 
 
-def _expect_reject(base, tag):
-    """负例断言：exit≠0 + 错误信息含 041 门禁标记 + 旧 summary 未被覆盖。"""
+def _expect_reject(base, tag, opt_o=False, needle=None):
+    """负例断言：exit≠0 + 门禁标记 + 旧 summary 未被覆盖。"""
     sp = _place_sentinel_summary(base)
-    r = _run(base)
+    r = _run(base, opt_o=opt_o)
     assert r.returncode != 0, \
         f"{tag}: 篡改后仍 exit=0（跨臂身份门禁失效）：\n{r.stdout[-800:]}"
     assert ("E119-GATE-FAIL" in r.stderr) or ("跨臂" in r.stderr) or \
            ("cell" in r.stderr), (tag, r.stderr[-800:])
+    if needle is not None:
+        assert needle in r.stderr, (tag, needle, r.stderr[-900:])
     cur = json.load(open(sp))
     assert cur == SENTINEL, f"{tag}: 失败运行覆盖了旧 summary"
-    print(f"  {tag} PASS  exit={r.returncode}，旧 summary 未覆盖；"
+    mode = "python -O " if opt_o else ""
+    print(f"  {tag} PASS  {mode}exit={r.returncode}，旧 summary 未覆盖；"
           f"拒绝原因: {r.stderr.strip().splitlines()[-1][:110]}")
     return True
 
 
 def test_P1_positive(base):
-    """P1：三臂真实产物原样副本 → 通过 + identity_gate 段 + 数值不变。"""
+    """P1：fixture 三臂原样 → 通过 + identity_gate/arm 契约 + 数值不变。"""
     r = _run(base)
     assert r.returncode == 0, (r.returncode, r.stdout[-1500:],
                                r.stderr[-1000:])
-    s = json.load(open(os.path.join(base, SUMMARY)))
-    assert {a: v["avg"] for a, v in s["arms"].items()} == \
-        {"mavg": 49.42, "FullKV": 48.54, "aavg": 47.51}, s["arms"]
+    s = json.load(open(os.path.join(base, "results", SUMMARY)))
+    assert {a: v["avg"] for a, v in s["arms"].items()} == FIXTURE_AVG, \
+        s["arms"]
+    assert {a: v["legacy_protocol"] for a, v in s["arms"].items()} == \
+        {"mavg": True, "FullKV": True, "aavg": True}, s["arms"]
     ig = s["identity_gate"]
     assert ig["protocol"] == "e116g-crossarm-identity-v1"
     assert ig["all_arms_data_identity_identical"] is True
     assert len(ig["common_identity_digest"]) == 64
-    assert ig["treatment_whitelist"] == ["alpha", "beta", "far_method",
-                                         "gamma", "method", "near_method"]
-    assert ig["per_arm_treatment"]["FullKV"] == {"method": "none"}
-    assert ig["per_arm_treatment"]["mavg"]["gamma"] == "0.625"
-    assert s["closure"]["crossarm_identity_gate"] is True
-    print("P1 PASS  三臂真实产物副本 → 汇总通过；identity_gate 段生成；"
-          "avg 49.42/48.54/47.51 逐位不变；treatment 白名单逐臂记录")
+    assert ig["script_sha_identical"] is True
+    # 046②：arm 契约逐字段入 summary，且 per_arm_treatment 与契约相等
+    assert ig["arm_contract"]["mavg"] == {
+        "far_method": "minmax", "near_method": "avg",
+        "alpha": "0.25", "beta": "0.125", "gamma": "0.625"}
+    assert ig["arm_contract"]["FullKV"] == {"method": "none"}
+    for arm, treat in ig["per_arm_treatment"].items():
+        assert treat == ig["arm_contract"][arm], (arm, treat)
+    # 046③：legacy receipt 显式标注，不得声称发布锁协议已作用
+    for arm, proto in ig["per_arm_receipt_protocol"].items():
+        assert proto["legacy_protocol"] is True, (arm, proto)
+        assert proto["publish_protocol"] is None, (arm, proto)
+    assert "不声称" in ig["protocol_note"]
+    # 046④：结论从结构化数值动态生成（fixture 口径 mavg +5.00 冠军）
+    assert s["identity"]["samples_per_task"] == 3
+    assert s["identity"]["tasks"] == 4
+    assert s["verdict"]["ruler64k_ranking"] == \
+        "mavg 40.0 > FullKV 35.0 > aavg 30.0"
+    assert "mavg（vs FullKV +5.00）居首" in s["verdict"]["conclusion"]
+    assert "aavg（-5.00）居末" in s["verdict"]["conclusion"]
+    assert "方向一致" in s["verdict"]["conclusion"]
+    print("P1 PASS  fixture 三臂 → 汇总通过；arms 40.0/35.0/30.0；"
+          "arm 契约逐臂记录且与 treatment 相等；三臂 legacy_protocol "
+          "如实标注；结论从结构化 ranking 动态生成")
 
 
 def test_N1_tamper_id(base):
@@ -187,8 +248,8 @@ def test_N5_tamper_model_identity(base):
 def test_N6_multi_cell(base):
     """N6（041 建议 4）：单臂 result JSON 多 cell → fail-closed 拒绝
     （修 next(iter(d["n"])) 静默取首键假设 bug）。"""
-    jp = os.path.join(base, ARMS["FullKV"])
-    rp = os.path.join(base, ARMS["FullKV"] + ".receipt.json")
+    jp = _result_path(base, "FullKV")
+    rp = _receipt_path(base, "FullKV")
     d = json.load(open(jp))
     key = next(iter(d["n"]))
     fake = key + "_SECOND_L"
@@ -201,30 +262,93 @@ def test_N6_multi_cell(base):
     _expect_reject(base, "N6(multi-cell)")
 
 
-def test_W1_script_sha_warn(base):
-    """W1（041 建议 1 的脚本 SHA 语义）：单臂 formal_script_sha256 篡改
-    → 仅 warn 不硬拒（评分口径非数据身份），summary 记录三臂各自 SHA。"""
-    _tamper_manifest(base, "aavg", lambda m: m["run_identity"]
-                     .__setitem__("formal_script_sha256", "f" * 64))
-    r = _run(base)
-    assert r.returncode == 0, (r.returncode, r.stdout[-1000:],
-                               r.stderr[-800:])
-    assert "E119-WARN" in r.stderr, r.stderr[-800:]
-    s = json.load(open(os.path.join(base, SUMMARY)))
-    ig = s["identity_gate"]
-    assert ig["script_sha_warn"] is True
-    shas = {a: v["formal_script_sha256"]
-            for a, v in ig["per_arm_script_sha256"].items()}
-    assert shas["aavg"] == "f" * 64 and shas["mavg"] != "f" * 64
-    assert ig["all_arms_data_identity_identical"] is True
-    print("W1 PASS  脚本 SHA 差异仅 warn（stderr E119-WARN）不硬拒；"
-          "summary 记录三臂各自 formal/scorer SHA；数据身份门禁仍全过")
+def test_N7_treatment_swap(base):
+    """N7（046②）：交换 treatment——把 aavg 配置（far=avg/α=β=γ=0）
+    冠到 mavg 臂名下（manifest + receipt 同步闭合）→ arm 契约 fail-closed
+    拒绝。修复前唯一通道是篡改 treatment，此门禁使其不可达。"""
+    def mut(m):
+        m["run_identity"]["extra_params"] = {
+            "far_method": "avg", "near_method": "avg",
+            "alpha": "0", "beta": "0", "gamma": "0"}
+    def mut_rc(r):
+        r["inputs"]["run_identity"]["extra_params"] = {
+            "far_method": "avg", "near_method": "avg",
+            "alpha": "0", "beta": "0", "gamma": "0"}
+    _tamper_manifest(base, "mavg", mut, also_receipt_identity=mut_rc)
+    _expect_reject(base, "N7(treatment-swap)", needle="046②")
+
+
+def test_N8_script_sha_fail_closed(base):
+    """N8（047）：单臂 formal_script_sha256 篡改（+receipt 同步闭合）→
+    fail-closed 拒绝——评分口径公平从 warn-only 升格为硬门禁（数据身份
+    相同不足以证明 A/B/C 评分公平）。"""
+    # 注意：fixture 三臂 FORMAL_SHA 本身是 "f"*64，须篡成不同值才构成反例
+    def mut(m):
+        m["run_identity"]["formal_script_sha256"] = "a" * 64
+    def mut_rc(r):
+        r["inputs"]["run_identity"]["formal_script_sha256"] = "a" * 64
+    _tamper_manifest(base, "aavg", mut, also_receipt_identity=mut_rc)
+    _expect_reject(base, "N8(script-sha)", needle="047")
+
+
+def test_P2_dynamic_conclusion(base):
+    """P2（046④）：篡改 aavg 分数反超 mavg（+receipt result SHA 同步）→
+    门禁全过（分数属臂私有、receipt 闭合），但 verdict 必须跟随新排序
+    aavg 冠军 +10.00——验证结论从结构化数值动态生成，无硬编码残留。"""
+    jp = _result_path(base, "aavg")
+    rp = _receipt_path(base, "aavg")
+    d = json.load(open(jp))
+    key = next(iter(d["n"]))
+    d["scores"][key] = {t: 45.0 for t in d["scores"][key]}
+    json.dump(d, open(jp, "w"), indent=1, ensure_ascii=False)
+    r = json.load(open(rp))
+    r["result_sha256"] = _sha(jp)
+    json.dump(r, open(rp, "w"), indent=1, ensure_ascii=False)
+    rr = _run(base)
+    assert rr.returncode == 0, (rr.returncode, rr.stdout[-1200:],
+                                rr.stderr[-800:])
+    s = json.load(open(os.path.join(base, "results", SUMMARY)))
+    assert {a: v["avg"] for a, v in s["arms"].items()} == \
+        {"aavg": 45.0, "mavg": 40.0, "FullKV": 35.0}, s["arms"]
+    assert s["arms"]["aavg"]["delta_vs_fullkv"] == 10.0
+    assert s["verdict"]["ruler64k_ranking"] == \
+        "aavg 45.0 > mavg 40.0 > FullKV 35.0"
+    assert "aavg（vs FullKV +10.00）居首" in s["verdict"]["conclusion"]
+    assert "FullKV（+0.00）居末" in s["verdict"]["conclusion"]
+    # 排序与 32K 方向相反 → 结论如实写「不一致」，不得仍称 mavg 冠军稳定
+    assert "不一致" in s["verdict"]["conclusion"]
+    assert "mavg 冠军" not in s["verdict"]["conclusion"]
+    print("P2 PASS  分数改动 → verdict/conclusion 逐字跟随新排序"
+          "（aavg 冠军 +10.00、32K 方向不一致如实标注），无硬编码残留")
+
+
+def test_O1_python_opt(base):
+    """O1（045）：python -O 双跑负例——两类篡改在优化模式下仍必须
+    非零退出且不覆盖旧 summary（门禁全部为显式条件 + _fail，
+    assert 零依赖）。"""
+    # 子例 a：aavg result JSON 篡改但不修补 receipt → receipt SHA 不一致
+    jp = _result_path(base, "aavg")
+    d = json.load(open(jp))
+    key = next(iter(d["n"]))
+    d["scores"][key]["cwe"] = 13.97
+    json.dump(d, open(jp, "w"), indent=1, ensure_ascii=False)
+    _expect_reject(base, "O1a(python -O, receipt SHA)", opt_o=True)
+    # 子例 b：跨臂 answers_sha 篡改 + receipt 闭合 → 跨臂身份门禁
+    base_b = os.path.join(os.path.dirname(base), "fx_O1b")
+    os.makedirs(base_b)
+    _copy_fixture(base_b, _FIXTURE)
+    def mut(m):
+        m["tasks"]["cwe"]["answers_sha"]["cwe:0"] = "0123456789abcdef"
+    _tamper_manifest(base_b, "aavg", mut)
+    _expect_reject(base_b, "O1b(python -O, crossarm identity)", opt_o=True)
 
 
 def main():
-    global PASS
+    global PASS, _FIXTURE
     root_tmp = tempfile.mkdtemp(prefix="e119_ident_")
     try:
+        # 048①：fixture 源（已入库优先，异常检出时现场重建）
+        _FIXTURE = _ensure_fixture(root_tmp)
         # 每个用例独立新鲜副本：篡改互不累积，拒绝原因可精确归因到
         # 该用例注入的单字段错配（共享副本会让上一轮篡改先触发门禁）
         cases = [
@@ -235,17 +359,20 @@ def main():
             ("N4", test_N4_tamper_source_data_sha),
             ("N5", test_N5_tamper_model_identity),
             ("N6", test_N6_multi_cell),
-            ("W1", test_W1_script_sha_warn),
+            ("N7", test_N7_treatment_swap),
+            ("N8", test_N8_script_sha_fail_closed),
+            ("P2", test_P2_dynamic_conclusion),
+            ("O1", test_O1_python_opt),
         ]
         for tag, fn in cases:
             base = os.path.join(root_tmp, f"fx_{tag}")
             os.makedirs(base)
-            _copy_fixture(base)
+            _copy_fixture(base, _FIXTURE)
             fn(base)
             PASS += 1
     finally:
         shutil.rmtree(root_tmp, ignore_errors=True)
-    print(f"\nE119 crossarm identity ALL PASS ({PASS}/8)")
+    print(f"\nE119 crossarm identity ALL PASS ({PASS}/11)")
 
 
 if __name__ == "__main__":

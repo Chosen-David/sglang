@@ -1,0 +1,149 @@
+{
+ "manifest_version": 2,
+ "run_id": "20261009120000-000002-0002",
+ "generated": "2026-10-09T12:00:00",
+ "root": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/pred_root/fullkv",
+ "pred_postfix": "_1024",
+ "expect_tasks": 4,
+ "min_samples": 3,
+ "run_identity": {
+  "data_root": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root",
+  "model_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/Qwen3-8B-fixture",
+  "yarn": true,
+  "yarn_factor": 2.0,
+  "extra_params": {
+   "method": "none"
+  },
+  "formal_script_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "scorer_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "note": "synthetic fixture：E119 最小脱敏产物（048①），全部行为合成数据；结构与真实 legacy 产物逐字段同构"
+ },
+ "source_data_sha256": {
+  "65536/niah_single_1": {
+   "path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root/65536/niah_single_1.jsonl",
+   "sha256": "6c25227dd66a098b8c4ccd9bda7267aa18053f33e46424bd3308ec956d6c60fd"
+  },
+  "65536/niah_multiquery": {
+   "path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root/65536/niah_multiquery.jsonl",
+   "sha256": "46dd0c857b34c7074afc766647504286e062fe37e448f0939f7dc36512fc7d14"
+  },
+  "65536/cwe": {
+   "path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root/65536/cwe.jsonl",
+   "sha256": "5ac408ac45d334c4568019305d200e2acdf4e7a42bc5dfe7f3a13fd96afca1c0"
+  },
+  "65536/vt": {
+   "path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/data_root/65536/vt.jsonl",
+   "sha256": "bf4cce2b47d7e675996119a295ffef157005c6e46d6e1fb45060c411e4bd9144"
+  }
+ },
+ "cells": {
+  "L65536/none": {
+   "length_dir": 65536,
+   "identity_mode": "legacy-partial",
+   "tasks": {
+    "niah_single_1": {
+     "n": 3,
+     "best_file": "niah_single_1-none-10090633.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/pred_root/fullkv/L65536/pred_1024/niah_single_1-none-10090633.jsonl",
+     "source_sha256": "0a238ebbeac4ddff6e4525c74e5a9b82111265d1462539ff415ab287811bcd2f",
+     "derived_sha256": "47003e1d66ddbbb36ddf55377f11531bbaf22d2a1e13a0d3c1e4c71afa547adf"
+    },
+    "niah_multiquery": {
+     "n": 3,
+     "best_file": "niah_multiquery-none-10090633.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/pred_root/fullkv/L65536/pred_1024/niah_multiquery-none-10090633.jsonl",
+     "source_sha256": "5cf80d982d74de3b8b9750d63edbc921586829dd557d25ddb144db74475210b8",
+     "derived_sha256": "d3541b2c46a4174af282aa67191c619a3050d0fb6fb5ecada5062e9dea85df2d"
+    },
+    "cwe": {
+     "n": 3,
+     "best_file": "cwe-none-10090633.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/pred_root/fullkv/L65536/pred_1024/cwe-none-10090633.jsonl",
+     "source_sha256": "5ea5c494be43c833b533e1bc3e2594dfdf5d2ec32ba3fd1033160384826b62e2",
+     "derived_sha256": "002ec6021ffa8c65499c421b1318f8ebc0ae5f1d7993c4a05147046f2690918f"
+    },
+    "vt": {
+     "n": 3,
+     "best_file": "vt-none-10090633.jsonl",
+     "source_path": "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/testdata/e119_min/pred_root/fullkv/L65536/pred_1024/vt-none-10090633.jsonl",
+     "source_sha256": "fe869ce93a687c6228dae505dce2fc4d8b82ec40b92cabd4dc1e2aa2898437f1",
+     "derived_sha256": "a2b5b1a3340eb5c1593dc5f904faa25055120aa556fcf6bd19a8804d90924f5d"
+    }
+   }
+  }
+ },
+ "tasks": {
+  "niah_single_1": {
+   "ids": [
+    "niah_single_1:0",
+    "niah_single_1:1",
+    "niah_single_1:2"
+   ],
+   "answers_sha": {
+    "niah_single_1:0": "5d67552360b8827e",
+    "niah_single_1:1": "209e004d0876eecf",
+    "niah_single_1:2": "98cb6987b58deba6"
+   },
+   "lengths": [
+    65536,
+    65536,
+    65536
+   ],
+   "identity_mode": "legacy-partial"
+  },
+  "niah_multiquery": {
+   "ids": [
+    "niah_multiquery:0",
+    "niah_multiquery:1",
+    "niah_multiquery:2"
+   ],
+   "answers_sha": {
+    "niah_multiquery:0": "5d67552360b8827e",
+    "niah_multiquery:1": "209e004d0876eecf",
+    "niah_multiquery:2": "98cb6987b58deba6"
+   },
+   "lengths": [
+    65536,
+    65536,
+    65536
+   ],
+   "identity_mode": "legacy-partial"
+  },
+  "cwe": {
+   "ids": [
+    "cwe:0",
+    "cwe:1",
+    "cwe:2"
+   ],
+   "answers_sha": {
+    "cwe:0": "5d67552360b8827e",
+    "cwe:1": "209e004d0876eecf",
+    "cwe:2": "98cb6987b58deba6"
+   },
+   "lengths": [
+    65536,
+    65536,
+    65536
+   ],
+   "identity_mode": "legacy-partial"
+  },
+  "vt": {
+   "ids": [
+    "vt:0",
+    "vt:1",
+    "vt:2"
+   ],
+   "answers_sha": {
+    "vt:0": "5d67552360b8827e",
+    "vt:1": "209e004d0876eecf",
+    "vt:2": "98cb6987b58deba6"
+   },
+   "lengths": [
+    65536,
+    65536,
+    65536
+   ],
+   "identity_mode": "legacy-partial"
+  }
+ }
+}
