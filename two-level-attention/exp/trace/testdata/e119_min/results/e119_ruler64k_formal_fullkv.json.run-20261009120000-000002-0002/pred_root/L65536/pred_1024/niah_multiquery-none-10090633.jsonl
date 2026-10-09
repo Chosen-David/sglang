@@ -1,0 +1,3 @@
+{"index": 0, "input": "synthetic input for niah_multiquery row 0", "answers": ["gt0"], "length": 65536, "pred": "synthetic pred FullKV/niah_multiquery/0", "budget": 1024, "_id": "niah_multiquery:0", "_answers_sha": "5d67552360b8827e"}
+{"index": 1, "input": "synthetic input for niah_multiquery row 1", "answers": ["gt1"], "length": 65536, "pred": "synthetic pred FullKV/niah_multiquery/1", "budget": 1024, "_id": "niah_multiquery:1", "_answers_sha": "209e004d0876eecf"}
+{"index": 2, "input": "synthetic input for niah_multiquery row 2", "answers": ["gt2"], "length": 65536, "pred": "synthetic pred FullKV/niah_multiquery/2", "budget": 1024, "_id": "niah_multiquery:2", "_answers_sha": "98cb6987b58deba6"}

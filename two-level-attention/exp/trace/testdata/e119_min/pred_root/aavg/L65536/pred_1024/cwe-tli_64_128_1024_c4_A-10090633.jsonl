@@ -1,0 +1,3 @@
+{"index": 0, "input": "synthetic input for cwe row 0", "answers": ["gt0"], "length": 65536, "pred": "synthetic pred aavg/cwe/0", "budget": 1024}
+{"index": 1, "input": "synthetic input for cwe row 1", "answers": ["gt1"], "length": 65536, "pred": "synthetic pred aavg/cwe/1", "budget": 1024}
+{"index": 2, "input": "synthetic input for cwe row 2", "answers": ["gt2"], "length": 65536, "pred": "synthetic pred aavg/cwe/2", "budget": 1024}

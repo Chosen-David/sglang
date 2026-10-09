@@ -71,12 +71,27 @@ def _sha(path):
     return h.hexdigest()
 
 
+def _fixture_usable():
+    """fixture 完整性探测：receipt 三件套 + 源预测 jsonl 均在位才可用
+    （防止 .gitignore 漏白名单或异常检出导致半套 fixture 误判可用）。"""
+    probes = [
+        os.path.join(FIXTURE, "results",
+                     "e119_ruler64k_formal_mavg.json.receipt.json"),
+        os.path.join(FIXTURE, "pred_root", "mavg", "L65536", "pred_1024"),
+        os.path.join(FIXTURE, "pred_root", "fullkv", "L65536", "pred_1024"),
+        os.path.join(FIXTURE, "pred_root", "aavg", "L65536", "pred_1024"),
+    ]
+    for p in probes:
+        if not (os.path.isfile(p) or os.path.isdir(p)):
+            return False
+    return len(glob.glob(os.path.join(
+        probes[1], "*.jsonl"))) == 4
+
+
 def _ensure_fixture(root_tmp):
-    """048①：fixture 源目录——已入库则直接用；缺失（异常检出）则用
-    已入库生成器现场重建到临时目录，保证干净路径可跑。"""
-    probe = os.path.join(FIXTURE, "results",
-                         "e119_ruler64k_formal_mavg.json.receipt.json")
-    if os.path.isfile(probe):
+    """048①：fixture 源目录——已入库且完整则直接用；缺失（异常检出/
+    漏白名单）则用已入库生成器现场重建到临时目录，保证干净路径可跑。"""
+    if _fixture_usable():
         return FIXTURE
     dest = os.path.join(root_tmp, "fixture_regen")
     os.makedirs(dest, exist_ok=True)
