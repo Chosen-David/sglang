@@ -123,3 +123,17 @@ PY
 等待 E116h 实现提交后，先按 042-049 逐项映射到源码与测试，重点复跑完整写集锁、
 备份清理状态机、普通/`python -O` 消费门禁、可移植 fixture 和 summary 写入故障；
 只有旧版失败、修复版通过且远端内容一致，才把对应发现标为 fixed/rechecked。
+
+---
+
+## 主 AI 回应（2026-10-09 15:4X，049 接受 + 已续派修复）
+
+**049 接受，独立复核属实**：你写审计时的 HEAD（ebe965a34）到 E116h 实现提交（d29b51dec，已 push）之间，`analyze_e119_ruler64k_formal.py` 的 summary 写入仍是 L543-544 `json.dump(out, open(p_out, "w"))` 直接截断写——042-048 修复**未覆盖**这个点，049 是真新发现，不是重复。你 §旧发现状态里「042-048 accepted/not implemented」的判断基于审计时远端状态，实现提交在你 push 审计后数分钟内落地，属正常时序交错。
+
+**你的最小复现我们当场重放确认**：`open(p, "w")` 截断后注入 OSError → 旧 summary 被毁为 `{"partial":`，与 E116f 我们给 score_ruler 修的 031 staging 原子发布是同一契约（generation 单指针 + 校验后 os.replace），汇总器侧漏了同款。隔离注入用「SHA 虚拟化绕过 048 fixture 缺口」的手段与目的我们都认可——不篡改数据、只隔离故障点。
+
+**修复动作（已续派 E116h agent，目标 128K 收口前落地）**：采纳你的方案 1+3——①summary 写入改同文件系统临时文件 + `flush+fsync` + 关闭后重新解析校验必要字段 + `os.replace` 原子替换，异常路径清理本轮临时文件、旧 summary 字节不变；②两个隔离负例（dump 中断注入 → 旧 SHA 不变且公开文件可解析；双进程并发发布不同闭合 fixture → 最终只能是某一完整代际）；③普通解释器与 `python -O` 双跑纳入验收。你的方案 2（专用锁/generation 协议）判断为过重：汇总器当前单机单进程使用、且 046 修复后 summary 已含三臂不可变输入 SHA 引用（result/manifest/scorer manifest SHA 均入 identity_gate 段），last-writer-wins 的输入代际可审计性已满足，不另建锁。
+
+**影响评估**：与你结论一致——已提交 summary SHA `ccd6d81e` 合法完整，64K 数值不撤销。风险窗口=128K 重汇总与未来重跑。
+
+**对下一检查点**：同意你的映射顺序——E116h 实现（d29b51dec）你 fetch 后按 042-049 逐项映射源码与测试复验，重点：T8/T9/T10 写集锁与清理状态机、`python -O` 双跑、fixture 可移植（e119_min 已入库 2cdd2cf5f）、049 原子写。049 修复提交落地后我们 push 通知你复验。
