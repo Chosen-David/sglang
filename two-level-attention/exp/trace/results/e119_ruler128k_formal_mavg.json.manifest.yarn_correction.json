@@ -1,0 +1,40 @@
+{
+ "correction_version": "yarn-identity-057-v1",
+ "audit_ref": "TL-E119-YARN-IDENTITY-057",
+ "task_chain": "#194",
+ "generated": "2026-10-10T04:08:07.716447",
+ "target_manifest": "exp/trace/results/e119_ruler128k_formal_mavg.json.manifest.json",
+ "target_manifest_sha256": "6f74d9e0e5404121b0c1dcba567f337dd679c9f9c62d6e497c50eb4bae9ff6bf",
+ "target_manifest_bytes_unchanged": true,
+ "original_run_identity": {
+  "yarn": true,
+  "yarn_factor": 2.0
+ },
+ "correction": {
+  "yarn_factor_status": "operator_declared_not_effective",
+  "operator_declared_yarn_factor": 2.0,
+  "yarn_factor_provenance": "operator_declared",
+  "producer_native_evidence": "missing",
+  "effective_yarn_factor": null,
+  "effective_factor_closed": false
+ },
+ "evidence": {
+  "code_chain": "benchmark/RULER/pred_ruler.py YARN_FACTOR_AUTO = {65536: 2.0, 131072: 4.0}；--yarn_factor 默认 None，解析处用 args.yarn_factor or YARN_FACTOR_AUTO.get(...)——只传 --yarn 未传显式 factor 的 131072 档按 4.0 自动档路径解析",
+  "e190_corroboration": {
+   "file": "exp/trace/results/e119_128k_arm_provenance_corroboration.json / .md",
+   "strength": "contemporaneous-corroboration-not-hash-bound",
+   "supports": "E190 A 级脚本 case 编码 + B 级日志 saved 行强支持三臂128K 生成链派单只传 --yarn 未传显式 --yarn_factor，即按当时 pred_ruler.py 的 4.0 自动档路径解析；三臂同派单协议",
+   "caveat": "佐证≠同代密码学绑定（与 051 同纪律）：无生成进程原生 effective-config receipt，不能据此把 4.0 补写为已证实的实际生效值"
+  },
+  "why_not_rewrite_actual_4": "未取得预测字节到生成进程/源码的同代闭包，补写 actual=4.0 属脑补；如需精确 factor 身份须按 producer-yarn-config-v1 协议重新生成预测与评分"
+ },
+ "impact": {
+  "cross_arm_comparability": "三臂同一派单协议（均只传 --yarn），相对分数/排序不受影响（E190 已核验：三臂 yarn_factor 声明同为 2.0，跨臂可比性无影响）",
+  "prohibited_claims": [
+   "不得宣称 128K 批次 effective factor=2.0 已证实",
+   "不得宣称 effective factor=4.0 已证实（E190 佐证只能表述为「启动链/当前代码强支持 4.0 自动档路径」）",
+   "不得按 manifest yarn_factor=2.0 做精确复现或依赖 factor=2.0 的配置结论"
+  ]
+ },
+ "forward_protocol": "新生成走 producer-yarn-config-v1（pred_ruler.py 旁挂 {pred 基名}-yarn_receipt.json 原子写）；formal 消费侧（score_ruler_formal.py）优先消费生产者证据，CLI 声明与生产者证据冲突 fail-closed，legacy 无证据标 operator_declared"
+}

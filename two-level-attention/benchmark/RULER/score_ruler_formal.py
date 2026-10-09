@@ -82,6 +82,28 @@
 #       再做备份清理；清理降级为提交后 best-effort GC（失败只记
 #       rollback_state["gc_pending"] + stderr warning，不回滚、不影响
 #       提交语义；进程后续若落 failure receipt 则 gc_pending 一并记录）。
+# ===== #194（GPT 2026-10-10 0330 审计 TL-E119-YARN-IDENTITY-057）=====
+#   run_identity.yarn_factor 此前无条件等于操作者事后 CLI 声明——E119
+#   128K 批次派单只传 --yarn 未传显式 factor（生成进程按
+#   YARN_FACTOR_AUTO[131072]=4.0 自动档路径解析），三份正式 manifest 却
+#   声明 2.0，effective factor 未闭合。修复（producer-yarn-config-v1）：
+#   ① 生成侧 pred_ruler.py 每次运行把 effective 配置原子写入预测产物旁挂
+#      receipt（{pred 基名}-yarn_receipt.json，见 yarn_receipt.py）；
+#   ② 本入口 freeze_and_stage 对每个 best-file 探查旁挂 receipt：全部
+#      格子有证据 → run_identity.yarn/yarn_factor 取生产者 effective 值
+#      （yarn_factor_provenance="producer_receipt"，receipt path+SHA 逐格
+#      冻结进 manifest cells 与 producer_evidence）；操作者 CLI 声明与
+#      生产者证据冲突 → fail-closed（_fail 走 SystemExit，python -O 不
+#      失效）；全部格子无证据（legacy）→ CLI 值如实降级
+#      yarn_factor_provenance="operator_declared"（实际生效值未闭合，
+#      不冒充 effective 值）；部分有部分无 → fail-closed（单次
+#      run_identity 不得混合两种口径）；receipt 存在但半写/损坏/自相矛盾
+#      /档位不符 → fail-closed（存在即证据）；
+#   ③ 既有 128K 三臂 manifest 字节不动，旁挂版本化 correction JSON
+#      （.manifest.yarn_correction.json）把 2.0 降级为 operator_declared
+#      并记录「E190 启动链佐证强支持 4.0 自动档路径、生产者原生证据缺失、
+#      effective factor 未闭合」——不脑补 actual=4.0（佐证≠同代哈希绑定，
+#      与 051 同纪律）。64K 无冲突（auto 65536=2.0 与声明一致），不动。
 # ===== E116j（GPT 2026-10-10 0125 审计 TL-E119-GEN-CONTENT-BINDING-052）=====
 #   generation 的 md 与 generation receipt 此前只被消费者做「存在性检查」
 #   （v2 receipt 只声明 result/manifest 的 SHA）→ 两者发布后被篡改不可
@@ -126,6 +148,10 @@ sys.path.insert(0, REPO)
 from benchmark.RULER.score_ruler import (  # noqa: E402
     TASKS, _answers_sha16, _file_sha256, _nlines, _ts_of,
     _validate_manifest_schema,
+)
+# 057：生产者原生 yarn receipt 探查/自洽校验（协议与生成侧共享同一口径）
+from benchmark.RULER.yarn_receipt import (  # noqa: E402
+    producer_receipt_path_for, validate_producer_receipt,
 )
 
 FORMAL_PATH = os.path.abspath(__file__)
@@ -390,17 +416,56 @@ def _stamp_or_copy(src, dst, task, stamp):
     return True, out_rows
 
 
+def _load_producer_yarn_receipt(pred_dir, best_basename, task, Lnum):
+    """057：探查 best-file 在原始目录的旁挂生产者 receipt 并做自洽校验。
+
+    返回 receipt 摘要 dict；文件不存在 → None（legacy，如实标 missing）。
+    存在但损坏/自相矛盾/协议不符/档位不符 → _fail（存在即证据：半写或
+    被篡改的 receipt 比缺失更危险，fail-closed 拒收整次发布）。"""
+    src_pred = os.path.join(pred_dir, best_basename)
+    rcp_path = producer_receipt_path_for(src_pred)
+    if not os.path.isfile(rcp_path):
+        return None
+    try:
+        with open(rcp_path, encoding="utf-8") as f:
+            rcp = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        _fail(f"{rcp_path}: 生产者 yarn receipt 解析失败（{e}）——"
+              f"存在即证据，半写/损坏 fail closed（057）")
+    err = validate_producer_receipt(rcp, src_pred)
+    if err:
+        _fail(err)
+    if rcp["context_length"] != Lnum:
+        _fail(f"{rcp_path}: receipt.context_length={rcp['context_length']} "
+              f"与所在目录档位 L{Lnum} 不一致——生产者证据与数据档位"
+              f"冲突，fail closed（057）")
+    return {
+        "path": os.path.abspath(rcp_path),
+        "sha256": _file_sha256(rcp_path),
+        "receipt_version": rcp["receipt_version"],
+        "yarn_enabled": rcp["yarn_enabled"],
+        "effective_yarn_factor": rcp["effective_yarn_factor"],
+        "yarn_factor_source": rcp["yarn_factor_source"],
+        "context_length": rcp["context_length"],
+        "task": task,
+    }
+
+
 def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
                      min_samples, data_root):
     """阶段一（E116e 重构）：原始候选只读拷贝进 staging 派生目录 →
     legacy 补刻（派生副本上）→ 长度身份门禁 → min-samples 硬门禁 →
     best-file 仲裁 → 跨 method 身份（ids/answers_sha/lengths 逐行）一致性
-    → 源数据 SHA256 绑定 → 冻结 manifest。
-    返回 (tasks_manifest, identity_info)。"""
+    → 源数据 SHA256 绑定 → 生产者 yarn receipt 探查（057）→ 冻结 manifest。
+    返回 (tasks_manifest, cells_info, src_data_sha, producer_yarn)；
+    producer_yarn = {"cells": {格键: receipt 摘要}, "missing": [格键]}——
+    best-file 旁挂 receipt 的存在性即生产者证据（存在即证据，半写/损坏/
+    自相矛盾一律 fail-closed，见 _load_producer_yarn_receipt）。"""
     staged_root = os.path.join(staging, "pred_root")
     tasks_manifest = {}   # {task: {ids, answers_sha, lengths, identity_mode}}
     cells_info = {}       # {key: {length_dir, identity_mode, tasks: {...}}}
     src_data_sha = {}     # {"{Lnum}/{task}": {path, sha256}}
+    producer_yarn = {"cells": {}, "missing": []}   # 057
     n_stamped = 0
     for L_dir in sorted(glob.glob(os.path.join(root, "L*"))):
         Lname = os.path.basename(L_dir)
@@ -498,6 +563,17 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
                         "lengths": lengths,
                         "identity_mode": identity_mode,
                     }
+                # ---- 057：生产者 yarn receipt 探查（best-file 旁挂）----
+                # best 是 staging 派生副本（与原始文件同名）；receipt 在
+                # 原始 pred_dir 探查。缺 receipt = legacy（missing 如实
+                # 记录，由 _resolve_yarn_identity 裁决 provenance）。
+                cell_rcp = _load_producer_yarn_receipt(
+                    pred_dir, os.path.basename(best), task, Lnum)
+                cell_key = f"{key}/{task}"
+                if cell_rcp is None:
+                    producer_yarn["missing"].append(cell_key)
+                else:
+                    producer_yarn["cells"][cell_key] = cell_rcp
                 cells_info.setdefault(key, {
                     "length_dir": Lnum,
                     "identity_mode": identity_mode,
@@ -511,6 +587,9 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
                     "source_sha256": _file_sha256(os.path.join(
                         pred_dir, os.path.basename(best))),
                     "derived_sha256": _file_sha256(best),
+                    # 057：生产者证据按格绑定（null=missing，legacy）；
+                    # path+sha256 把 receipt 字节冻结进 manifest
+                    "producer_yarn_receipt": cell_rcp,
                 }
     if expect_tasks > 0 and len(tasks_manifest) < expect_tasks:
         missing = sorted(set(TASKS[:expect_tasks]) - set(tasks_manifest))
@@ -521,7 +600,83 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
         print(f"[formal] 共 {n_stamped} 个 legacy 文件在派生副本上补刻身份"
               f"（_id/_answers_sha；源文件零改动，逐字段不变量已断言）")
     _validate_manifest_schema(tasks_manifest)
-    return tasks_manifest, cells_info, src_data_sha
+    return tasks_manifest, cells_info, src_data_sha, producer_yarn
+
+
+def _resolve_yarn_identity(args, producer_yarn):
+    """057：run_identity 的 yarn 字段裁决（生产者证据优先）。
+
+    三条路径：
+      ① 全部格子有生产者 receipt → yarn/yarn_factor 取生产者 effective 值
+        （provenance="producer_receipt"）；操作者 CLI 声明与其冲突 →
+        _fail（事后声明不得覆盖实际值——128K 批次教训的核心门禁）；
+      ② 全部格子无 receipt（legacy）→ CLI 值如实降级
+        provenance="operator_declared"，不冒充实际生效值；
+      ③ 部分有部分无 → _fail（单次 run_identity 不能混合「生产者证实」
+        与「操作者声明」两种口径——要么全证实要么全声明，fail closed）。
+    _fail 走 SystemExit（非 assert），python -O 下门禁不失效。"""
+    found = producer_yarn["cells"]
+    missing = producer_yarn["missing"]
+    n_total = len(found) + len(missing)
+    if not found:
+        return {
+            "yarn": bool(args.yarn),
+            "yarn_factor": args.yarn_factor,
+            "yarn_factor_provenance": "operator_declared",
+            "yarn_factor_operator_declared": args.yarn_factor,
+            "producer_evidence": {
+                "status": "missing",
+                "cells_with_receipt": 0,
+                "cells_total": n_total,
+                "note": ("legacy 产物无生产者 yarn receipt：yarn_factor 为"
+                         "操作者事后 CLI 声明（operator_declared），实际"
+                         "生效值未闭合——不冒充 effective 值（057）"),
+            },
+        }
+    if missing:
+        _fail(f"生产者 yarn receipt 覆盖不全：{len(found)}/{n_total} 格有"
+              f"证据（缺 {sorted(missing)}）——单次 formal 的 run_identity "
+              f"不能混合『生产者证实』与『操作者声明』两种口径，"
+              f"fail closed（057）")
+    enableds = {c["yarn_enabled"] for c in found.values()}
+    factors = {c["effective_yarn_factor"] for c in found.values()}
+    if len(enableds) > 1 or len(factors) > 1:
+        _fail(f"生产者 yarn receipt 之间不一致：yarn_enabled="
+              f"{sorted(enableds, key=str)}，effective_factor="
+              f"{sorted(factors, key=str)}——同一 run_identity 无法声明"
+              f"单一 effective 配置（混合档位/factor 的 root 须按档拆分"
+              f"formal 运行），fail closed（057）")
+    enabled = enableds.pop()
+    factor = factors.pop()
+    # 操作者 CLI 声明 vs 生产者证据冲突 → fail-closed（057 核心门禁：
+    # 修复前 128K 批次正是「派单未传 factor → 4.0 自动档生效，formal
+    # 事后声明 2.0 原样入 manifest」才产生身份冲突）
+    if bool(args.yarn) != enabled:
+        _fail(f"yarn 声明冲突：CLI --yarn={bool(args.yarn)} vs 生产者 "
+              f"receipt yarn_enabled={enabled}（{len(found)} 格证据一致）"
+              f"——生产者证据优先，事后声明不得覆盖实际值，"
+              f"fail closed（057）")
+    if args.yarn_factor is not None and (not enabled or
+                                          factor != args.yarn_factor):
+        _fail(f"yarn factor 声明冲突：CLI --yarn-factor={args.yarn_factor} "
+              f"vs 生产者 receipt effective={factor!r}（yarn_enabled="
+              f"{enabled}）——生产者证据优先，fail closed（057）")
+    return {
+        "yarn": enabled,
+        "yarn_factor": factor if enabled else None,
+        "yarn_factor_provenance": "producer_receipt",
+        "yarn_factor_operator_declared": args.yarn_factor,
+        "producer_evidence": {
+            "status": "present",
+            "protocol": "producer-yarn-config-v1",
+            "cells_with_receipt": len(found),
+            "cells_total": n_total,
+            "yarn_enabled": enabled,
+            "effective_yarn_factor": factor if enabled else None,
+            "receipts": {k: {"path": v["path"], "sha256": v["sha256"]}
+                        for k, v in sorted(found.items())},
+        },
+    }
 
 
 def main():
@@ -547,9 +702,14 @@ def main():
                     help="声明生成该预测所用模型路径（身份绑定；legacy 数据"
                          "可留空，manifest 记 null 不冒充）")
     ap.add_argument("--yarn", action="store_true",
-                    help="声明生成时启用 YaRN（身份绑定）")
+                    help="声明生成时启用 YaRN（057：有生产者 receipt 时"
+                         "须与其一致，冲突 fail-closed；legacy 无证据时"
+                         "记为操作者声明）")
     ap.add_argument("--yarn-factor", type=float, default=None,
-                    help="声明 YaRN factor（身份绑定）")
+                    help="声明 YaRN factor（057：有生产者 receipt 时必须"
+                         "与其 effective 值一致，冲突 fail-closed；legacy "
+                         "无证据时降级 operator_declared，不冒充实际"
+                         "生效值）")
     ap.add_argument("--extra-param", action="append", default=[],
                     metavar="K=V",
                     help="附加身份参数（可重复，如 --extra-param "
@@ -606,11 +766,29 @@ def main():
             _fail(f"--data-root 不是目录: {args.data_root}")
         os.makedirs(staging, exist_ok=True)
 
-        # ---- 阶段一：staging 派生 + 冻结 manifest（含身份扩展 032）----
-        tasks_manifest, cells_info, src_data_sha = freeze_and_stage(
-            args.root, args.pred_postfix, args.expect_tasks,
-            stamp=not args.no_stamp_legacy_ids, staging=staging,
-            min_samples=args.min_samples, data_root=args.data_root)
+        # ---- 阶段一：staging 派生 + 冻结 manifest（含身份扩展 032 +
+        #      057 生产者 yarn 证据消费）----
+        tasks_manifest, cells_info, src_data_sha, producer_yarn = \
+            freeze_and_stage(
+                args.root, args.pred_postfix, args.expect_tasks,
+                stamp=not args.no_stamp_legacy_ids, staging=staging,
+                min_samples=args.min_samples, data_root=args.data_root)
+
+        # ---- 057：run_identity 的 yarn 字段裁决（生产者证据优先；
+        #      冲突 fail-closed；legacy 无证据 → operator_declared）----
+        yarn_id = _resolve_yarn_identity(args, producer_yarn)
+        if yarn_id["yarn_factor_provenance"] == "producer_receipt":
+            pe = yarn_id["producer_evidence"]
+            print(f"[formal] yarn 身份：producer_receipt 证实 yarn="
+                  f"{yarn_id['yarn']} effective_factor="
+                  f"{yarn_id['yarn_factor']!r}"
+                  f"（{pe['cells_with_receipt']}/{pe['cells_total']} 格"
+                  f"生产者证据闭合，057）")
+        else:
+            print(f"[formal] yarn 身份：生产者证据缺失 → CLI 声明降级 "
+                  f"operator_declared（yarn={yarn_id['yarn']} "
+                  f"yarn_factor={yarn_id['yarn_factor']!r}，实际生效值"
+                  f"未闭合，不冒充 effective 值，057）")
 
         manifest_full = {
             "manifest_version": 2,
@@ -623,16 +801,30 @@ def main():
             "run_identity": {
                 "data_root": os.path.abspath(args.data_root),
                 "model_path": args.model_path or None,
-                "yarn": bool(args.yarn),
-                "yarn_factor": args.yarn_factor,
+                "yarn": yarn_id["yarn"],
+                # 057：yarn/yarn_factor 不再无条件等于 CLI 声明——
+                # provenance=producer_receipt 时为生产者 receipt 证实的
+                # 实际生效值；operator_declared 时为操作者事后声明
+                # （实际生效值未闭合，不冒充）
+                "yarn_factor": yarn_id["yarn_factor"],
+                "yarn_factor_provenance":
+                    yarn_id["yarn_factor_provenance"],
+                "yarn_factor_operator_declared":
+                    yarn_id["yarn_factor_operator_declared"],
+                "producer_evidence": yarn_id["producer_evidence"],
                 "extra_params": extra_params,
                 "formal_script_sha256": _file_sha256(FORMAL_PATH),
                 "scorer_sha256": _file_sha256(SCORER_PATH),
                 # legacy 声明口径：model/yarn 等为操作者事后声明，
                 # 可能不可恢复——以 receipt/manifest 记录为准，不冒充完整
-                "note": ("model_path/yarn 等为操作者声明值；legacy 数据无法"
-                         "从文件恢复完整输入身份（identity_mode=legacy-"
-                         "partial），native 数据由 pred_ruler.py 落盘"),
+                "note": ("model_path 为操作者声明值；yarn_factor 按 "
+                         "yarn_factor_provenance 区分：producer_receipt="
+                         "生成进程旁挂 receipt 证实的实际生效值，"
+                         "operator_declared=legacy 产物无生产者证据时的"
+                         "操作者事后声明（实际生效值未闭合，不冒充）；"
+                         "legacy 数据无法从文件恢复完整输入身份"
+                         "（identity_mode=legacy-partial），native 数据"
+                         "由 pred_ruler.py 落盘"),
             },
             "source_data_sha256": src_data_sha,
             "cells": cells_info,
