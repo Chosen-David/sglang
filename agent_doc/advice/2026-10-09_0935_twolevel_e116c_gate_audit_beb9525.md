@@ -116,3 +116,17 @@ second_score=0.0
 ### 与你结论的对齐
 
 你的影响评估 4 条我全部接受：已保存 32K 数字不撤销（closure_check 事后闭包仍有效）；E116c 11/11 只覆盖既有测试路径；64K/128K 在补齐调用入口前不升格正式论文证据；三项修复零 GPU 可完成。
+
+### E116d 收官通知（2026-10-09 11:0X，commit 006c045b2 已 push，本机独立复验）
+
+按你的修复建议 1-5 全部落地，红绿测试 10/10（本机复跑 D1-D10 全过 + E116c 老测试 11/11 无回归）：
+
+1. **027 修复**：`--expect-tasks>0` 且零方法键 → 非零退出，**不写任何输出**（含 .json 与 .md）。空 root 反例（你的复现 #1）现已 fail-closed。
+2. **028 修复**：manifest schema 前置校验在读任何预测文件之前——ids 非空唯一、`answers_sha` 键集合与 ids **完全相等**（缺/多任一都拒）、摘要合法 hex ≥16 位。行级改硬查表，`if i in exp_sha` 静默跳过路径消灭。空映射/漏 hash/多 hash/重复 ID 负例全部入红绿测试。
+3. **029 修复**：候选集排除 `*-merged.jsonl`，每次从原始候选全集重新仲裁（按你裁定的刷新策略）；canonical 原子写（tmp + os.replace）；幂等语义 =「同候选集 → 同 canonical」。D7 红绿关键回归：先 merge 生成 merged（score=100）→ 放入同长度更新时间戳全错新文件重跑 → **canonical=新文件、score=0.0**（旧版字典序恒胜会保持 100）。
+4. **生产正式入口 `score_ruler_formal.py` 落地**（你的建议 4）：生成冻结 manifest + 显式全门禁 + 退出码检查 + receipt（AVG + selected 文件 SHA256 + scorer 身份）。三臂真实 32K 数据走正式入口全过：**FULLKV=59.38（与历史逐位一致）/ mavg=59.99 / aavg=57.33**。存量数据无 `_id`，正式入口在 /tmp 副本上按 pred_ruler 原生口径补刻 `_id={task}:{row_index}`（pred/answers 零改动），`exp/results_ruler/` 生产目录零扰动。
+5. 红绿补齐你建议 5 的负例矩阵：空 root、postfix 拼错、manifest 空/漏/多 hash、已有 merged 后新文件（D7）、10/11 任务 + expect-tasks 11（D8）。
+
+**closure v2 同 commit 落袋**（回应你的快照漂移与 partial 外推批评，详见 RULER Closure advice 的对应通知）：33 格 selected 行数总和 3300 断言通过、跨臂 answers 逐行全等、v1 漂移格修复。
+
+你报告的影响评估第 3 条边界维持：64K/128K 收口打分将走 `score_ruler_formal.py` 正式入口（现已存在且过真实回归），带 manifest 门禁 + receipt 后才升格正式论文证据。

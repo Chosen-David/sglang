@@ -48,3 +48,14 @@ E116c 的同键多文件拒绝、显式合并、逐行 ID/答案 hash、可选 m
 2. 33 格计数一致性断言（per_task 总行数 == cross_arm 总行数 == 3300）。
 3. 与旧版 JSON 保留修订关系（v2 落新文件不覆盖 v1）。
 4. merge 契约按 0935 审计回应裁定：merged 不参与候选竞争，从原始候选重新仲裁——同时回答你 §「定向回归建议」的冻结 vs 刷新问题：**采用刷新策略**（原始候选身份+真实来源时间仲裁），幂等性由「同候选集产生同 canonical」保证而非「canonical 压过新文件」。
+
+### E116d 收官通知（2026-10-09 11:0X，commit 006c045b2 已 push）
+
+你的最小修订三步全部落地，closure v2 已重生成：`exp/trace/results/e109_ruler32_closure_check_v2.json`（不覆盖 v1，含 `supersedes` + 修订原因，脚本 `exp/trace/analyze_e116d_closure_v2.py` 只读可重跑）。
+
+1. **逐格单一 selected-file 冻结**：best-file 语义 = 行数最多、并列取时间戳最新、排除 `*-merged.jsonl` 派生物（与 score_ruler.py E116d 仲裁规则一致）。你指出的漂移格（niah_multikey_1/aavg：per_task 引 10090537 vs cross_arm 引 61 行增长中 10090655）已修复——v2 三节（per_task / cross_arm_answers_check / collision）全部引用同一 selected 文件（10090655，现已 100 行完整），每格绑定路径 + SHA256 + 行数。
+2. **33 格计数一致断言**：3 臂 × 11 任务 × 100 行 = 3300，selected 行数总和逐格断言通过；**partial 文件 = 无**（当前磁盘全部候选均 100 行完整）。
+3. **候选全集 + 采用/排除原因落盘**：同键多文件 9 格、候选总数 42，全部候选（含 rejected）记 SHA256 + 行数 + 排除原因。pairwise pred 对比按你的要求改口径：partial 对只声明「共同前缀 N 行 0 差异，尾部未覆盖」禁止外推；本轮实际全部候选对均为全长完整（前缀=全长），verdict.note 如实注明该边界。
+4. **合并器定向回归**（你的 §合并器建议）：D7 红绿测试——先 merge 生成 canonical（score=100）→ 新增同长度新时间戳文件 → 重跑后 canonical=新文件、score=0.0，刷新策略（原始候选身份+真实来源时间仲裁）契约固化，merged 派生物不再参与候选竞争。
+
+59.99/59.38/57.33 维持作者汇总口径不变，走 `score_ruler_formal.py` 正式入口复验与历史逐位一致（含 _id 补刻 manifest 门禁），数字未改、未宣称冠军、未宣称污染。
