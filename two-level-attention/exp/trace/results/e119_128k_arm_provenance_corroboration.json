@@ -1,0 +1,823 @@
+{
+ "meta": {
+  "task": "E190 溯源证据收割（GPT 审计 TL-E119-128K-FORMAL-CLOSURE-051 同时代运行佐证）",
+  "collected_at": "2026-10-10T02:32:35+08:00",
+  "collection_mode": "只读（四机 /tmp 日志与脚本 grep、仓库脚本读取、formal manifest 读取、.251 活进程 ps）；未修改任何生产数据/代码/进程",
+  "audit_051_restated": "GPT 审计 051：128K mavg/aavg 臂 formal manifest 中 treatment 不可区分——run_identity.extra_params 仅 {\"method\": \"tli_64_128_1024_c4_A\"}，无 far/near method 与 αβγ。",
+  "audit_051_verification": "属实。sparse_attn/info.py get_method_name_with_info（tli 分支 L11-17）只编码 tia_block_size(64)/level1_topk(128)/level2_topk(1024)/cmp_ratio(4) 与开关位 A(subspace)B(kmeans)D(layer_skip)，不编码 tli_far_method/tli_near_method/tli_alpha/tli_beta/tli_gamma → mavg 与 aavg 的文件名方法段与 manifest extra_params 完全同串。此为 051 根因，本文件不推翻、只补充运行侧佐证。",
+  "honesty_boundary": [
+   "本文件是同时代（contemporaneous）运行佐证，不是哈希绑定证据：saved-> 日志行证明『某文件名在该时刻该机该日志链产出』，派单记录证明『该链进程的 argv 配置』，两者靠 文件名+时间戳+任务序 对齐；没有从 pred 字节到进程的密码学绑定。",
+   "不能将 051 升级为 closed：mavg/aavg 的 128K 归因（+1.06/-3.87）保持 provisional。要 closed 须按 E120 口径在未来数据上以原生身份字段（far/near/αβγ 入 manifest）重建。",
+   "操作者会话记录（~/.claude/projects/-home-wangyuanshuo02-CUDA-Triton-Learn/62aa2193-*.jsonl 的 tool_use Bash 条目，UTC 时间戳）属操作者自查材料，其独立性弱于第三方证据，强弱次序如实标注于 evidence_level。"
+  ],
+  "evidence_level_definitions": {
+   "A_case_encoded": "配置编码在启动脚本的 per-arm case 语句内，且该脚本字节 SHA256 已在 script_sha_inventory 记录——配置证据随脚本字节固定。",
+   "B_dispatch_extra": "long_tasks.sh 无 per-arm case，配置在派单命令 EXTRA；证据 = 时间戳化操作者会话派单命令原文（部分附同会话 ps argv 快照）+ 远端日志 RULERLONGSUB 起跑行 + saved-> 行三方对齐。"
+  },
+  "integrity_anchor": {
+   "check": "对 33 个 best_file 逐个重算本地生产文件 SHA256，与 e119_ruler128k_formal_{arm}.json.manifest.json 的 tasks[].source_sha256 比对",
+   "result": "33/33 逐字节一致（收集时实测）——本表所对账的文件正是 formal 收口实际消费的字节。",
+   "note": "该 SHA 匹配只锚定『本地文件 == 收口输入』，不锚定『文件字节 == 某配置进程的输出』（后者即 051 的缺口）。"
+  },
+  "script_sha_inventory": [
+   {
+    "script": "/tmp/e109_ruler128_tasks.sh（本地与 H20 各一份）",
+    "sha256_local": "b94128e43619221ef7ddda20ddb1e9ea26028d5d37d3343a45861dfe890c86a1",
+    "sha256_h20": "b94128e43619221ef7ddda20ddb1e9ea26028d5d37d3343a45861dfe890c86a1",
+    "role": "H20 128K 补位主力（per-arm case：mavg L15/aavg L16/fullkv L17）"
+   },
+   {
+    "script": "/tmp/e109_ruler_long_tasks.sh",
+    "sha256_local": "cd21c84057078f268907b4143ffb87ad91352211896ab4a6772887806e945921（2026-10-09 05:37Z sed 修 MODEL 行后的版本）",
+    "sha256_187": "465d0314677480859ceb038dfac2fe2c6d3fa9d5a2f70eb4372762a558d683b8（MODEL=/home/wangyuanshuo02/Qwen3-8B，.187 本地化）",
+    "role": "长档包抄链（无 per-arm case，EXTRA 透传，--method tli 硬编码、fullkv 靠 EXTRA 后位覆盖）——两份仅 MODEL 行不同，逻辑逐行一致（人工 diff 核对）"
+   },
+   {
+    "script": "/tmp/e109_251_ruler128k.sh（.251）",
+    "sha256": "212e62b23d197499c217c472422433a3a24977c5312240dfd871d83144ca9053",
+    "role": ".251 双卡 128K 补位（per-arm case：mavg/aavg/fullkv 完整 αβγ 编码）"
+   },
+   {
+    "script": "benchmark/RULER/run_ruler_e109.sh（仓库 runner）",
+    "sha256_187": "65a2f7a232b1a0195bf41c70e423ea917d78ecee38b2fa8f4bad247946f0425e",
+    "sha256_h20": "65a2f7a232b1a0195bf41c70e423ea917d78ecee38b2fa8f4bad247946f0425e",
+    "sha256_local_repo": "461716ade54fcca5e014fbd4d3bea903e9455bcda4cfa07270287fbac1876bb4（MODEL/cd 行本地化）",
+    "role": "早期 r128 三链（.187 GPU6 mavg / H20 GPU1 fullkv / H20 GPU4 aavg，TS=10090643/10090704）；.187/H20 副本逐字节一致"
+   },
+   {
+    "script": "/tmp/e109_ruler64_tasks.sh（三机一致）",
+    "sha256": "b7095f780a39671d852832324095f2348bdf05f11fe78fabd370d80f4ff802bc",
+    "role": "仅 65536 档（L65536 硬编码），与 128K 无关，列此仅为排除混淆"
+   }
+  ],
+  "arm_config_tri_source": {
+   "mavg": {
+    "cfg": "--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625",
+    "sources": [
+     "run_ruler_e109.sh L34",
+     "e109_ruler128_tasks.sh L15",
+     "e109_251_ruler128k.sh case mavg",
+     "long_tasks 派单 EXTRA（会话记录 2026-10-08T23:59:22Z / 00:08:18Z / 04:39:49Z 原文）"
+    ]
+   },
+   "aavg": {
+    "cfg": "--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0",
+    "sources": [
+     "run_ruler_e109.sh L38",
+     "e109_ruler128_tasks.sh L16",
+     "e109_251_ruler128k.sh case aavg",
+     "long_tasks 派单 EXTRA（00:08:18Z / 04:39:49Z）",
+     ".251 活进程 ps argv（2026-10-10 02:1X 收集，pid 2514139）"
+    ]
+   },
+   "fullkv": {
+    "cfg": "--method none（无 TLI 参数）",
+    "sources": [
+     "run_ruler_e109.sh L40-42",
+     "e109_ruler128_tasks.sh L17",
+     "e109_251_ruler128k.sh case fullkv",
+     "long_tasks 派单 EXTRA '--method none'（后位覆盖）",
+     ".251 活进程 ps argv（pid 2524519，--method none 且无任何 --tli_* 参数）"
+    ]
+   }
+  },
+  "closure_reference": {
+   "summary": "exp/trace/results/e119_ruler128k_formal_summary.json",
+   "scores": "mavg 47.49 (+1.06) > FullKV 46.43 > aavg 42.56 (−3.87)",
+   "receipt_run_ids": {
+    "mavg": "20261010001240-949233-6982",
+    "fullkv": "20261010001142-947492-6957",
+    "aavg": "20261010001312-949782-2375"
+   },
+   "identity_mode": "legacy-partial（manifest note：model_path/yarn 等为操作者声明值）"
+  }
+ },
+ "dispatch_records": {
+  "d_187_g6_mavg_r128": "2026-10-08T22:43:07Z nohup bash /home/wangyuanshuo02/two-level-attention/benchmark/RULER/run_ruler_e109.sh mavg 6 100 \"131072\" > /tmp/r128_mavg_187.log 2>&1（22:39:38Z 首派相对路径 cd 失败后改绝对路径重派）",
+  "d_h20_g1_fullkv_r128": "2026-10-08T23:03:54Z nohup bash /home/wangyuanshuo02/two-level-attention/benchmark/RULER/run_ruler_e109.sh fullkv 1 100 \"131072\" > /tmp/r128_fullkv_h20.log",
+  "d_h20_g4_aavg_r128": "2026-10-08T23:03:54Z nohup bash /home/wangyuanshuo02/two-level-attention/benchmark/RULER/run_ruler_e109.sh aavg 4 100 \"131072\" > /tmp/r128_aavg_h20.log",
+  "d_187_g0_mavg": "2026-10-08T23:59:22Z ssh .187 'M=\"--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625\"; nohup bash /tmp/e109_ruler_long_tasks.sh 0 mavg 131072 \"$M\" \"vt cwe fwe\" > /tmp/r128sub_187_g0.log'；ps 快照 2026-10-09T00:02:45Z argv 展开证实",
+  "d_187_g1a4a7": "2026-10-09T00:08:18Z ssh .187 三连派：G1 aavg \"$A\" 'vt cwe fwe'；G4 mavg \"$M\" 'niah_multikey_1 niah_multikey_2 niah_multikey_3'；G7 fullkv '--method none' 'niah_single_2 niah_single_3 niah_multikey_1'（A=\"--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0\"，M=\"--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625\"）；ps 快照 03:05:06Z/03:06:04Z argv 展开证实",
+  "d_187_g2g3g5": "2026-10-09T04:39:49Z ssh .187 三连派：G2 fullkv \"--method none\" 'niah_multiquery niah_multivalue cwe fwe vt'；G3 mavg \"mavg配置\" 'niah_multikey_3 niah_multiquery niah_multivalue'；G5 aavg \"aavg配置\" 'niah_multikey_2 niah_multikey_3 niah_multiquery fwe'",
+  "d_187_g7_tail": "2026-10-09T06:44:08Z ssh .187 'nohup bash -c \"bash /tmp/e109_ruler_long_tasks.sh 7 fullkv 131072 \\\"--method none\\\" \\\"cwe fwe\\\"\" > /tmp/e109_gpu7_128k_fullkv_tail.log'",
+  "d_local_g1_s3": "2026-10-09T04:51:30Z cd /home/wangyuanshuo02/two-level-attention && nohup bash /tmp/e109_ruler_long_tasks.sh 1 fullkv 131072 \"--method none\" \"niah_single_3\"（12:51 CST 起 SKIP done 163，零产出）",
+  "d_local_g1_cwe_fwe_1st": "2026-10-09T04:54:46Z 同型派 cwe fwe → /tmp/e109_gpu1_128k_fullkv_cwe_fwe.log：12:55 两次 RULERLONGSUB 相隔 11s 即转下一任务（MODEL 路径错，HF 加载失败，零产出）",
+  "d_local_g1_cwe_fwe_2nd": "2026-10-09T05:37:01Z sed 修本地脚本 MODEL 行（/home/wangyuanshuo02/Qwen3-8B → /mnt/dolphinfs/.../sunyueqing/Qwen3-8B）后重派 → /tmp/e109_gpu1_128k_fullkv_cwe_fwe2.log（13:37 CST 起跑成功）",
+  "d_local_g0_mk1mk3": "2026-10-09T06:02:01Z cd /home/wangyuanshuo02/two-level-attention && nohup bash /tmp/e109_ruler_long_tasks.sh 0 fullkv 131072 \"--method none\" \"niah_multikey_1 niah_multikey_3\" > /tmp/e109_gpu0_128k_fullkv_mk1mk3.log（mk1 SKIP done 104，mk3 14:02 CST 起跑）",
+  "d_h20_ruler128_quad": "2026-10-09T02:38:35Z ssh H20 四连派 ruler128_tasks.sh：G0 fullkv 'mk1 mk3 mq mv cwe fwe'；G2 mavg 'mk2 mk3 mq mv cwe fwe'；G3 aavg 'mk1 mk2 mk3 mq'；G5 aavg 'mv cwe fwe s3'（各日志 10:39 CST 起跑，TS=10091039）",
+  "d_h20_g6_fill": "2026-10-09T03:07:20Z ssh H20 'nohup bash -c \"bash /tmp/e109_ruler128_tasks.sh 6 mavg niah_single_3; bash /tmp/e109_ruler128_tasks.sh 6 fullkv vt\" > /tmp/e109_gpu6_128k_fill.log'（mavg s3 11:07 CST TS=10091107；fullkv vt 14:05 CST TS=10091405）",
+  "d_h20_g7_fwe_mv": "2026-10-09T04:24:07Z ssh H20 'nohup bash /tmp/e109_ruler128_tasks.sh 7 mavg \"fwe mv\" > /tmp/e109_gpu7_128k_mavg.log'（fwe 12:24 CST TS=10091224 正常落盘；mv 非 RULER_TASKS 合法名被 argparse 秒拒 → DONE failed=1，无文件）",
+  "d_h20_g7_deepcells": "2026-10-09T07:33:18Z ssh H20 'nohup bash -c \"bash /tmp/e109_ruler128_tasks.sh 7 mavg niah_multivalue; bash /tmp/e109_ruler128_tasks.sh 7 aavg niah_multiquery\" > /tmp/e109_gpu7_128k_deepcells.log'（mv 15:33 TS=10091533；mq 18:30 TS=10091830）"
+ },
+ "per_file": {
+  "mavg/niah_single_1": {
+   "arm": "mavg",
+   "task": "niah_single_1",
+   "best_file": "niah_single_1-tli_64_128_1024_c4_A-10090643.jsonl",
+   "source_sha256": "bae78c6df25661e94a1f53ec98a37214ea2e90bdaf5ac48fae5a0974218d2188",
+   "origin": {
+    "machine": ".187",
+    "gpu": "GPU6",
+    "log": "/tmp/r128_mavg_187.log",
+    "evidence_lines": [
+     "=== [06:43:34] L=131072 task=niah_single_1 arm=mavg n=100 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/niah_single_1-tli_64_128_1024_c4_A-10090643.jsonl"
+    ],
+    "dispatch_records": [
+     "d_187_g6_mavg_r128"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "benchmark/RULER/run_ruler_e109.sh（.187 副本 SHA256 65a2f7a2...，mavg case L34/aavg L38/fullkv L40-42）",
+    "config_basis": "脚本 case L34：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "mavg/niah_single_2": {
+   "arm": "mavg",
+   "task": "niah_single_2",
+   "best_file": "niah_single_2-tli_64_128_1024_c4_A-10090643.jsonl",
+   "source_sha256": "beb554d57b14da3f9e421db7fed63cfcc6f3ee112b74a93aee79974bb0b69291",
+   "origin": {
+    "machine": ".187",
+    "gpu": "GPU6",
+    "log": "/tmp/r128_mavg_187.log",
+    "evidence_lines": [
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/niah_single_2-tli_64_128_1024_c4_A-10090643.jsonl"
+    ],
+    "dispatch_records": [
+     "d_187_g6_mavg_r128"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "benchmark/RULER/run_ruler_e109.sh（.187 副本 SHA256 65a2f7a2...，mavg case L34/aavg L38/fullkv L40-42）",
+    "config_basis": "脚本 case L34：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "mavg/niah_single_3": {
+   "arm": "mavg",
+   "task": "niah_single_3",
+   "best_file": "niah_single_3-tli_64_128_1024_c4_A-10091107.jsonl",
+   "source_sha256": "3c3aac08443dac0c2600fa856bb2c873b674286e4c055a42a89ab01e01eaef41",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU6",
+    "log": "/tmp/e109_gpu6_128k_fill.log",
+    "evidence_lines": [
+     "=== RULER128SUB mavg niah_single_3 GPU6 10-09 11:07:25 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/niah_single_3-tli_64_128_1024_c4_A-10091107.jsonl",
+     "E109_RULER128SUB_mavg_GPU6_DONE failed=0 Fri Oct  9 02:05:42 PM CST 2026"
+    ],
+    "dispatch_records": [
+     "d_h20_g6_fill"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_ruler128_tasks.sh（H20 副本 SHA256 b94128e4...，mavg L15/aavg L16/fullkv L17 case）",
+    "config_basis": "脚本 case L15：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "mavg/niah_multikey_1": {
+   "arm": "mavg",
+   "task": "niah_multikey_1",
+   "best_file": "niah_multikey_1-tli_64_128_1024_c4_A-10090808.jsonl",
+   "source_sha256": "7bb2d52f80232bdafdda5fc37c188e4b7b1fe942baf3ac1e5233885b4a637a97",
+   "origin": {
+    "machine": ".187",
+    "gpu": "GPU4",
+    "log": "/tmp/r128sub_187_g4.log",
+    "evidence_lines": [
+     "=== RULERLONGSUB mavg L131072 niah_multikey_1 GPU4 10-09 08:08:44 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/niah_multikey_1-tli_64_128_1024_c4_A-10090808.jsonl"
+    ],
+    "dispatch_records": [
+     "d_187_g1a4a7"
+    ],
+    "evidence_level": "B_dispatch_extra（long_tasks.sh 配置仅存在于派单 EXTRA；证据=时间戳化的操作者会话派单命令 + 远端日志起跑/saved 行 +（部分）同会话 ps argv 快照）",
+    "launcher": "/tmp/e109_ruler_long_tasks.sh（.187 SHA256 465d0314...，EXTRA 透传）",
+    "config_basis": "派单 EXTRA（会话记录原文）：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "mavg/niah_multikey_2": {
+   "arm": "mavg",
+   "task": "niah_multikey_2",
+   "best_file": "niah_multikey_2-tli_64_128_1024_c4_A-10091039.jsonl",
+   "source_sha256": "90f894e4ac9c05982812627cb65d8f1bbb49ee89da466511ec8079b2387385da",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU2",
+    "log": "/tmp/e109_128_g2_mavg.log",
+    "evidence_lines": [
+     "=== RULER128SUB mavg niah_multikey_2 GPU2 10-09 10:39:02 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/niah_multikey_2-tli_64_128_1024_c4_A-10091039.jsonl"
+    ],
+    "dispatch_records": [
+     "d_h20_ruler128_quad"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_ruler128_tasks.sh（H20 副本 SHA256 b94128e4...，mavg L15/aavg L16/fullkv L17 case）",
+    "config_basis": "脚本 case L15：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "mavg/niah_multikey_3": {
+   "arm": "mavg",
+   "task": "niah_multikey_3",
+   "best_file": "niah_multikey_3-tli_64_128_1024_c4_A-10091240.jsonl",
+   "source_sha256": "9fde48e27669de4227d50e6885e49cba56daa3c4387434d7c55d51b70ca1959e",
+   "origin": {
+    "machine": ".187",
+    "gpu": "GPU3",
+    "log": "/tmp/e109_187_g3_128k_mavg.log",
+    "evidence_lines": [
+     "=== RULERLONGSUB mavg L131072 niah_multikey_3 GPU3 10-09 12:40:15 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/niah_multikey_3-tli_64_128_1024_c4_A-10091240.jsonl"
+    ],
+    "dispatch_records": [
+     "d_187_g2g3g5"
+    ],
+    "evidence_level": "B_dispatch_extra（long_tasks.sh 配置仅存在于派单 EXTRA；证据=时间戳化的操作者会话派单命令 + 远端日志起跑/saved 行 +（部分）同会话 ps argv 快照）",
+    "launcher": "/tmp/e109_ruler_long_tasks.sh（.187 SHA256 465d0314...，EXTRA 透传）",
+    "config_basis": "派单 EXTRA（会话记录原文）：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "mavg/niah_multiquery": {
+   "arm": "mavg",
+   "task": "niah_multiquery",
+   "best_file": "niah_multiquery-tli_64_128_1024_c4_A-10091240.jsonl",
+   "source_sha256": "ad6157e24ada28eaf392789380f274be999088e588fe607be685836dbd2315b3",
+   "origin": {
+    "machine": ".187",
+    "gpu": "GPU3",
+    "log": "/tmp/e109_187_g3_128k_mavg.log",
+    "evidence_lines": [
+     "=== RULERLONGSUB mavg L131072 niah_multiquery GPU3 10-09 15:37:32 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/niah_multiquery-tli_64_128_1024_c4_A-10091240.jsonl",
+     "E109_RULERLONGSUB_mavg_L131072_DONE Fri Oct  9 09:19:04 PM CST 2026"
+    ],
+    "dispatch_records": [
+     "d_187_g2g3g5"
+    ],
+    "evidence_level": "B_dispatch_extra（long_tasks.sh 配置仅存在于派单 EXTRA；证据=时间戳化的操作者会话派单命令 + 远端日志起跑/saved 行 +（部分）同会话 ps argv 快照）",
+    "launcher": "/tmp/e109_ruler_long_tasks.sh（.187 SHA256 465d0314...，EXTRA 透传）",
+    "config_basis": "派单 EXTRA（会话记录原文）：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "mavg/niah_multivalue": {
+   "arm": "mavg",
+   "task": "niah_multivalue",
+   "best_file": "niah_multivalue-tli_64_128_1024_c4_A-10091533.jsonl",
+   "source_sha256": "1ecaf04f1a46788ff6aa37d587898638fe2a07ce971d898bfd22d93793235d3a",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU7",
+    "log": "/tmp/e109_gpu7_128k_deepcells.log",
+    "evidence_lines": [
+     "=== RULER128SUB mavg niah_multivalue GPU7 10-09 15:33:30 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/niah_multivalue-tli_64_128_1024_c4_A-10091533.jsonl",
+     "E109_RULER128SUB_mavg_GPU7_DONE failed=0 Fri Oct  9 06:30:52 PM CST 2026"
+    ],
+    "dispatch_records": [
+     "d_h20_g7_deepcells"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_ruler128_tasks.sh（H20 副本 SHA256 b94128e4...，mavg L15/aavg L16/fullkv L17 case）",
+    "config_basis": "脚本 case L15：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "mavg/cwe": {
+   "arm": "mavg",
+   "task": "cwe",
+   "best_file": "cwe-tli_64_128_1024_c4_A-10091039.jsonl",
+   "source_sha256": "8394df12a9570ed83e903c7f1abd340edb74c86ebe5dbf07d32e6d150c0a94ac",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU2",
+    "log": "/tmp/e109_128_g2_mavg.log",
+    "evidence_lines": [
+     "=== RULER128SUB mavg cwe GPU2 10-09 19:21:44 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/cwe-tli_64_128_1024_c4_A-10091039.jsonl",
+     "E109_RULER128SUB_mavg_GPU2_DONE failed=0 Fri Oct  9 10:11:47 PM CST 2026"
+    ],
+    "dispatch_records": [
+     "d_h20_ruler128_quad"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_ruler128_tasks.sh（H20 副本 SHA256 b94128e4...，mavg L15/aavg L16/fullkv L17 case）",
+    "config_basis": "脚本 case L15：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "mavg/fwe": {
+   "arm": "mavg",
+   "task": "fwe",
+   "best_file": "fwe-tli_64_128_1024_c4_A-10091224.jsonl",
+   "source_sha256": "25e58878176d40f5b7cc3255712da28db564b52725b76663bc4e4a2d629ad4b7",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU7",
+    "log": "/tmp/e109_gpu7_128k_mavg.log",
+    "evidence_lines": [
+     "=== RULER128SUB mavg fwe GPU7 10-09 12:24:34 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/fwe-tli_64_128_1024_c4_A-10091224.jsonl",
+     "E109_RULER128SUB_mavg_GPU7_DONE failed=1 Fri Oct  9 03:22:26 PM CST 2026（failed=1 即派单尾部非法任务名 mv，与 fwe 本格无关）"
+    ],
+    "dispatch_records": [
+     "d_h20_g7_fwe_mv"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_ruler128_tasks.sh（H20 副本 SHA256 b94128e4...，mavg L15/aavg L16/fullkv L17 case）",
+    "config_basis": "脚本 case L15：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "mavg/vt": {
+   "arm": "mavg",
+   "task": "vt",
+   "best_file": "vt-tli_64_128_1024_c4_A-10090759.jsonl",
+   "source_sha256": "c40f4bcce9328c9d9c6548e3f4aae6c043ce59ad8bfa799fe82bff7a0274af4e",
+   "origin": {
+    "machine": ".187",
+    "gpu": "GPU0",
+    "log": "/tmp/r128sub_187_g0.log",
+    "evidence_lines": [
+     "=== RULERLONGSUB mavg L131072 vt GPU0 10-09 07:59:49 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/mavg/L131072/pred_1024/vt-tli_64_128_1024_c4_A-10090759.jsonl"
+    ],
+    "dispatch_records": [
+     "d_187_g0_mavg"
+    ],
+    "evidence_level": "B_dispatch_extra（long_tasks.sh 配置仅存在于派单 EXTRA；证据=时间戳化的操作者会话派单命令 + 远端日志起跑/saved 行 +（部分）同会话 ps argv 快照）",
+    "launcher": "/tmp/e109_ruler_long_tasks.sh（.187 SHA256 465d0314...，EXTRA 透传）",
+    "config_basis": "派单 EXTRA（会话记录原文+ps argv 快照）：--tli_far_method minmax --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0.25 --tli_beta 0.125 --tli_gamma 0.625"
+   }
+  },
+  "aavg/niah_single_1": {
+   "arm": "aavg",
+   "task": "niah_single_1",
+   "best_file": "niah_single_1-tli_64_128_1024_c4_A-10090704.jsonl",
+   "source_sha256": "3217031ef522f49bf06044e9cf21bda05ccb0b007fa2702bb134659270167669",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU4",
+    "log": "/tmp/r128_aavg_h20.log",
+    "evidence_lines": [
+     "=== [07:04:21] L=131072 task=niah_single_1 arm=aavg n=100 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/aavg/L131072/pred_1024/niah_single_1-tli_64_128_1024_c4_A-10090704.jsonl"
+    ],
+    "dispatch_records": [
+     "d_h20_g4_aavg_r128"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "benchmark/RULER/run_ruler_e109.sh（H20 副本 SHA256 65a2f7a2...，同 case）",
+    "config_basis": "脚本 case L38：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0"
+   }
+  },
+  "aavg/niah_single_2": {
+   "arm": "aavg",
+   "task": "niah_single_2",
+   "best_file": "niah_single_2-tli_64_128_1024_c4_A-10090922.jsonl",
+   "source_sha256": "1ed296181e66472e8da4fdc3fed9370257a2f0830f79c65f8bf364fd5d53e680",
+   "origin": {
+    "machine": ".251",
+    "gpu": "GPU1",
+    "log": "/tmp/e109_251_ruler128k_aavg.log",
+    "evidence_lines": [
+     "=== [09:22:37] L=131072 task=niah_single_2 arm=aavg n=100 gpu=1 ===",
+     "saved -> exp/results_ruler/e109_full_Qwen3-8B（.251 机相对路径）/aavg/L131072/pred_1024/niah_single_2-tli_64_128_1024_c4_A-10090922.jsonl",
+     "活进程佐证（收集时 2026-10-10 02:1X CST，pid 2514139 同链后续任务）：python -u -m benchmark.RULER.pred_ruler ... --output-dir exp/.../aavg --tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0 --yarn ..."
+    ],
+    "dispatch_records": [],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_251_ruler128k.sh（.251 SHA256 212e62b2...，mavg/aavg/fullkv case）",
+    "config_basis": "脚本 case aavg：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0（另有同机活进程 argv 直接印证）"
+   }
+  },
+  "aavg/niah_single_3": {
+   "arm": "aavg",
+   "task": "niah_single_3",
+   "best_file": "niah_single_3-tli_64_128_1024_c4_A-10091218.jsonl",
+   "source_sha256": "b43768a1665708292eee77f3e62df3cc8f0a83fd00478a5af32b808b127331aa",
+   "origin": {
+    "machine": ".251",
+    "gpu": "GPU1",
+    "log": "/tmp/e109_251_ruler128k_aavg.log",
+    "evidence_lines": [
+     "=== [12:18:39] L=131072 task=niah_single_3 arm=aavg n=100 gpu=1 ===",
+     "saved -> exp/results_ruler/e109_full_Qwen3-8B（.251 机相对路径）/aavg/L131072/pred_1024/niah_single_3-tli_64_128_1024_c4_A-10091218.jsonl"
+    ],
+    "dispatch_records": [],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_251_ruler128k.sh（.251 SHA256 212e62b2...，mavg/aavg/fullkv case）",
+    "config_basis": "脚本 case aavg：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0"
+   }
+  },
+  "aavg/niah_multikey_1": {
+   "arm": "aavg",
+   "task": "niah_multikey_1",
+   "best_file": "niah_multikey_1-tli_64_128_1024_c4_A-10091516.jsonl",
+   "source_sha256": "a00f5b6f73e55602740940c029bdd2d2b8bb3b058a16ab6369861cb99652824e",
+   "origin": {
+    "machine": ".251",
+    "gpu": "GPU1",
+    "log": "/tmp/e109_251_ruler128k_aavg.log",
+    "evidence_lines": [
+     "=== [15:16:21] L=131072 task=niah_multikey_1 arm=aavg n=100 gpu=1 ===",
+     "saved -> exp/results_ruler/e109_full_Qwen3-8B（.251 机相对路径）/aavg/L131072/pred_1024/niah_multikey_1-tli_64_128_1024_c4_A-10091516.jsonl"
+    ],
+    "dispatch_records": [],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_251_ruler128k.sh（.251 SHA256 212e62b2...，mavg/aavg/fullkv case）",
+    "config_basis": "脚本 case aavg：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0"
+   }
+  },
+  "aavg/niah_multikey_2": {
+   "arm": "aavg",
+   "task": "niah_multikey_2",
+   "best_file": "niah_multikey_2-tli_64_128_1024_c4_A-10091813.jsonl",
+   "source_sha256": "b2816739b916b2af00555a1dfce621fb69c354c3489189c522729e56e8aa110d",
+   "origin": {
+    "machine": ".251",
+    "gpu": "GPU1",
+    "log": "/tmp/e109_251_ruler128k_aavg.log",
+    "evidence_lines": [
+     "=== [18:13:51] L=131072 task=niah_multikey_2 arm=aavg n=100 gpu=1 ===",
+     "saved -> exp/results_ruler/e109_full_Qwen3-8B（.251 机相对路径）/aavg/L131072/pred_1024/niah_multikey_2-tli_64_128_1024_c4_A-10091813.jsonl"
+    ],
+    "dispatch_records": [],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_251_ruler128k.sh（.251 SHA256 212e62b2...，mavg/aavg/fullkv case）",
+    "config_basis": "脚本 case aavg：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0"
+   }
+  },
+  "aavg/niah_multikey_3": {
+   "arm": "aavg",
+   "task": "niah_multikey_3",
+   "best_file": "niah_multikey_3-tli_64_128_1024_c4_A-10091240.jsonl",
+   "source_sha256": "e00d686979e16b9f1921bce2417c03e771cf6fd2eb6cf7080327f0867b333126",
+   "origin": {
+    "machine": ".187",
+    "gpu": "GPU5",
+    "log": "/tmp/e109_187_g5_128k_aavg.log",
+    "evidence_lines": [
+     "=== RULERLONGSUB aavg L131072 niah_multikey_3 GPU5 10-09 18:04:09 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/aavg/L131072/pred_1024/niah_multikey_3-tli_64_128_1024_c4_A-10091240.jsonl"
+    ],
+    "dispatch_records": [
+     "d_187_g2g3g5"
+    ],
+    "evidence_level": "B_dispatch_extra（long_tasks.sh 配置仅存在于派单 EXTRA；证据=时间戳化的操作者会话派单命令 + 远端日志起跑/saved 行 +（部分）同会话 ps argv 快照）",
+    "launcher": "/tmp/e109_ruler_long_tasks.sh（.187 SHA256 465d0314...，EXTRA 透传）",
+    "config_basis": "派单 EXTRA（会话记录原文）：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0"
+   }
+  },
+  "aavg/niah_multiquery": {
+   "arm": "aavg",
+   "task": "niah_multiquery",
+   "best_file": "niah_multiquery-tli_64_128_1024_c4_A-10091830.jsonl",
+   "source_sha256": "506e08c12b8d9c226296caea92eb89bbec46b77e3eef208bdb04b8697ddb9e0e",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU7",
+    "log": "/tmp/e109_gpu7_128k_deepcells.log",
+    "evidence_lines": [
+     "=== RULER128SUB aavg niah_multiquery GPU7 10-09 18:30:52 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/aavg/L131072/pred_1024/niah_multiquery-tli_64_128_1024_c4_A-10091830.jsonl",
+     "E109_RULER128SUB_aavg_GPU7_DONE failed=0 Fri Oct  9 09:25:16 PM CST 2026"
+    ],
+    "dispatch_records": [
+     "d_h20_g7_deepcells"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_ruler128_tasks.sh（H20 副本 SHA256 b94128e4...，mavg L15/aavg L16/fullkv L17 case）",
+    "config_basis": "脚本 case L16：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0"
+   }
+  },
+  "aavg/niah_multivalue": {
+   "arm": "aavg",
+   "task": "niah_multivalue",
+   "best_file": "niah_multivalue-tli_64_128_1024_c4_A-10091039.jsonl",
+   "source_sha256": "38ba91278ec8682f42671ebdc79057be995b428029a808ed1dd644a502d86874",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU5",
+    "log": "/tmp/e109_128_g5_aavg.log",
+    "evidence_lines": [
+     "=== RULER128SUB aavg niah_multivalue GPU5 10-09 10:39:02 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/aavg/L131072/pred_1024/niah_multivalue-tli_64_128_1024_c4_A-10091039.jsonl",
+     "E109_RULER128SUB_aavg_GPU5_DONE failed=0 Fri Oct  9 07:30:50 PM CST 2026"
+    ],
+    "dispatch_records": [
+     "d_h20_ruler128_quad"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_ruler128_tasks.sh（H20 副本 SHA256 b94128e4...，mavg L15/aavg L16/fullkv L17 case）",
+    "config_basis": "脚本 case L16：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0"
+   }
+  },
+  "aavg/cwe": {
+   "arm": "aavg",
+   "task": "cwe",
+   "best_file": "cwe-tli_64_128_1024_c4_A-10091039.jsonl",
+   "source_sha256": "13909833feda79d7af82db0ec3b60069a0fa55e656f11ee5a0eb128da820c6ce",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU5",
+    "log": "/tmp/e109_128_g5_aavg.log",
+    "evidence_lines": [
+     "=== RULER128SUB aavg cwe GPU5 10-09 13:36:38 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/aavg/L131072/pred_1024/cwe-tli_64_128_1024_c4_A-10091039.jsonl"
+    ],
+    "dispatch_records": [
+     "d_h20_ruler128_quad"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_ruler128_tasks.sh（H20 副本 SHA256 b94128e4...，mavg L15/aavg L16/fullkv L17 case）",
+    "config_basis": "脚本 case L16：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0"
+   }
+  },
+  "aavg/fwe": {
+   "arm": "aavg",
+   "task": "fwe",
+   "best_file": "fwe-tli_64_128_1024_c4_A-10091039.jsonl",
+   "source_sha256": "e3c80f65db0a3473bc8f58de3c6569ce30ccfac1022820fc63a40aa21e19ca42",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU5",
+    "log": "/tmp/e109_128_g5_aavg.log",
+    "evidence_lines": [
+     "=== RULER128SUB aavg fwe GPU5 10-09 16:33:07 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/aavg/L131072/pred_1024/fwe-tli_64_128_1024_c4_A-10091039.jsonl"
+    ],
+    "dispatch_records": [
+     "d_h20_ruler128_quad"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_ruler128_tasks.sh（H20 副本 SHA256 b94128e4...，mavg L15/aavg L16/fullkv L17 case）",
+    "config_basis": "脚本 case L16：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0"
+   }
+  },
+  "aavg/vt": {
+   "arm": "aavg",
+   "task": "vt",
+   "best_file": "vt-tli_64_128_1024_c4_A-10090808.jsonl",
+   "source_sha256": "dad80cf0045f9568d44b54d424a441f77c6b9cde08693709d1f32b3c48272680",
+   "origin": {
+    "machine": ".187",
+    "gpu": "GPU1",
+    "log": "/tmp/r128sub_187_g1.log",
+    "evidence_lines": [
+     "=== RULERLONGSUB aavg L131072 vt GPU1 10-09 08:08:44 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/aavg/L131072/pred_1024/vt-tli_64_128_1024_c4_A-10090808.jsonl",
+     "E109_RULERLONGSUB_aavg_L131072_DONE Fri Oct  9 04:56:52 PM CST 2026"
+    ],
+    "dispatch_records": [
+     "d_187_g1a4a7"
+    ],
+    "evidence_level": "B_dispatch_extra（long_tasks.sh 配置仅存在于派单 EXTRA；证据=时间戳化的操作者会话派单命令 + 远端日志起跑/saved 行 +（部分）同会话 ps argv 快照）",
+    "launcher": "/tmp/e109_ruler_long_tasks.sh（.187 SHA256 465d0314...，EXTRA 透传）",
+    "config_basis": "派单 EXTRA（会话记录原文+ps argv 快照 03:05:06Z）：--tli_far_method avg --tli_near_method avg --tli_enable_kmeans false --tli_alpha 0 --tli_beta 0 --tli_gamma 0"
+   }
+  },
+  "fullkv/niah_single_1": {
+   "arm": "fullkv",
+   "task": "niah_single_1",
+   "best_file": "niah_single_1-none-10090704.jsonl",
+   "source_sha256": "d27b49b8b63522cbcfb8d5d72f26f7c2de474738db727c40074959af3aee368a",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU1",
+    "log": "/tmp/r128_fullkv_h20.log",
+    "evidence_lines": [
+     "=== [07:04:21] L=131072 task=niah_single_1 arm=fullkv n=100 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/fullkv/L131072/pred_1024/niah_single_1-none-10090704.jsonl"
+    ],
+    "dispatch_records": [
+     "d_h20_g1_fullkv_r128"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "benchmark/RULER/run_ruler_e109.sh（H20 副本 SHA256 65a2f7a2...，同 case）",
+    "config_basis": "脚本 case fullkv（L40-42）：METHOD=none、TLI_ARGS 空"
+   }
+  },
+  "fullkv/niah_single_2": {
+   "arm": "fullkv",
+   "task": "niah_single_2",
+   "best_file": "niah_single_2-none-10090808.jsonl",
+   "source_sha256": "2c9c6a7aec159f562d46cbf00471aeab630f5d0b9162df7954d0bdca6e0f9ac3",
+   "origin": {
+    "machine": ".187",
+    "gpu": "GPU7",
+    "log": "/tmp/r128sub_187_g7.log",
+    "evidence_lines": [
+     "=== RULERLONGSUB fullkv L131072 niah_single_2 GPU7 10-09 08:08:44 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/fullkv/L131072/pred_1024/niah_single_2-none-10090808.jsonl",
+     "E109_RULERLONGSUB_fullkv_L131072_DONE Fri Oct  9 02:21:03 PM CST 2026"
+    ],
+    "dispatch_records": [
+     "d_187_g1a4a7"
+    ],
+    "evidence_level": "B_dispatch_extra（long_tasks.sh 配置仅存在于派单 EXTRA；证据=时间戳化的操作者会话派单命令 + 远端日志起跑/saved 行 +（部分）同会话 ps argv 快照）",
+    "launcher": "/tmp/e109_ruler_long_tasks.sh（.187 SHA256 465d0314...，EXTRA 透传）",
+    "config_basis": "派单 EXTRA：--method none (argparse 后位覆盖 long_tasks.sh 硬编码 --method tli；无任何 TLI 参数)"
+   }
+  },
+  "fullkv/niah_single_3": {
+   "arm": "fullkv",
+   "task": "niah_single_3",
+   "best_file": "niah_single_3-none-10090808.jsonl",
+   "source_sha256": "9fb9ed395a76bc4652d614c6a70d666512ef1094d31d3a9434ccd87399d465db",
+   "origin": {
+    "machine": ".187",
+    "gpu": "GPU7",
+    "log": "/tmp/r128sub_187_g7.log",
+    "evidence_lines": [
+     "=== RULERLONGSUB fullkv L131072 niah_single_3 GPU7 10-09 10:12:52 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/fullkv/L131072/pred_1024/niah_single_3-none-10090808.jsonl"
+    ],
+    "dispatch_records": [
+     "d_187_g1a4a7"
+    ],
+    "evidence_level": "B_dispatch_extra（long_tasks.sh 配置仅存在于派单 EXTRA；证据=时间戳化的操作者会话派单命令 + 远端日志起跑/saved 行 +（部分）同会话 ps argv 快照）",
+    "launcher": "/tmp/e109_ruler_long_tasks.sh（.187 SHA256 465d0314...，EXTRA 透传）",
+    "config_basis": "派单 EXTRA：--method none (argparse 后位覆盖 long_tasks.sh 硬编码 --method tli；无任何 TLI 参数)"
+   }
+  },
+  "fullkv/niah_multikey_1": {
+   "arm": "fullkv",
+   "task": "niah_multikey_1",
+   "best_file": "niah_multikey_1-none-10091039.jsonl",
+   "source_sha256": "364a4700a208af40d0be27e821b31ccce411df0e38a8aaa5a7db60d807cbfceb",
+   "origin": {
+    "machine": "H20",
+    "gpu": "GPU0",
+    "log": "/tmp/e109_128_g0_fullkv.log",
+    "evidence_lines": [
+     "=== RULER128SUB fullkv niah_multikey_1 GPU0 10-09 10:39:02 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/fullkv/L131072/pred_1024/niah_multikey_1-none-10091039.jsonl",
+     "E109_RULER128SUB_fullkv_GPU0_DONE failed=0 Fri Oct  9 11:09:09 PM CST 2026"
+    ],
+    "dispatch_records": [
+     "d_h20_ruler128_quad"
+    ],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_ruler128_tasks.sh（H20 副本 SHA256 b94128e4...，mavg L15/aavg L16/fullkv L17 case）",
+    "config_basis": "脚本 case fullkv（L17）：METHOD=none、TLI_ARGS 空"
+   }
+  },
+  "fullkv/niah_multikey_2": {
+   "arm": "fullkv",
+   "task": "niah_multikey_2",
+   "best_file": "niah_multikey_2-none-10090922.jsonl",
+   "source_sha256": "914f40f8e901eabe97711a7b9f411990bcfd021dec6bf7debc14b9aa966e8ba2",
+   "origin": {
+    "machine": ".251",
+    "gpu": "GPU0",
+    "log": "/tmp/e109_251_ruler128k_fullkv.log",
+    "evidence_lines": [
+     "=== [09:22:37] L=131072 task=niah_multikey_2 arm=fullkv n=100 gpu=0 ===",
+     "saved -> exp/results_ruler/e109_full_Qwen3-8B（.251 机相对路径）/fullkv/L131072/pred_1024/niah_multikey_2-none-10090922.jsonl",
+     "活进程佐证（收集时，pid 2524519 同链后续任务）：python -u -m benchmark.RULER.pred_ruler ... --task niah_single_3 --context_length 131072 --method none ... --yarn --pred_postfix _1024 --max-num 100（无任何 TLI 参数）"
+    ],
+    "dispatch_records": [],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_251_ruler128k.sh（.251 SHA256 212e62b2...，mavg/aavg/fullkv case）",
+    "config_basis": "脚本 case fullkv：METHOD=none、TLI_ARGS 空（另有同机活进程 argv 直接印证）"
+   }
+  },
+  "fullkv/niah_multikey_3": {
+   "arm": "fullkv",
+   "task": "niah_multikey_3",
+   "best_file": "niah_multikey_3-none-10091402.jsonl",
+   "source_sha256": "8064b5864008d555c0b63372096c0dbd1a56c4d7900044ce25f9221a883d4e96",
+   "origin": {
+    "machine": "本地",
+    "gpu": "GPU0",
+    "log": "/tmp/e109_gpu0_128k_fullkv_mk1mk3.log",
+    "evidence_lines": [
+     "==== SKIP fullkv L131072 niah_multikey_1 (done 104) ====",
+     "=== RULERLONGSUB fullkv L131072 niah_multikey_3 GPU0 10-09 14:02:27 ===",
+     "saved -> /home/wangyuanshuo02/two-level-attention/exp/results_ruler/e109_full_Qwen3-8B/fullkv/L131072/pred_1024/niah_multikey_3-none-10091402.jsonl",
+     "E109_RULERLONGSUB_fullkv_L131072_DONE Fri Oct  9 04:07:18 PM CST 2026"
+    ],
+    "dispatch_records": [
+     "d_local_g0_mk1mk3"
+    ],
+    "evidence_level": "B_dispatch_extra（long_tasks.sh 配置仅存在于派单 EXTRA；证据=时间戳化的操作者会话派单命令 + 远端日志起跑/saved 行 +（部分）同会话 ps argv 快照）",
+    "launcher": "/tmp/e109_ruler_long_tasks.sh（本地 SHA256 cd21c840...，05:37Z sed 修 MODEL 行后版本；与 .187 版仅 MODEL 行不同）",
+    "config_basis": "派单 EXTRA：--method none (argparse 后位覆盖 long_tasks.sh 硬编码 --method tli；无任何 TLI 参数)"
+   }
+  },
+  "fullkv/niah_multiquery": {
+   "arm": "fullkv",
+   "task": "niah_multiquery",
+   "best_file": "niah_multiquery-none-10091332.jsonl",
+   "source_sha256": "24260c1dc9e7e699939b2dbd0a06165efcadb48ce958fdb682172839f332c717",
+   "origin": {
+    "machine": ".251",
+    "gpu": "GPU0",
+    "log": "/tmp/e109_251_ruler128k_fullkv.log",
+    "evidence_lines": [
+     "=== [13:32:24] L=131072 task=niah_multiquery arm=fullkv n=100 gpu=0 ===",
+     "saved -> exp/results_ruler/e109_full_Qwen3-8B（.251 机相对路径）/fullkv/L131072/pred_1024/niah_multiquery-none-10091332.jsonl"
+    ],
+    "dispatch_records": [],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_251_ruler128k.sh（.251 SHA256 212e62b2...，mavg/aavg/fullkv case）",
+    "config_basis": "脚本 case fullkv：METHOD=none、TLI_ARGS 空"
+   }
+  },
+  "fullkv/niah_multivalue": {
+   "arm": "fullkv",
+   "task": "niah_multivalue",
+   "best_file": "niah_multivalue-none-10091535.jsonl",
+   "source_sha256": "f04dd2360edd13d42eab5dac025fdb5c16095c59d64b56c683b97decb0ea19ef",
+   "origin": {
+    "machine": ".251",
+    "gpu": "GPU0",
+    "log": "/tmp/e109_251_ruler128k_fullkv.log",
+    "evidence_lines": [
+     "=== [15:35:32] L=131072 task=niah_multivalue arm=fullkv n=100 gpu=0 ===",
+     "saved -> exp/results_ruler/e109_full_Qwen3-8B（.251 机相对路径）/fullkv/L131072/pred_1024/niah_multivalue-none-10091535.jsonl"
+    ],
+    "dispatch_records": [],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_251_ruler128k.sh（.251 SHA256 212e62b2...，mavg/aavg/fullkv case）",
+    "config_basis": "脚本 case fullkv：METHOD=none、TLI_ARGS 空"
+   }
+  },
+  "fullkv/cwe": {
+   "arm": "fullkv",
+   "task": "cwe",
+   "best_file": "cwe-none-10091740.jsonl",
+   "source_sha256": "19cf5f582d39c40a99867d4d5b17e01724ea90038518459b022c14b718571398",
+   "origin": {
+    "machine": ".251",
+    "gpu": "GPU0",
+    "log": "/tmp/e109_251_ruler128k_fullkv.log",
+    "evidence_lines": [
+     "=== [17:40:38] L=131072 task=cwe arm=fullkv n=100 gpu=0 ===",
+     "saved -> exp/results_ruler/e109_full_Qwen3-8B（.251 机相对路径）/fullkv/L131072/pred_1024/cwe-none-10091740.jsonl"
+    ],
+    "dispatch_records": [],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_251_ruler128k.sh（.251 SHA256 212e62b2...，mavg/aavg/fullkv case）",
+    "config_basis": "脚本 case fullkv：METHOD=none、TLI_ARGS 空"
+   }
+  },
+  "fullkv/fwe": {
+   "arm": "fullkv",
+   "task": "fwe",
+   "best_file": "fwe-none-10091943.jsonl",
+   "source_sha256": "83fcf388af54c30d8f59bc6b4f45a694fd030d0f80eaa2f10ad769293b8d87e0",
+   "origin": {
+    "machine": ".251",
+    "gpu": "GPU0",
+    "log": "/tmp/e109_251_ruler128k_fullkv.log",
+    "evidence_lines": [
+     "=== [19:43:16] L=131072 task=fwe arm=fullkv n=100 gpu=0 ===",
+     "saved -> exp/results_ruler/e109_full_Qwen3-8B（.251 机相对路径）/fullkv/L131072/pred_1024/fwe-none-10091943.jsonl"
+    ],
+    "dispatch_records": [],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_251_ruler128k.sh（.251 SHA256 212e62b2...，mavg/aavg/fullkv case）",
+    "config_basis": "脚本 case fullkv：METHOD=none、TLI_ARGS 空"
+   }
+  },
+  "fullkv/vt": {
+   "arm": "fullkv",
+   "task": "vt",
+   "best_file": "vt-none-10092148.jsonl",
+   "source_sha256": "7bd57fbff9cdb5084e436b3d917720d94bb06e7694f9e79f90d26b2643286047",
+   "origin": {
+    "machine": ".251",
+    "gpu": "GPU0",
+    "log": "/tmp/e109_251_ruler128k_fullkv.log",
+    "evidence_lines": [
+     "=== [21:48:17] L=131072 task=vt arm=fullkv n=100 gpu=0 ===",
+     "saved -> exp/results_ruler/e109_full_Qwen3-8B（.251 机相对路径）/fullkv/L131072/pred_1024/vt-none-10092148.jsonl"
+    ],
+    "dispatch_records": [],
+    "evidence_level": "A_case_encoded（配置编码在启动脚本 per-arm case 内，脚本字节 SHA 在案）",
+    "launcher": "/tmp/e109_251_ruler128k.sh（.251 SHA256 212e62b2...，mavg/aavg/fullkv case）",
+    "config_basis": "脚本 case fullkv：METHOD=none、TLI_ARGS 空"
+   }
+  }
+ },
+ "reconciliation_summary": {
+  "total_cells": 33,
+  "matched_with_evidence": 33,
+  "by_level": {
+   "A_case_encoded": 24,
+   "B_dispatch_extra": 9
+  },
+  "by_machine": {
+   ".187": 10,
+   "H20": 12,
+   ".251": 10,
+   "本地": 1
+  }
+ },
+ "gaps_and_observations": [
+  "【主边界】全部证据为同时代佐证而非哈希绑定：051 不得据此升级为 closed，128K mavg/aavg 归因保持 provisional。",
+  "【在飞件】.251 收集时仍在跑两格非收口输入：aavg/niah_multiquery-10100009.jsonl（74 行）与 fullkv/niah_single_3-10100158.jsonl（16 行）；formal 收口 33 格 best-file 全部为 100 行且先于 2026-10-10 00:1X 收口时点完成，二者不属于收口输入。两进程 ps argv 已抓取（aavg pid 2514139 / fullkv pid 2524519），恰好提供了两臂配置的直接进程级佐证。",
+  "【失败派单·本地】fullkv cwe/fwe 首派（12:54 CST）因本地 long_tasks.sh MODEL 行为 .187 路径而 11s 内双任务失败（/tmp/e109_gpu1_128k_fullkv_cwe_fwe.log 仅两条 RULERLONGSUB），13:37 sed 修复后重派成功——这解释了本地（cd21c840）与 .187（465d0314）long_tasks.sh SHA 差异仅为 MODEL 行。",
+  "【失败派单·H20】GPU7 mavg 派单任务表 'fwe mv' 中 mv 非法任务名被 argparse 秒拒（DONE failed=1），fwe 正常落盘（fwe-10091224 即收口 best-file）；无残留半文件。",
+  "【.187 r128 mavg 链首派失败】2026-10-08T22:39:38Z 首派用相对路径 cd 失败（r64_aavg_187.log 留有 'No such file or directory' 记录），22:43:07Z 改绝对路径重派成功；r128_mavg_187.log 现存内容为成功链（06:43:34 起）。",
+  "【旁支观察·与 051 无关但如实记录】128K 三臂 manifest 的 run_identity.yarn_factor 声明值为 2.0（operator-declared，legacy-partial），而派单均只传 --yarn 未传 --yarn_factor，pred_ruler.py YARN_FACTOR_AUTO[131072]=4.0 → 实际运行 factor 应为 4.0。三臂声明值与实际运行行为同值同路径，跨臂可比性不受影响；但 identity 声明与代码行为的这一不一致建议并入 GPT 后续审计项。",
+  "【多文件同格】部分格存在多机重复产物（SKIP 幂等 + best-file 仲裁取最大单文件），本表只对账 formal manifest 仲裁选中的 best_file；同格其余历史文件（如 mavg/niah_single_3 的 10090643/10090808/10091039 三个非 best 文件）不在 33 格对账范围内，其来源日志同样在四机 /tmp 可查。"
+ ]
+}
