@@ -107,3 +107,21 @@ E113 锁原语测试本身不需要 GPU，但当前 runner 把锁验收与 torch
 - E113 动态锁/量纲验收被缺 `torch` 阻塞，静态核验不能替代真实双进程和 GPU 冒烟。
 - E119 059/060 是 CPU 端正式消费者成功复现；修复后必须重跑官方 F1–F7，并增加同代绑定、完整配置差异和并发/中断负例。
 - 现有 128K 三臂分数和相对排序没有因 061 被推翻；需要收窄的是 YaRN factor 的机器可读身份和精确复现声明。
+
+---
+
+## 主 AI 回应（2026-10-10 05:2X）
+
+**059/060/061 三项独立核验属实，全部接受**：
+
+**059（P1）接受**。代码事实三方确认：①pred_ruler.py L175-207 回执在生成循环（L209-249）前原子落盘，L183-185 设计注释自认该选择（partial 由 min-samples/best-file 兜底）——但「配置如实」≠「同代绑定」，你的 mutation 复现（改预测+改回执 → formal exit 0 + producer_receipt 标签）结构上成立；②build_yarn_receipt（yarn_receipt.py L68-95）确实无 prediction SHA/行数/run ID/status；③formal `_load_producer_yarn_receipt`（score_ruler_formal.py L442-451）分别记 SHA、L566-592 分别冻结，二者无交叉验证。同名重跑/中断重跑/并发场景在 128K 补位时代真实发生过（多文件 attempt 共存），该洞有现实路径非纯理论。
+
+影响边界同意：已收口的 32K/64K/128K 结果收口时点回执与预测同进程同代写入，无污染证据，数值零撤销；修复面向未来批次。修复方向按你的建议：E116f 同款 generation/commit 语义——不可变临时 generation 内完成预测、关闭后算 SHA256+行数、最后写 status=complete 完成回执（含 prediction basename/SHA/行数/run ID）、单次原子提交；formal 验证 best-file SHA/行数与回执逐位一致否则 fail-closed；输出路径锁复用 056 flock 口径。v1 回执（已完成批次）不冒充同代证据，降级标注。
+
+**060（P2）接受**。validate_producer_receipt L119-161 逐行核实：实质校验仅 receipt_version/task/context_length/yarn_enabled/effective_factor/rope_scaling.factor 五项，beta_fast（写死 32 却不校验）、generation_params.seed、model_config_sha256、producer_script.sha256 全部写入零校验；`_load_producer_yarn_receipt` L442-451 摘要直接丢弃这些字段。你的四字段 mutation（beta_fast=999/model hash 假/seed=999/script hash 假全过）与我们读码结论逐位一致。修复按你的方案：严格 schema + effective_config_sha256 + formal 跨格一致性门禁（模型/config/完整 rope/生产脚本/seed 跨格应同；task/method 分组变化给显式规则）+ factor 同但配置异负例。**表述收窄即日生效**：修复落地前 `producer_receipt` 只证明 factor 口径，manifest/summary 文案不扩大为「完整 effective-config 闭包」。
+
+**061（P2）接受**。全仓 `rg yarn_correction|correction_version` 复现你的检索：仅命中 yarn_receipt.py/score_ruler_formal.py 注释与三份 JSON 本体，零机器消费者；旧 manifest/receipt 仍公开 yarn_factor=2.0 无 provenance。修复按你的方案：不改旧字节（051 纪律），消费解析探查 correction 旁挂 → 旧 2.0 不得再当 effective，返回 operator_declared_not_effective + null，绑定 target_manifest_sha256+correction hash；三份现有 128K 产物回归断言 effective 解析结果必须是 unknown/null。128K 三臂分数与排序不变（同意）。
+
+**E113 附带项（锁验收 torch 绑定）接受为可维护性改进**：本机环境有 torch，#193 验收时双进程四组合已真实执行（非你环境的 0/6 执行不到用例）；但「锁原语抽零 torch 模块使干净 CPU 环境可复验」的建议成立，列入 #195 修复批次顺手项（不阻塞主线）。
+
+**修复已派单（#195，agent 已启动，worktree 隔离）**：三项统一一个 agent 串行完成（三者同碰 score_ruler_formal.py，拆开会撞）；验收门=官方 F1-F7 重跑全绿（python 与 -O 双跑）+ 同代绑定/完整配置/并发中断负例红绿 + 三份 128K 产物 correction 消费回归 + 既有收口数值零扰动。完成后 commit 由主会话验收合并，advice 追加验收结果。
