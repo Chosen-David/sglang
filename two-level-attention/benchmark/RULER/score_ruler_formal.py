@@ -50,6 +50,20 @@
 #   outputs.generation_files（消费者可从 receipt 单指针解析同一
 #   generation 内的全部文件）；旧格式四件套（32K/64K 已发布产物）仍
 #   按原路径直接可读，读取兼容不受影响。
+# ===== E116g（GPT 1326 审计 040 修复，同 --out 并发发布互斥）=====
+#   TL-RULER-CONCURRENT-PUBLISH-040（两个并发发布者对同一 --out 的
+#       备份/四镜像安装/清理可交错，留下固定 JSON 与 receipt 的持久
+#       混合代际且两进程均返回 0；run_id 只隔离 staging/generation，
+#       不隔离固定 aliases）→ 发布事务整体移入进程间独占锁：以
+#       realpath(abspath(--out)) 为键建立 fcntl.flock(LOCK_EX) 排他锁
+#       （锁文件 {out}.lock 与目标同目录），锁覆盖「读取/建立备份 →
+#       四镜像安装 → SHA 终验 → 备份清理或回滚」全段，备份必须在获得
+#       锁后才创建；安装后新增 SHA 终验（镜像 ↔ generation 规范文件
+#       逐位一致，锁内失败走锁内回滚）。锁语义边界如实声明：flock 为
+#       咨询锁，仅约束同样走本入口的发布者；进程退出（含 SIGKILL）时
+#       由内核自动释放，无陈旧锁需人工清理；仅验证过本机文件系统，
+#       跨宿主共享文件系统（NFS 等）的 flock 语义未验证，不构成跨宿主
+#       互斥承诺。
 # 用法（单臂单 root）：
 #   python -u benchmark/RULER/score_ruler_formal.py \
 #     --root exp/results_ruler/e109_full_Qwen3-8B/L32768 \
@@ -66,6 +80,7 @@
 #   merged 规范文件 + scorer manifest）。
 # 失败产物：{out}.failure-{run_id}.json（独立 failure receipt，不动旧产物）。
 import argparse
+import fcntl
 import glob
 import json
 import os
@@ -162,6 +177,83 @@ def _atomic_install(src, dst, run_id):
         except OSError:
             pass
         raise
+
+
+def _locked_publish(mirrors, run_id, out_path, backups, published,
+                    rollback_state):
+    """E116g（040）：同一 --out 的并发发布互斥（进程间独占锁）。
+
+    以 realpath(abspath(--out)) 为稳定键建立排他锁：fcntl.flock
+    LOCK_EX（阻塞等待），锁文件 {out}.lock 与目标同目录。锁覆盖完整
+    发布事务——「读取/建立备份 → 四镜像安装 → SHA 终验 → 备份清理
+    或回滚」；备份必须在获得锁之后才创建（审计建议 1：备份与安装
+    不可分割，否则另一发布者可在备份与安装之间完成整轮发布，留下
+    持久混合代际）。
+
+    安装后新增 SHA 终验：每个已安装镜像与 generation 规范文件逐位
+    一致；终验失败 → 锁内回滚（旧产物逐位还原，首轮则删除新镜像）
+    后向上抛出，由外层 except 统一写 failure receipt。
+
+    锁语义边界（如实声明，不冒充跨宿主保障）：
+      - flock 是咨询锁，仅约束同样走本入口的发布者；
+      - 锁在进程退出（含被 SIGKILL）时由内核自动释放——不存在需要
+        人工清理的陈旧锁（.lock 文件本身可长期留存，无锁持有状态）；
+      - 仅验证过本机文件系统的 flock 语义；跨宿主共享文件系统
+        （NFS 等）的 flock 语义有坑且未验证，本锁不构成跨宿主互斥
+        承诺（多机发布到共享路径须另行协调）。
+    """
+    lock_path = os.path.realpath(out_path) + ".lock"
+    d = os.path.dirname(lock_path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)   # 阻塞等待；内核级自动释放
+        # ---- 备份必须在获得锁后创建（040）----
+        for _, dst in mirrors:
+            backups[dst] = _backup_public(dst, run_id)
+        try:
+            for src, dst in mirrors:
+                _atomic_install(src, dst, run_id)
+                published.append(dst)
+            # ---- SHA 终验（锁内）：安装后的镜像与 generation 规范
+            #      文件逐位一致；失败走锁内回滚 ----
+            for src, dst in mirrors:
+                if _file_sha256(dst) != _file_sha256(src):
+                    raise OSError(
+                        f"镜像 {dst} 安装后 SHA 终验失败（与 generation "
+                        f"规范文件 {src} 不一致）——锁内回滚")
+        except BaseException:
+            # ---- 锁内回滚（040：失败回滚不得与并发发布者交错）----
+            errors = []
+            for dst in published:
+                bak = backups.get(dst)
+                try:
+                    if bak is None:
+                        try:
+                            os.remove(dst)
+                        except FileNotFoundError:
+                            pass
+                    else:
+                        os.replace(bak, dst)
+                except OSError as oe:
+                    errors.append(f"{dst}: {oe}")
+            rollback_state.update(
+                done=True, n_restored=len(published) - len(errors),
+                errors=errors)
+            raise
+        # ---- 全部镜像安装 + 终验成功 → 提交完成，锁内清理备份 ----
+        for dst, bak in backups.items():
+            if bak is not None:
+                try:
+                    os.remove(bak)
+                except FileNotFoundError:
+                    pass
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def _stamp_or_copy(src, dst, task, stamp):
@@ -402,6 +494,10 @@ def main():
     # E116f（038）发布事务状态：在 try 之前定义，失败路径据此回滚
     backups = {}    # 公开路径 → 备份路径（None = 旧产物不存在/首轮）
     published = []  # 已成功替换的公开镜像（回滚清单，按替换顺序）
+    # E116g（040）：锁内回滚状态（_locked_publish 在锁内完成回滚后置
+    # done=True，外层 except 据此跳过重复回滚——锁释放后的二次回滚会
+    # 与下一个发布者交错，正是 040 要消除的窗口）
+    rollback_state = {"done": False, "n_restored": 0, "errors": []}
 
     extra_params = {}
     for kv in args.extra_param:
@@ -582,26 +678,18 @@ def main():
                 _file_sha256(gen["json"]) != receipt["result_sha256"]:
             _fail("generation 规范文件 SHA 与 receipt 声明不一致——不发布")
         # ⑤ 公开固定路径作为兼容镜像逐个安装（JSON → MD → manifest →
-        #    receipt；receipt 镜像最后落盘 = 唯一提交信号）。任一步
-        #    OSError 由 except 统一回滚，混合代际不可达（修复 038）
+        #    receipt；receipt 镜像最后落盘 = 唯一提交信号）。E116g
+        #    （040）：整个安装事务在进程间独占锁内执行——「备份建立 →
+        #    四镜像安装 → SHA 终验 → 备份清理或锁内回滚」，同一 --out
+        #    的并发发布者串行化，混合代际不可达
         mirrors = [
             (gen["json"], args.out),
             (gen["md"], md_path),
             (gen["manifest"], manifest_path),
             (gen["receipt"], receipt_path),
         ]
-        for _, dst in mirrors:
-            backups[dst] = _backup_public(dst, run_id)
-        for src, dst in mirrors:
-            _atomic_install(src, dst, run_id)
-            published.append(dst)
-        # 全部镜像安装成功 → 提交完成，清理备份
-        for dst, bak in backups.items():
-            if bak is not None:
-                try:
-                    os.remove(bak)
-                except FileNotFoundError:
-                    pass
+        _locked_publish(mirrors, run_id, args.out, backups, published,
+                        rollback_state)
         print(f"[formal] 发布成功（generation 原子提交 + 兼容镜像）："
               f"{args.out} / {md_path} / {manifest_path} / {receipt_path}")
         print(f"[formal] 派生目录（generation，含四规范文件+补刻副本"
@@ -620,19 +708,27 @@ def main():
         # E116f（038）回滚：published 中的公开镜像已换成新代际 → 从备份
         # 逐位还原（os.replace，与备份同目录必同设备、原子）；旧产物原本
         # 不存在（首轮）→ 删除新镜像。回滚后不存在「旧 receipt 配新结果」
-        rollback_errors = []
-        for dst in published:
-            bak = backups.get(dst)
-            try:
-                if bak is None:
-                    try:
-                        os.remove(dst)
-                    except FileNotFoundError:
-                        pass
-                else:
-                    os.replace(bak, dst)
-            except OSError as oe:
-                rollback_errors.append(f"{dst}: {oe}")
+        # E116g（040）：镜像安装段的失败已在 _locked_publish 锁内完成
+        # 回滚（rollback_state.done）——锁释放后的二次回滚会与下一个
+        # 发布者交错（正是 040 的竞态窗口），此处跳过；未进锁即失败的
+        # 路径（staging/scorer/generation rename）published 为空，回滚
+        # 天然为 no-op
+        if rollback_state["done"]:
+            rollback_errors = rollback_state["errors"]
+        else:
+            rollback_errors = []
+            for dst in published:
+                bak = backups.get(dst)
+                try:
+                    if bak is None:
+                        try:
+                            os.remove(dst)
+                        except FileNotFoundError:
+                            pass
+                    else:
+                        os.replace(bak, dst)
+                except OSError as oe:
+                    rollback_errors.append(f"{dst}: {oe}")
         # 残留备份/临时文件清理（_atomic_install 失败时已自清理 tmp，
         # 这里对全部公开路径兜底）
         for dst in backups:
@@ -662,8 +758,14 @@ def main():
                 "publish_protocol": "e116f-generation-v2",
                 "rollback": {
                     "attempted": bool(published),
-                    "n_restored": len(published) - len(rollback_errors),
+                    "n_restored": (
+                        rollback_state["n_restored"]
+                        if rollback_state["done"]
+                        else len(published) - len(rollback_errors)),
                     "errors": rollback_errors,
+                    # E116g（040）：True = 回滚发生在发布锁内（镜像
+                    # 安装段失败）；False = 未进锁即失败（无镜像被触碰）
+                    "in_publish_lock": rollback_state["done"],
                 },
                 "note": ("本轮失败，未发布任何产物（发布阶段失败时已回滚"
                          "全部已替换的公开镜像至旧代际）；输出路径下既有"

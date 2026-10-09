@@ -8,11 +8,76 @@
     "samples_per_task": 100,
     "tasks": 11
   },
+  "identity_gate": {
+    "protocol": "e116g-crossarm-identity-v1",
+    "common_identity_digest": "ed5589af534f18202faa5b12df78636f454b036b379a4508ce9993614156e07a",
+    "compared_fields": [
+      "task_set",
+      "tasks.{ids,answers_sha,lengths}",
+      "source_data_sha256",
+      "expect_tasks",
+      "min_samples",
+      "model_path",
+      "yarn",
+      "yarn_factor",
+      "data_root",
+      "extra_params(白名单外逐键)",
+      "scorer_manifest_digest"
+    ],
+    "treatment_whitelist": [
+      "alpha",
+      "beta",
+      "far_method",
+      "gamma",
+      "method",
+      "near_method"
+    ],
+    "per_arm_treatment": {
+      "mavg": {
+        "alpha": "0.25",
+        "beta": "0.125",
+        "far_method": "minmax",
+        "gamma": "0.625",
+        "near_method": "avg"
+      },
+      "FullKV": {
+        "method": "none"
+      },
+      "aavg": {
+        "alpha": "0",
+        "beta": "0",
+        "far_method": "avg",
+        "gamma": "0",
+        "near_method": "avg"
+      }
+    },
+    "scorer_manifest_digest": "15d05c9767b07aeceba0942f1f31329c627b1232c1d6f42da7fe08454dcf7315",
+    "per_arm_script_sha256": {
+      "mavg": {
+        "formal_script_sha256": "c6b70a27601143c9faa8bd22218f3cf6a79ba2d47633cf17893db92665b88e43",
+        "scorer_sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99"
+      },
+      "FullKV": {
+        "formal_script_sha256": "c6b70a27601143c9faa8bd22218f3cf6a79ba2d47633cf17893db92665b88e43",
+        "scorer_sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99"
+      },
+      "aavg": {
+        "formal_script_sha256": "c6b70a27601143c9faa8bd22218f3cf6a79ba2d47633cf17893db92665b88e43",
+        "scorer_sha256": "ea771d2f8e352114cb6009cd255a30583076fef9203e00b1afef8ad9c73adf99"
+      }
+    },
+    "script_sha_policy": "warn-only：formal/scorer 脚本 SHA 的身份语义是评分口径而非数据身份（后续脚本修复会使旧产物 SHA 与新脚本不同），记录差异不硬拒",
+    "script_sha_warn": false,
+    "all_arms_data_identity_identical": true
+  },
   "closure": {
     "three_arm_receipts_success": true,
     "receipt_result_sha_matches": true,
+    "receipt_manifest_sha_matches": true,
     "all_cells_n100": true,
-    "source_sha_stable": true
+    "single_cell_enforced": true,
+    "source_sha_stable": true,
+    "crossarm_identity_gate": true
   },
   "arms": {
     "mavg": {
@@ -78,6 +143,6 @@
   },
   "verdict": {
     "ruler64k_ranking": "mavg 49.42 > FullKV 48.54 > aavg 47.51",
-    "conclusion": "64K 正式口径下 mavg(+0.88) 超 FullKV、aavg(−1.03) 落后；与 32K 正式排序（mavg 59.99 > FullKV 59.38 > aavg 57.33）方向一致——RULER 32K/64K 两档 mavg 冠军稳定，128K 待全齐后同口径收口。"
+    "conclusion": "64K 正式口径下 mavg(+0.88) 超 FullKV、aavg(−1.03) 落后；与 32K 正式排序（mavg 59.99 > FullKV 59.38 > aavg 57.33）方向一致——RULER 32K/64K 两档 mavg 冠军稳定，128K 待全齐后同口径收口（E116g 起收口同时启用跨臂身份门禁 + 正式入口并发发布锁）。"
   }
 }

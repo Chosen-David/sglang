@@ -15,6 +15,20 @@
 #       临时文件 + 原子替换」，EXDEV 不可达，发布成功且 receipt 与跨
 #       设备 manifest SHA 闭合；
 #   既有 E116e 套件（E1-E12 + D9 SKIP 基线）不回归 → D1。
+# ===== E116g（GPT 1326 审计 TL-RULER-CONCURRENT-PUBLISH-040）=====
+#   T4：两个子进程同 --out 确定性交错发布（A 慢速安装者注入延迟、B
+#       快速后到者）→ fcntl.flock 发布锁串行化，两进程均 rc=0，最终
+#       四固定 aliases 属同一 run_id、receipt result/manifest SHA 与
+#       固定文件闭合、后到者完全覆盖前者（最终 JSON 与 B 单独发布
+#       逐位一致，无混合代际）；
+#   T5（红例）：同一交错调度下把 fcntl.flock 补丁成 no-op（模拟修复
+#       前无互斥）→「两进程均成功 + 最终代际闭合」不再成立（B 的镜像
+#       交错进 A 的安装窗口，A 的锁内 SHA 终验/回滚被破坏或失败）——
+#       证明 T4 的绿灯来自发布锁而非侥幸时序；
+#   T6：一方发布中持锁安装中途被 SIGKILL 异常退出 → flock 由内核
+#       自动释放（无陈旧锁），另一方正常发布成功且最终四 aliases
+#       完整属于后者（被杀进程的 .bak/generation 残留属预期——
+#       SIGKILL 无法执行清理，不构成混合代际）。
 # 用法:
 #   PYTHONPATH=$PWD python3 -m benchmark.RULER.test_e116f_publish_atomic
 import glob
@@ -26,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
@@ -103,6 +118,186 @@ def _formal_inject(root, out, inject_replace=None, inject_rename=False,
 def _copy_fixture(base, name):
     return shutil.copytree(os.path.join(TESTDATA, "pred_root"),
                            os.path.join(base, name))
+
+
+# ---- E116g（040）：并发发布交错测试辅助 ----
+
+def _formal_bg(root, out):
+    """普通（无注入）正式入口后台子进程。"""
+    argv = [sys.executable, "-u", "-m", "benchmark.RULER.score_ruler_formal",
+            "--root", root, "--pred-postfix", "_fx",
+            "--data-root", os.path.join(TESTDATA, "data_root"),
+            "--out", out, "--min-samples", "2"]
+    return subprocess.Popen(argv, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, cwd=REPO,
+                            env={**os.environ, "PYTHONPATH": REPO})
+
+
+def _formal_inject_bg(root, out, delay=0.0, marker=None, no_lock=False):
+    """带发布阶段延迟/锁禁用的正式入口后台子进程（040 交错测试）。
+
+    注入语义：os.replace 先执行真实替换、再写 marker、再 sleep(delay)
+    ——即「该镜像已安装 + 发布者停在发布临界区内」，确定性构造审计
+    040 的交错窗口；no_lock=True 时把 fcntl.flock 补丁成 no-op（模拟
+    修复前无互斥的红例——子进程内先打补丁再 import 正式入口模块，
+    模块级 `import fcntl` 取到的是同一被补丁的模块对象）。"""
+    formal_argv = ["--root", root, "--pred-postfix", "_fx",
+                   "--data-root", os.path.join(TESTDATA, "data_root"),
+                   "--out", out, "--min-samples", "2"]
+    code = (
+        "import os, sys, time\n"
+        "sys.argv = ['score_ruler_formal'] + " + repr(formal_argv) + "\n"
+        "delay = " + repr(delay) + "\n"
+        "marker = " + repr(marker) + "\n"
+        "no_lock = " + repr(no_lock) + "\n"
+        "if no_lock:\n"
+        "    import fcntl\n"
+        "    fcntl.flock = lambda *a, **k: None\n"
+        "_rp = os.replace\n"
+        "_cnt = {'n': 0}\n"
+        "def _replace(a, b):\n"
+        "    _cnt['n'] += 1\n"
+        "    r = _rp(a, b)\n"
+        "    if marker is not None:\n"
+        "        with open(marker, 'w') as f:\n"
+        "            f.write(str(_cnt['n']))\n"
+        "    if delay:\n"
+        "        time.sleep(delay)\n"
+        "    return r\n"
+        "os.replace = _replace\n"
+        "import benchmark.RULER.score_ruler_formal as m\n"
+        "m.main()\n"
+    )
+    return subprocess.Popen([sys.executable, "-c", code],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, cwd=REPO,
+                            env={**os.environ, "PYTHONPATH": REPO})
+
+
+def _aliases_closed(out):
+    """四个固定 aliases 是否同一代际闭合：receipt success + receipt
+    result/manifest SHA 与固定文件逐位一致 + manifest.run_id 与
+    receipt.run_id 相同 + generation 目录真实存在。混合代际（040 的
+    持久病态）在该口径下必表现为 False。"""
+    try:
+        rc = json.load(open(out + ".receipt.json"))
+        mf = json.load(open(out + ".manifest.json"))
+    except (OSError, ValueError):
+        return False
+    if rc.get("status") != "success":
+        return False
+    try:
+        return (rc.get("result_sha256") == _sha(out) and
+                rc.get("manifest_sha256") == _sha(out + ".manifest.json")
+                and mf.get("run_id") == rc.get("run_id") and
+                os.path.isdir(rc["outputs"]["derived_dir"]))
+    except OSError:
+        return False
+
+
+def test_T4_concurrent_publish_lock(base):
+    """T4（040）：A 慢速安装者（每个镜像安装后停 1s）+ B 快速后到者，
+    同 --out 并发 → 发布锁串行化，两进程均成功，最终四 aliases 完整
+    属于 B（后到者完全覆盖前者），无混合代际。"""
+    root_a = _copy_fixture(base, "t4_root_a")
+    root_b = _copy_fixture(base, "t4_root_b")
+    _tamper_vt_pred(root_a, "T4-A")
+    _tamper_vt_pred(root_b, "T4-B")
+    out = os.path.join(base, "t4.json")
+    # B 单独发布的参考产物：并发收口的最终代际必须与它逐位一致
+    out_b_ref = os.path.join(base, "t4_b_ref.json")
+    r = _formal(root_b, out_b_ref)
+    assert r.returncode == 0 and "DONE" in r.stdout, \
+        (r.returncode, r.stdout[-2000:], r.stderr[-1000:])
+    a = _formal_inject_bg(root_a, out, delay=1.0)
+    time.sleep(0.3)          # 确保 A 先进入发布临界区（持锁安装中）
+    b = _formal_bg(root_b, out)
+    a_out, a_err = a.communicate(timeout=180)
+    b_out, b_err = b.communicate(timeout=180)
+    assert a.returncode == 0 and "DONE" in a_out, \
+        (a.returncode, a_out[-1500:], a_err[-800:])
+    assert b.returncode == 0 and "DONE" in b_out, \
+        (b.returncode, b_out[-1500:], b_err[-800:])
+    # 四固定 aliases 同一代际闭合（receipt↔JSON/manifest SHA +
+    # manifest.run_id == receipt.run_id + generation 存在）
+    assert _aliases_closed(out), \
+        "并发发布后固定 aliases 不闭合（混合代际，040 复发）"
+    # 后到者完全覆盖前者：最终 JSON 与 B 单独发布逐位一致
+    assert _sha(out) == _sha(out_b_ref), \
+        "最终 JSON ≠ 后到者 B 的单独发布结果（存在部分代际残留）"
+    # 锁文件留存属预期（flock 无持锁状态，文件本身无害可长存）
+    assert os.path.isfile(out + ".lock")
+    print("T4 PASS  同 --out 双进程确定性交错发布（A 持锁慢速安装、B "
+          "阻塞等待）→ 两进程均成功；四固定 aliases 同 run_id 闭合；"
+          "最终代际 = 后到者 B 逐位（完全覆盖前者，无混合代际，040 修复）")
+
+
+def test_T5_no_lock_red(base):
+    """T5（040 红例）：同一交错调度 + flock 补丁 no-op（模拟修复前）→
+    「两进程均成功 + 最终代际闭合」不成立（本调度下 B 的镜像交错进
+    A 的安装窗口：A 的 SHA 终验捕获交错后失败回滚/最终代际被破坏）。
+    证明 T4 绿灯来自发布锁本身而非侥幸时序。"""
+    root_a = _copy_fixture(base, "t5_root_a")
+    root_b = _copy_fixture(base, "t5_root_b")
+    _tamper_vt_pred(root_a, "T5-A")
+    _tamper_vt_pred(root_b, "T5-B")
+    out = os.path.join(base, "t5.json")
+    a = _formal_inject_bg(root_a, out, delay=2.0, no_lock=True)
+    time.sleep(0.3)
+    b = _formal_inject_bg(root_b, out, no_lock=True)
+    a_out, a_err = a.communicate(timeout=180)
+    b_out, b_err = b.communicate(timeout=180)
+    ok = (a.returncode == 0 and b.returncode == 0 and
+          _aliases_closed(out))
+    assert not ok, (
+        f"红例失效：禁用 flock 后同一交错调度仍「双成功+闭合」——"
+        f"说明 T4 的交错窗口未真正覆盖临界区（a_rc={a.returncode}, "
+        f"b_rc={b.returncode}）：\nA: {a_out[-600:]}\nB: {b_out[-600:]}")
+    print(f"T5 PASS  红例：flock 禁用 + 同一交错调度 → 双成功+代际闭合"
+          f"被破坏（a_rc={a.returncode}, b_rc={b.returncode}, "
+          f"closed={_aliases_closed(out)}）——T4 绿灯确证来自发布锁")
+
+
+def test_T6_kill_while_locked(base):
+    """T6（040）：一方持锁安装中途被 SIGKILL → flock 由内核自动释放
+    （陈旧锁天然恢复，无人工清理），另一方正常发布成功且最终四
+    aliases 完整属于后者。被杀进程的 .bak/generation 残留属预期
+    （SIGKILL 无法执行清理代码），不构成混合代际。"""
+    root_a = _copy_fixture(base, "t6_root_a")
+    root_b = _copy_fixture(base, "t6_root_b")
+    _tamper_vt_pred(root_a, "T6-A")
+    _tamper_vt_pred(root_b, "T6-B")
+    out = os.path.join(base, "t6.json")
+    out_b_ref = os.path.join(base, "t6_b_ref.json")
+    r = _formal(root_b, out_b_ref)
+    assert r.returncode == 0 and "DONE" in r.stdout, r.stdout[-1500:]
+    marker = os.path.join(base, "t6_marker.txt")
+    a = _formal_inject_bg(root_a, out, delay=3.0, marker=marker)
+    # 轮询 marker=="1"：A 已安装第 1 个镜像（JSON）并停在临界区延迟内
+    # ——此刻 A 持有发布锁
+    deadline = time.time() + 60
+    entered = False
+    while time.time() < deadline:
+        if (os.path.isfile(marker) and
+                open(marker).read().strip() == "1"):
+            entered = True
+            break
+        time.sleep(0.05)
+    assert entered, "60s 内未观察到 A 进入发布临界区（marker 未出现）"
+    a.kill()                 # SIGKILL：持锁状态下异常退出
+    a.wait()
+    assert a.returncode != 0, "被杀进程 returncode 应非零"
+    b = _formal_bg(root_b, out)
+    b_out, b_err = b.communicate(timeout=180)
+    assert b.returncode == 0 and "DONE" in b_out, \
+        (b.returncode, b_out[-1500:], b_err[-800:])
+    assert _aliases_closed(out), \
+        "被杀发布者之后另一方的发布结果不闭合（锁未正确释放/混合代际）"
+    assert _sha(out) == _sha(out_b_ref), \
+        "最终 JSON ≠ 后到者 B 的单独发布结果（被杀进程代际残留）"
+    print("T6 PASS  持锁发布中 SIGKILL → 内核自动释放 flock（无陈旧锁）；"
+          "另一方正常发布成功，最终四 aliases 完整属于后者（被杀进程的"
+          " .bak/generation 残留属预期，不构成混合代际）")
 
 
 def _tamper_vt_pred(root, tag):
@@ -297,11 +492,17 @@ def main():
         t3 = test_T3_cross_device_manifest(base)
         if t3:
             PASS += 1
+        test_T4_concurrent_publish_lock(base)
+        PASS += 1
+        test_T5_no_lock_red(base)
+        PASS += 1
+        test_T6_kill_while_locked(base)
+        PASS += 1
         test_D1_no_regression()
         PASS += 1
     finally:
         shutil.rmtree(base, ignore_errors=True)
-    total = 4 if t3 else 3
+    total = 7 if t3 else 6
     skip = "" if t3 else "，T3 SKIP（无第二设备）"
     print(f"\nE116f ALL PASS ({PASS}/{total}{skip})")
 
