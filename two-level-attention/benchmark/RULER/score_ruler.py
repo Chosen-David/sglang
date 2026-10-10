@@ -2,6 +2,13 @@
 # 对每个样本：ground truth 列表逐目标做大小写不敏感子串包含，命中数/
 # 目标数；全体样本均值 ×100。汇总 11 任务 × 长度 × 方法 → markdown 表。
 # 用法：python -u benchmark/RULER/score_ruler.py [--root exp/results_ruler/Qwen3-8B]
+#   【069 边界（GPT 2026-10-10 1330 审计 TL-E119-POINTER-SCORER）】：本
+#   直接入口只支持 legacy-direct 产物（{task}-*.jsonl 直写文件）。root
+#   下检测到任何 .tli_gen generation 指针 → [GATE-FAIL] 非零退出、不写
+#   任何输出，提示改用 score_ruler_formal.py（legacy+pointer 双通道正式
+#   打分入口）。单口径原则：不在本脚本维护第二套指针解析——base scorer
+#   只作为 formal 的内部后端（formal 经 staging 派生副本调用，staging
+#   内无指针文件，本门禁对其零触发）；正式结果一律以 formal 为准。
 # B08 修复（GPT 审查 2026-10-08）：原版不验证样本数、不隔离轮次——同目录
 # 残留旧轮/部分结果的 cell 会混入 AVG（缺任务也照出分）。修复：①逐 cell
 # 记录样本数 n，n < min-samples 的 cell 打 WARN 且不计入 AVG（分数仍展示）
@@ -36,6 +43,15 @@ import hashlib
 import json
 import os
 import shutil
+
+# 069：指针协议后缀从 yarn_receipt 单一来源取（协议常量不复制第二份，
+# 防双实现漂移——正是 069 的根因）。-m 包调用走第一分支；直接脚本调用
+# （python benchmark/RULER/score_ruler.py，无包上下文）时 sys.path[0]
+# 已是脚本目录，退回同目录导入。
+try:
+    from benchmark.RULER.yarn_receipt import GENERATION_POINTER_SUFFIX
+except ImportError:
+    from yarn_receipt import GENERATION_POINTER_SUFFIX
 
 TASKS = [
     "niah_single_1", "niah_single_2", "niah_single_3",
@@ -238,6 +254,41 @@ def _score_cell(path, task, key, manifest):
     return round(string_match_all(preds, refs), 2), len(preds)
 
 
+def _gate_no_generation_pointers(root, pred_postfix):
+    """069（TL-E119-POINTER-SCORER）：direct CLI 指针协议门禁。
+
+    验证什么：root（含 pred{postfix} 目录）下不得存在任何 .tli_gen
+    generation 指针——本脚本候选发现只 glob 直写 JSONL（legacy-direct），
+    pointer-only root 会被静默解释成「零方法」：带 --expect-tasks 时误报
+    0 方法键，无门禁时 exit 0 写出空 scores/n/sources 结果（GPT 审计复现
+    SHA 4d493b3e...，冒充正式外观产物）。
+
+    行为：检测到指针 → SystemExit（[GATE-FAIL]，非零退出，python -O 不
+    失效），提示改用 score_ruler_formal.py；门禁在任何读盘/写盘之前执行
+    → 零输出文件。检测本身只认文件名后缀（不解析指针内容——解析口径
+    单一归属 yarn_receipt.resolve_generation_pointer，本脚本不复制）。
+
+    不影响 formal 内部复用：本函数只在 main()（direct CLI）调用；
+    formal import 本模块的函数（TASKS/_score_cell/_resolve_group 等）不
+    经过 main()。formal 的 scorer 子进程跑在 staging 派生副本
+    （root=staging/pred_root，只含 legacy 直写复制件、无指针文件）上，
+    门禁对其恒零触发。"""
+    pointers = sorted(glob.glob(os.path.join(
+        root, "L*", f"pred{pred_postfix}", f"*{GENERATION_POINTER_SUFFIX}")))
+    if not pointers:
+        return
+    raise SystemExit(
+        f"[GATE-FAIL] {root}（pred-postfix {pred_postfix}）下检测到 "
+        f"{len(pointers)} 个 generation 指针协议产物（如 "
+        f"{os.path.basename(pointers[0])}）——score_ruler.py 直接入口只"
+        f"支持 legacy-direct 产物，不维护第二套指针解析（069 单口径"
+        f"原则）；pointer 协议 root 会被静默解释成零方法（无门禁时 "
+        f"exit 0 写空结果）。请改用 benchmark/RULER/"
+        f"score_ruler_formal.py（legacy + pointer 双通道正式打分入口）。"
+        f"fail closed，不写任何输出文件。"
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default="exp/results_ruler/Qwen3-8B")
@@ -256,6 +307,10 @@ def main():
                     help="每个方法 key 必须覆盖的任务数（按 TASKS 前 N 个为"
                          "预期集合；缺任一任务非零退出）")
     args = ap.parse_args()
+
+    # 069：direct CLI 指针门禁——须在任何读盘/写盘之前（pointer-only
+    # root 无门禁时曾 exit 0 写空结果冒充正式外观产物）
+    _gate_no_generation_pointers(args.root, args.pred_postfix)
 
     manifest = json.load(open(args.manifest)) if args.manifest else None
     if manifest is not None:

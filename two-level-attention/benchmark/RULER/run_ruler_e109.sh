@@ -5,8 +5,12 @@
 # 与旧版差异：
 #   - 三长度档：32768（原生 RoPE，不加 --yarn）/ 65536 / 131072（YaRN 自动加）
 #   - 三臂参数化：mavg 冠军 / aavg Pareto 候选 / fullkv baseline（--method none）
-#   - SKIP 幂等：输出文件已有行数 ≥ 当前 max_num 则跳过（断点续跑；
-#     冒烟 max-num 2 的残文件在全量 max-num 100 时会因 2<100 重跑覆盖）
+#   - SKIP 幂等（068 修复，TL-E119-POINTER-SKIP）：改走 gen_completion_probe
+#     探针——pointer-v1 指针 + legacy 直写双通道（#198 指针协议提交后逻辑
+#     路径无 .jsonl，旧 `ls | head -1` glob 看不到已完成代，断点续跑失效）；
+#     best-file 语义取最大行数（不做字典序 head -1，防 partial 首文件误判）；
+#     complete → SKIP / partial|missing → 跑 / invalid（指针损坏/缺件）→
+#     非零退出按协议错误处理，不当需要重跑
 #   - 输出目录：exp/results_ruler/e109_full_Qwen3-8B/{arm}/L{len}/pred_1024/
 #   - B06 同款纪律：逐任务 PIPESTATUS 检查 + FAILED 计数 + 失败 exit 1
 #
@@ -59,15 +63,32 @@ for L in $LENS; do
   for T in $TASKS; do
     OUTDIR=$OUTROOT/$ARM/L$L/pred$POSTFIX
     mkdir -p "$OUTDIR"
-    # SKIP 幂等：已有文件行数 >= N 则跳过
-    EXIST=$(ls $OUTDIR/$T-*.jsonl 2>/dev/null | head -1)
-    if [ -n "$EXIST" ]; then
-      NLINES=$(wc -l < "$EXIST")
-      if [ "$NLINES" -ge "$N" ]; then
-        echo "=== SKIP L=$L task=$T arm=$ARM (exist $NLINES >= $N) ==="
-        SKIPPED=$((SKIPPED+1))
-        continue
-      fi
+    # SKIP 幂等（068）：gen_completion_probe 探针四态判定——pointer-v1
+    # 指针 + legacy 直写双通道（指针优先，formal 同口径）+ best-file 语义
+    # （最大行数，不做 head -1）；探针自身 fail-closed（损坏指针非零退出）
+    PROBE=$(python -u benchmark/RULER/gen_completion_probe.py \
+      --out-dir "$OUTDIR" --task "$T" --max-num "$N" 2>&1)
+    PRC=$?
+    if [ "$PRC" -ne 0 ]; then
+      # invalid：协议错误（指针损坏/缺件），不当需要重跑处理——计失败，
+      # 脚本尾部 FAILED>0 → exit 1（人工介入诊断，不盲目重跑烧 GPU）
+      echo "==== PROBE-FAIL L=$L task=$T arm=$ARM rc=$PRC（协议错误，非需重跑）===="
+      echo "$PROBE"
+      FAILED=$((FAILED+1))
+      continue
+    fi
+    STATE=$(echo "$PROBE" | sed -n 's/^STATE=\([a-z]*\).*/\1/p')
+    if [ "$STATE" != "complete" ] && [ "$STATE" != "partial" ] \
+       && [ "$STATE" != "missing" ]; then
+      echo "==== PROBE-FAIL L=$L task=$T arm=$ARM（探针输出无法解析）===="
+      echo "$PROBE"
+      FAILED=$((FAILED+1))
+      continue
+    fi
+    if [ "$STATE" = "complete" ]; then
+      echo "=== SKIP L=$L task=$T arm=$ARM ($PROBE) ==="
+      SKIPPED=$((SKIPPED+1))
+      continue
     fi
     echo "=== [$(date +%H:%M:%S)] L=$L task=$T arm=$ARM n=$N ==="
     CUDA_VISIBLE_DEVICES=$GPU python -u -m benchmark.RULER.pred_ruler \

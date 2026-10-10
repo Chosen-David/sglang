@@ -3,7 +3,9 @@
 # 由 gen_ruler_long.py 循环体扩展生成）喂进本仓库 sparse_attn 管线
 # （TIA/TLI/Quest/FullKV 同一 monkeypatch）。
 # 口径对齐官方 RULER：prompt 原样（无 chat template）、max_new=64、
-# min_length=context+1 防复读、string_match_all 打分（score_ruler.py）。
+# min_length=context+1 防复读、string_match_all 打分（正式打分入口
+# score_ruler_formal.py——legacy + #198 指针协议双通道；score_ruler.py
+# 直接入口仅支持 legacy-direct 产物，pointer root 下 fail-closed，069）。
 # 用法（run_ruler.sh 批量调度）：
 #   python -u -m benchmark.RULER.pred_ruler \
 #     --model Qwen3-8B --model_path $MODEL \
