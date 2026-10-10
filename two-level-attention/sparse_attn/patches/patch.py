@@ -8,8 +8,9 @@ from transformers.models.llama.modeling_llama import LlamaAttention
 from .qwen3_attn_patch import qwen3_attn_forward
 from .llama3_attn_patch import llama3_attn_forward
 from ..indexer import indexer_type_dict
+from ..indexer.tli_indexer import TLIIndexer
 
-def register_patch(model: nn.Module, args) -> int:
+def register_patch(model: nn.Module, args, snapshot=None) -> int:
     """注册稀疏 attention patch，返回成功 patch 的模块数。
 
     【B3 修复（kimi3 清单 F3，2026-10-08）】method≠none 而零模块匹配时，
@@ -20,6 +21,14 @@ def register_patch(model: nn.Module, args) -> int:
     GLM 说明：glm4_moe_lite_attn_patch.py 是无 indexer 调用的半成品
     （MLA 结构），注册它反而会复现「标稀疏跑 dense」，故不注册、
     显式拒绝（GLM 支持留待补完 indexer 集成后再放开）。
+
+    【081（TL-E121-OUTPUT-SNAPSHOT-081）】snapshot：生产入口在模型
+    加载前冻结的 TreatmentSnapshot（sparse_attn.info.
+    resolve_treatment_snapshot 产出）。tli 臂逐层建 indexer 实例时
+    注入同一 snapshot 对象——层实例仍逐层建（layer_idx 各异），但
+    D′ 掩码 / 投影基内容不再按层重开文件（旧路径每层各 open 一次，
+    patch 中途换文件 → 跨层混代可达）。仅 TLIIndexer 接受注入，
+    其他 indexer 类型忽略 snapshot（其无文件型配置）。
     """
     IndexerType = indexer_type_dict.get(args.method, None)
     if args.method != 'none' and IndexerType is None:
@@ -28,7 +37,9 @@ def register_patch(model: nn.Module, args) -> int:
     if IndexerType is not None:
         for name, module in model.named_modules():
             if isinstance(module, Qwen3Attention):
-                module.indexer = IndexerType(args)
+                module.indexer = IndexerType(args, snapshot=snapshot) \
+                    if (snapshot is not None and IndexerType is TLIIndexer) \
+                    else IndexerType(args)
                 if hasattr(module, "layer_idx"):
                     module.indexer.layer_idx = module.layer_idx  # TLI D' 层掩码用
                 module.forward = MethodType(qwen3_attn_forward, module)
@@ -36,7 +47,9 @@ def register_patch(model: nn.Module, args) -> int:
                 if hasattr(module, "layer_idx") and module.layer_idx == 0:
                     print(f"register qwen3 attn: [{name}]")
             elif isinstance(module, LlamaAttention):
-                module.indexer = IndexerType(args)
+                module.indexer = IndexerType(args, snapshot=snapshot) \
+                    if (snapshot is not None and IndexerType is TLIIndexer) \
+                    else IndexerType(args)
                 if hasattr(module, "layer_idx"):
                     module.indexer.layer_idx = module.layer_idx
                 module.forward = MethodType(llama3_attn_forward, module)

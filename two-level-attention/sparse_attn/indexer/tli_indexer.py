@@ -21,10 +21,15 @@ import torch.nn.functional as F
 from einops import rearrange, repeat, einsum
 
 from .tia_indexer import TIAIndexer
+from ..info import DEFAULT_LAYER_SKIP_MASK_PATH
 
-DEFAULT_MASK = os.path.join(
-    os.path.dirname(__file__), "..", "..", "exp", "trace", "results", "tli_layer_skip_mask.json"
-)
+# 081（TL-E121-OUTPUT-SNAPSHOT-081）：默认 D′ 掩码路径定义上移到
+# sparse_attn/info.py（DEFAULT_LAYER_SKIP_MASK_PATH，单一事实源）——
+# manifest 侧（resolve_treatment_snapshot）与运行时侧展开的必须是同
+# 一个文件，此前 info 侧无从得知该路径 → 默认配置 manifest 恒 null
+# 而可读名含 D（081 身份缺口 ①）。本别名保留旧引用名（既有代码/
+# exp 脚本零改动），realpath 与旧定义逐位一致。
+DEFAULT_MASK = DEFAULT_LAYER_SKIP_MASK_PATH
 
 # ---- E113b：Triton 贪心 kernel（sim_greedy 臂的 Python 循环 → GPU kernel）----
 #   开关：SGLANG_TLI_GREEDY_KERNEL（默认 1 = 用 kernel；0 = 回退 Python 循环，
@@ -51,7 +56,16 @@ def _load_greedy_triton():
 class TLIIndexer(TIAIndexer):
     """A+B+D' 全开为 method='tli'；参数可单独关闭做消融。"""
 
-    def __init__(self, args) -> None:
+    def __init__(self, args, snapshot=None) -> None:
+        # 081（TL-E121-OUTPUT-SNAPSHOT-081）：snapshot = 生产入口在模型
+        # 加载前冻结的 TreatmentSnapshot（sparse_attn.info.
+        # resolve_treatment_snapshot 产出）。提供时 D′ 段直接消费
+        # snapshot.skip_ids、投影基段直接消费 snapshot.basis_tensor——
+        # 不再 open/torch.load 任何路径（旧路径 = patch.py 对每个
+        # attention 层各建一个实例、每实例各读一次文件，单模型跨层
+        # 混代可达：patch 中途换文件 → 层间 skip 集合/基不一致）。
+        # snapshot=None 保留旧路径读取行为（既有非 benchmark 入口不破），
+        # 但生产入口（benchmark pred.py / pred_ruler.py）必须注入。
         super().__init__(args)
         self.layer_idx = None            # 由 register_patch 注入
         # ---- A：子空间维度选择（2026-09-29 用户指令：参数化 rope/nope/full，默认 full）----
@@ -119,15 +133,32 @@ class TLIIndexer(TIAIndexer):
         # ---- D'：静态层掩码 ----
         self.enable_layer_skip = getattr(args, "tli_enable_layer_skip", True)
         self.skip_far = False
-        mask_path = getattr(args, "tli_layer_skip_path", None) or DEFAULT_MASK
         self._skip_ids: set[int] | None = None
-        if self.enable_layer_skip:
-            try:
-                with open(mask_path) as f:
-                    self._skip_ids = set(json.load(f)["skip"])
-            except (OSError, KeyError, ValueError):
-                print(f"[TLI] 警告: 层掩码 {mask_path} 不可读, D' 关闭")
-                self._skip_ids = None
+        if snapshot is not None:
+            # 081：注入已解析对象——掩码内容已在 resolve 阶段单次 open
+            # 解析（同一批 bytes 出 sha256 + skip 集合），此处零文件 IO。
+            if self.enable_layer_skip:
+                if snapshot.skip_ids is None:
+                    # resolve 阶段对不可读掩码已 fail closed（[GATE-FAIL]
+                    # 079 SystemExit），到达此处即 snapshot 与 args 失配
+                    # ——不允许静默关 D'（079 静默退化口径在注入路径同样
+                    # 不放行）。
+                    raise SystemExit(
+                        "[GATE-FAIL] 081: snapshot.skip_ids 为 None 但 "
+                        "tli_enable_layer_skip=True——注入的快照与 args "
+                        "失配（掩码不可用应在 resolve_treatment_snapshot "
+                        "阶段 fail closed 退出），拒绝运行")
+                self._skip_ids = set(snapshot.skip_ids)
+        else:
+            # 旧路径（非 benchmark 入口兼容）：每实例各 open 一次。
+            mask_path = getattr(args, "tli_layer_skip_path", None) or DEFAULT_MASK
+            if self.enable_layer_skip:
+                try:
+                    with open(mask_path) as f:
+                        self._skip_ids = set(json.load(f)["skip"])
+                except (OSError, KeyError, ValueError):
+                    print(f"[TLI] 警告: 层掩码 {mask_path} 不可读, D' 关闭")
+                    self._skip_ids = None
         # B 的聚类缓存（prefill 后一次；decode 期 far 区不变）
         self._km_centroids = None    # [Hkv, K_c, d']
         self._km_token_assign = None  # [Hkv, Tfar]
@@ -162,7 +193,20 @@ class TLIIndexer(TIAIndexer):
                     f"tli_proj_basis 定义在 tail-32 子空间上，与 tli_subspace={self.subspace} "
                     "不兼容（投影基的输入是 32 维特征）；请用 --tli_subspace tail"
                 )
-            self._basis_all = torch.load(bp_path, map_location="cpu", weights_only=True).float()
+            if snapshot is not None:
+                # 081：注入已解析的投影基（resolve 阶段单次 open，SHA 与
+                # tensor 同一批 bytes）——零文件 IO；快照缺基即与 args
+                # 失配，fail closed。
+                if snapshot.basis_tensor is None:
+                    raise SystemExit(
+                        "[GATE-FAIL] 081: snapshot.basis_tensor 为 None 但 "
+                        "args.tli_proj_basis 已声明——注入的快照与 args 失配"
+                        "（快照必须在 tli_proj_basis 声明的同一 args 上"
+                        "resolve），拒绝运行")
+                self._basis_all = snapshot.basis_tensor
+            else:
+                # 旧路径（非 benchmark 入口兼容）
+                self._basis_all = torch.load(bp_path, map_location="cpu", weights_only=True).float()
             self.enable_subspace = True  # 投影基定义在子空间内，强制开启
             print(f"[TLI] 投影基已加载 {bp_path} shape={list(self._basis_all.shape)}")
         self._basis = None   # 当前层子空间基 [Hkv, 32, r]（惰性提取于 prepare_index）

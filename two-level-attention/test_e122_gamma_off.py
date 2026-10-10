@@ -395,7 +395,14 @@ def t5_cli_and_info():
         # 字段集时本锚点必须重算同步更新。
         # 079 口径：manifest 新增 tia_enable_async_topk（缺省 False）→
         # 全部 tli hash 重算，本锚点已同步更新。
-        if name_f != "tli_64_128_1024_c4_BDa0_b0_g1_h1483e0db94":
+        # 081 + kimi3 0316 口径（B/D 开关入 manifest + 默认 D′ 掩码
+        # 内容身份）：kimi3 0316 追加修复 2 把 tli_enable_kmeans/
+        # tli_enable_layer_skip 入 _TREATMENT_FIELD_DEFAULTS（防可读段
+        # 截断吃掉 B/D 位后 hash 互覆）→ 锚点整体重算；叠加 081 身份
+        # 缺口 ① 修复（本 ns layer_skip=True 且未声明 path → manifest
+        # 解析 tracked DEFAULT_MASK 内容身份）→ 由 h1483e0db94 经
+        # h7c17d0b763 再重算为 hbb27186a72。
+        if name_f != "tli_64_128_1024_c4_BDa0_b0_g1_hbb27186a72":
             raise AssertionError(f"数值 γ 文件名应含生效 α/β/γ（E121 B09 口径）"
                                  f"+ 076 treatment hash：{name_f!r}")
         del ns.tli_gamma                      # 缺省属性按 1.0 兜底（不加 goff）

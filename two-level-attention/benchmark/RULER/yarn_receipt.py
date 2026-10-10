@@ -165,6 +165,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from datetime import datetime
 
 # 059：v2 = 当前协议（同代绑定）；v1 = 057 时代协议（消费侧降级标注，
@@ -755,6 +756,16 @@ def _validate_common_schema(receipt, pred_path):
     # 079：treatment_manifest（可选键——legacy 回执无此键，前向兼容）。
     # 存在时必须自洽：{sha256: 64 位十六进制, json: 非空 str} 且
     # sha256(json utf-8 字节) == 声明值——篡改 json 或 sha 任一 → 拒收。
+    # 081（TL-E121-OUTPUT-SNAPSHOT-081）：追加回执闭包校验——manifest
+    # 声明的内容身份必须与 prediction_basename 的 _h<hash10> 段相等
+    #（hash 段 = sha256(manifest json)[:10]，由 info.py 单一构造路径
+    # 保证）。修复前 schema 只查键内 sha256==json 自洽、basename 只查
+    # 物理文件名——「回执 A 的 manifest 配 B 的 basename」不可检（GPT
+    # 审计：指纹注释声称身份绑定由 _h 段承载，但代码从未比较二者）。
+    # basename 无 _h 段但 manifest 存在 → fail closed（防绕过）；
+    # legacy 回执（无 treatment_manifest 键）维持前向兼容放行——既有
+    # 收口数据零破坏。此校验不改 effective_config_sha256 指纹（079
+    # 口径注释继续成立：tm 是 per-arm 治疗身份，非同档配置语义）。
     tm = receipt.get("treatment_manifest")
     if tm is not None:
         if not isinstance(tm, dict) or not _is_hex64(tm.get("sha256")) \
@@ -766,6 +777,25 @@ def _validate_common_schema(receipt, pred_path):
                 != tm["sha256"]:
             return (f"{pred_path}: treatment_manifest.sha256 与 json 内容"
                     f"不一致（篡改/损坏）——fail closed（079）")
+        pb_tm = receipt.get("prediction_basename")
+        if not isinstance(pb_tm, str) or not pb_tm:
+            return (f"{pred_path}: treatment_manifest 存在但 "
+                    f"prediction_basename 缺失/非法——079 时代的回执"
+                    f"两者同产（v2 同代绑定），缺 basename 即协议残缺，"
+                    f"fail closed（081）")
+        m = re.search(r"_h([0-9a-f]{10})(?![0-9a-f])", pb_tm)
+        if m is None:
+            return (f"{pred_path}: treatment_manifest 存在但 "
+                    f"prediction_basename={pb_tm!r} 无 _h<hash10> 身份段"
+                    f"——tli 产物文件名必含 canonical treatment hash 尾段"
+                    f"（076），缺失即 basename 与 manifest 异源，"
+                    f"fail closed（081）")
+        if m.group(1) != tm["sha256"][:10]:
+            return (f"{pred_path}: prediction_basename 的 _h 段 "
+                    f"h{m.group(1)} 与 treatment_manifest 内容身份 "
+                    f"h{tm['sha256'][:10]} 不一致——回执内 manifest 与"
+                    f"产物文件名异源（同名混装/回执张冠李戴），"
+                    f"fail closed（081）")
     # 057 核心不变量 + 060 rope_scaling 完整规范
     eff = receipt["effective_yarn_factor"]
     if enabled:
@@ -976,7 +1006,10 @@ def effective_config_sha256(receipt):
     逐位一致」的配置语义；且纳入会使 legacy 回执（无此键 → None）与
     新回执指纹失配，破坏在飞批次（E123）与既有收口数据的跨格比较。
     其身份绑定由 prediction_basename 的 _h<hash10> 段 + 键内全长
-    sha256（schema 自洽校验）承载。"""
+    sha256 承载——081 起该绑定从「注释声称」升级为 schema 闭包校验
+    （_validate_common_schema：tm.sha256[:10] 必须等于 basename 的
+    _h 段；无 _h 段但 manifest 存在 → fail closed），指纹收录集
+    仍不含 tm（079 口径不变）。"""
     gp = receipt.get("generation_params") or {}
     ps = receipt.get("producer_script") or {}
     canon = {

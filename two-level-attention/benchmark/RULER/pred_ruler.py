@@ -80,7 +80,8 @@ from sparse_attn.arguments import add_sparse_attn_args  # noqa: E402
 from sparse_attn.patches import register_patch  # noqa: E402
 from sparse_attn.metrics import get_metrics  # noqa: E402
 from sparse_attn.info import (  # noqa: E402
-    get_method_name_with_info, get_treatment_manifest_json)
+    get_method_name_with_info, get_treatment_manifest_json,
+    resolve_treatment_snapshot)
 
 RULER_TASKS = [
     "niah_single_1", "niah_single_2", "niah_single_3",
@@ -161,6 +162,18 @@ def main():
     print(f"[ruler] task={args.task} L={args.context_length} "
           f"n={len(rows)} method={args.method}")
 
+    # 081（TL-E121-OUTPUT-SNAPSHOT-081）：tli 臂在模型加载（文件被任何
+    # attention 层消费）之前冻结一次解析的 treatment snapshot——D′ 掩码/
+    # 投影基每个文件只 open 一次；后续 method_name/out_path（190 行）、
+    # register_patch（175 行）、receipt 的 treatment_manifest_json
+    #（297 行）全部消费同一冻结对象。修复前：每层各读一次 + 190 行与
+    # 297 行各重读一遍 → 生成窗口内文件被替换时 runtime A / 文件名 B /
+    # receipt C 三方混装可达。非 tli 臂零改动（snapshot=None）。
+    if args.method == "tli":
+        snapshot = resolve_treatment_snapshot(args)
+    else:
+        snapshot = None
+
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_path, trust_remote_code=True)
     # YaRN：在模型加载前把 rope_scaling 写进 config（transformers 从
@@ -172,7 +185,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path, config=config, trust_remote_code=True,
         torch_dtype=torch.bfloat16, device_map="auto").eval()
-    register_patch(model, args)
+    register_patch(model, args, snapshot)
 
     # 超原生档位启用 logits_to_keep=1：prefill 只回传末 token logits
     # （131072×151936 bf16 全序列 logits ≈ 39.8GB 纯浪费；等价性由审计
@@ -187,7 +200,9 @@ def main():
     out_dir = os.path.join(args.output_dir, f"L{args.context_length}",
                            f"pred{args.pred_postfix}")
     os.makedirs(out_dir, exist_ok=True)
-    method_name = get_method_name_with_info(args)
+    # 081：method_name/out_path 从冻结 snapshot 派生（tli 臂）——与
+    # runtime 各层、receipt 的 treatment manifest 同一内容身份。
+    method_name = get_method_name_with_info(args, snapshot)
     out_path = os.path.join(
         out_dir, f"{args.task}-{method_name}-{args.t}.jsonl")
     # 076（TL-E121-OUTPUT-ID）：method_name 尾段含 canonical treatment
@@ -294,8 +309,12 @@ def main():
         # manifest（单一事实源），本入口不再各自维护治疗身份字段子集；
         # 非 tli 臂（none/quest/twia/tia）treatment 身份由可读名整体
         # 编码，不写。schema 校验 sha256(json) 自洽（yarn_receipt 079）。
+        # 081：从冻结 snapshot 派生（与 out_path 的 _h 段、runtime 各层
+        # 同一对象）——生成窗口内文件替换不再产生 receipt 混装；yarn_
+        # receipt 的 081 闭包校验（tm hash[:10] == basename _h 段）由此
+        # 结构性地成立。
         treatment_manifest_json = (
-            get_treatment_manifest_json(args)
+            get_treatment_manifest_json(args, snapshot)
             if args.method == "tli" else None)
         yarn_receipt = build_yarn_receipt(
             yarn_enabled=use_yarn,

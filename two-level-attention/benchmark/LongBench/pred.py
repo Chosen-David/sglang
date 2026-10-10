@@ -23,7 +23,7 @@ from sparse_attn.patches import register_patch
 from sparse_attn.metrics import get_metrics
 from sparse_attn.info import get_method_name_with_info, \
     truncate_output_name_keep_hash, get_treatment_manifest_json, \
-    gate_output_treatment_identity
+    gate_output_treatment_identity, resolve_treatment_snapshot
 
 
 def parse_args(args=None):
@@ -338,7 +338,7 @@ def seed_everything(seed):
     torch.cuda.manual_seed_all(seed)
 
 
-def load_model_and_tokenizer(path, model_name, device, args):
+def load_model_and_tokenizer(path, model_name, device, args, snapshot=None):
     tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         path, trust_remote_code=True, torch_dtype=torch.bfloat16, device_map="auto"
@@ -349,7 +349,9 @@ def load_model_and_tokenizer(path, model_name, device, args):
     # register_patch 返回成功 patch 的模块数；method≠none 而 0 匹配
     # （如 GLM-4 等未支持架构）时 fail-closed——防止静默跑 dense 却把
     # 输出文件打上稀疏方法标签（register_patch 内部同款 raise 为第一道）。
-    n_patched = register_patch(model, args)
+    # 081（TL-E121-OUTPUT-SNAPSHOT-081）：snapshot 透传给每个 attention
+    # 层的 TLIIndexer（共享同一冻结对象，不按层重开文件）。
+    n_patched = register_patch(model, args, snapshot)
     if args.method != "none" and n_patched == 0:
         raise RuntimeError(
             f"method={args.method!r} 但 register_patch 成功挂载 0 个 "
@@ -379,8 +381,18 @@ if __name__ == "__main__":
         model2path = model2path_list[model_name]
     else:
         model2path = args.model_path
+    # 081（TL-E121-OUTPUT-SNAPSHOT-081）：tli 臂在模型加载/patch（文件
+    # 被任何 attention 层消费）之前冻结一次解析的 treatment snapshot——
+    # D′ 掩码 / 投影基每个文件只 open 一次，后续 method_name（472）、
+    # sidecar 写门（501）全部消费同一冻结对象。修复前：每层各读一次 +
+    # 生成后再读 → 生成窗口内文件被替换时 runtime A / 文件名 B /
+    # sidecar C 三方混装可达。非 tli 臂零改动（snapshot=None）。
+    if args.method == "tli":
+        snapshot = resolve_treatment_snapshot(args)
+    else:
+        snapshot = None
     model, tokenizer = load_model_and_tokenizer(
-        model2path, model_name, device, args
+        model2path, model_name, device, args, snapshot
     )
     max_length = model2maxlen[model_name]
 
@@ -469,17 +481,25 @@ if __name__ == "__main__":
             data_fp=data_fp,
         )
 
-        method_name = get_method_name_with_info(args)
+        # 081：method_name 从冻结 snapshot 派生（tli 臂）——生成窗口内
+        # 文件被替换时文件名仍等于 runtime/sidecar 的内容身份。
+        method_name = get_method_name_with_info(args, snapshot)
         out_fn = f"{dataset_prefix}-{method_name}-{args.t}"
         # avoid too long file name
         out_fn = out_fn.replace(" ", "")
         out_fn = out_fn.replace("'", "")
-        if len(out_fn) > 245:
+        if len(out_fn) > 230:
             # 076（TL-E121-OUTPUT-ID）：截断不得从尾部吃掉 method_name 的
             # 身份 hash 尾段（_h<hash10> 被截后不同 treatment 可再次同名
             # 互覆）——先截可读中段再保 hash；非 tli 名（无 hash 段）回退
             # 旧口径。截断重建后统一补一次空格/撇号清洗（dataset_prefix
             # 走重建路径时不经过上面的 replace，与未截断路径口径一致）。
+            # 081 + kimi3 0316 追加修复 1：上限 245 → 230——out_fn 落盘
+            # 要拼 ".jsonl"（6）且写门会创建 sidecar ".tli_manifest.json"
+            # （18），245 下 sidecar 实名 269 > ext4 255 单文件名上限 →
+            # open 抛 OSError 36 裸 traceback（破坏 076 fail-closed 统一
+            # 口径）；230 = 255 − 6 − 18 − 1，与
+            # truncate_output_name_keep_hash 缺省 limit 同源。
             out_fn = truncate_output_name_keep_hash(
                 dataset_prefix, method_name, args.t)
             out_fn = out_fn.replace(" ", "").replace("'", "")
@@ -497,8 +517,11 @@ if __name__ == "__main__":
         # tli_layer_skip_path 的 realpath+内容 sha256+shape/n_skip，文件
         # 缺失/损坏 fail closed）——「同路径、内容已变」不再同 manifest，
         # 写门必拒；与 method hash/RULER receipt 共用 info.py 单一事实源。
+        # 081：manifest 从冻结 snapshot 派生（与 472 行 method_name、
+        # runtime 各层消费的 skip/basis 同一对象）——删除生成后重读
+        # 路径的调用，生成窗口内的文件替换不再产生 name/sidecar 混装。
         if args.method == "tli":
-            manifest_json = get_treatment_manifest_json(args)
+            manifest_json = get_treatment_manifest_json(args, snapshot)
             sidecar = gate_output_treatment_identity(out_path, manifest_json)
             with open(sidecar, "w", encoding="utf-8") as f:
                 f.write(manifest_json)

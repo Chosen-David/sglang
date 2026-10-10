@@ -352,31 +352,40 @@ def a4_method_name_abg():
         # 时本锚点必须重算同步更新（同名互覆防线 = 076 的存在理由）。
         # 079 口径：manifest 新增 tia_enable_async_topk（缺省 False）→
         # 全部 tli hash 重算，下列五个锚点已同步更新。
+        # 081 + kimi3 0316 口径（B/D 开关入 manifest + 默认 D′ 掩码内容
+        # 身份）：kimi3 0316 追加修复 2 把 tli_enable_kmeans/
+        # tli_enable_layer_skip 从「可读段 B/D 承载」升格入
+        # _TREATMENT_FIELD_DEFAULTS（截断吃掉可读段 B/D 位时身份仍由
+        # hash 单射承载）→ 两字段进 manifest 对全部 tli 配置生效，
+        # 五锚点整体重算；叠加 081 身份缺口 ① 修复（layer_skip=True
+        # 且未声明 tli_layer_skip_path → manifest 解析 tracked
+        # DEFAULT_MASK 内容身份），第三个锚点（唯一 layer_skip=True
+        # 案例）双重漂移。
         # B09：冠军配置 α/β/γ 进名；F11：full 口径不写 A（生效值）
         got = f(mk())
-        _require(got == "tli_64_128_1024_c4_a0.25_b0.125_g0.625_h35804f58c2",
+        _require(got == "tli_64_128_1024_c4_a0.25_b0.125_g0.625_h562141be42",
                  f"冠军配置名应含 α/β/γ 且 full 不写 A，实际 {got!r}")
         # F11 正向：rope 子空间（生效开）→ 写 A，即使 flag 原值 False
         # （名格式：ab 直拼 a 段——c4_Aa0.25，无分隔下划线）
         got = f(mk(tli_subspace="rope", tli_enable_subspace=False))
         _require(got == "tli_64_128_1024_c4_Aa0.25_b0.125_g0.625"
-                         "_h5e21299268",
+                         "_h08a067c3c5",
                  f"rope 生效子空间应写 A（不受 flag 原值 False 影响），实际 {got!r}")
         # B/D 与 γ None（"off"）
         got = f(mk(tli_subspace="rope", tli_enable_kmeans=True,
                    tli_enable_layer_skip=True, tli_alpha=0.0, tli_beta=0.0,
                    tli_gamma=None))
-        _require(got == "tli_64_128_1024_c4_ABDa0_b0_goff_h6b7948df60",
+        _require(got == "tli_64_128_1024_c4_ABDa0_b0_goff_h1ee5503c61",
                  f"kmeans+layer_skip 应写 BD；γ=None 应写 off，实际 {got!r}")
         # 稀疏 prefill 后缀 _P
         got = f(mk(tli_sparse_prefill=True))
         _require(got == "tli_64_128_1024_c4_a0.25_b0.125_g0.625_P"
-                         "_h3fffeef311",
+                         "_hd891baff79",
                  f"稀疏 prefill 应加 _P 后缀，实际 {got!r}")
         # 小数格式化（0.0625 不丢位）
         got = f(mk(tli_alpha=0.0625, tli_beta=0.03125, tli_gamma=0.5))
         _require(got == "tli_64_128_1024_c4_a0.0625_b0.03125_g0.5"
-                         "_hdb8db1cd70",
+                         "_h3396bc828c",
                  f"α/β/γ 小数应完整保位，实际 {got!r}")
         # 非 tli 方法不回归（quest/twia/tia/none）
         _require(f(types.SimpleNamespace(

@@ -212,8 +212,14 @@ def test_P1_matrix_pairwise_injective():
     # 字段集变更时此锚点必须重算（同步更新 A4/T5 同理）。
     # 079 口径：manifest 新增 tia_enable_async_topk（getattr 缺省
     # False）→ 全部 tli hash 重算，锚点由 he797a70df5 更新。
+    # 081 + kimi3 0316 口径（B/D 开关入 manifest + 默认 D′ 掩码内容
+    # 身份）：tli_enable_kmeans/tli_enable_layer_skip 入
+    # _TREATMENT_FIELD_DEFAULTS（防可读段截断吃掉 B/D 位后 hash 互覆）
+    # → 全部 tli hash 重算，锚点由 h046b987e01 更新为 h175d1bcba6
+    #（本矩阵 c1-c6 全部 layer_skip=False，manifest D′ 掩码身份恒
+    # null，故本锚点只受 kimi3 0316 字段集扩张影响）。
     _check(names["c1 minmax/avg/4bit/4bit"]
-           == "tli_64_128_2048_c4_a0.25_b0.125_g0.625_h046b987e01",
+           == "tli_64_128_2048_c4_a0.25_b0.125_g0.625_h175d1bcba6",
            f"c1 稳定性锚点失配（字段集被改？须重算锚点）："
            f"{names['c1 minmax/avg/4bit/4bit']!r}")
     return "PASS"
@@ -243,8 +249,9 @@ def test_P2_order_independent_and_default_equivalent():
            f"argparse 全缺省 vs 程序化最小 ns 应同名（缺省等价）："
            f"{name_argparse!r} vs {name_min!r}")
     # 与 P1 的 c1（同一配置）也须一致——跨构造路径单射到同一身份
-    # （079 口径锚点：async 字段入 manifest 后重算）
-    _check(name_min == "tli_64_128_2048_c4_a0.25_b0.125_g0.625_h046b987e01",
+    # （079 口径锚点：async 字段入 manifest 后重算；081+kimi3 0316
+    # 口径：B/D 入 _TREATMENT_FIELD_DEFAULTS 后与 P1 c1 同步重算）
+    _check(name_min == "tli_64_128_2048_c4_a0.25_b0.125_g0.625_h175d1bcba6",
            f"跨构造路径身份漂移：{name_min!r}")
 
     # 乱序构造（字段注入顺序不影响 sort_keys 序列化）
@@ -279,7 +286,7 @@ def test_P3_gate_fail_closed_no_overwrite(base):
     os.makedirs(d, exist_ok=True)
     out = os.path.join(
         d, "hotpotqa-tli_64_128_2048_c4_a0.25_b0.125_g0.625_"
-          "h046b987e01-09090909.jsonl")   # 079 口径：与 P1 c1 同步重算
+          "h175d1bcba6-09090909.jsonl")   # 081+kimi3 0316 口径：与 P1 c1 同步重算
     data_bytes = b'{"pred": "arm-A"}\n'
     with open(out, "wb") as f:
         f.write(data_bytes)
@@ -347,13 +354,19 @@ def test_P4_truncation_keeps_hash():
         _check(m is not None, f"method_name 缺 hash 段：{mn!r}")
         _check(t.endswith(f"_h{m.group(1)}-09090909"),
                f"截断名须保 hash 尾段与 -t：{t!r}")
-        _check(len(t) <= 245, f"截断名超 245 软上限：{len(t)}")
+        # 081 + kimi3 0316 追加修复 1：上限 245 → 230——out_fn 落盘拼
+        # ".jsonl"（6）+ 写门 sidecar ".tli_manifest.json"（18），245 下
+        # sidecar 实名 269 > ext4 255 → OSError 36（kimi3 实测）；
+        # 230 = 255 − 6 − 18 − 1。
+        _check(len(t) <= 230, f"截断名超 230 上限（sidecar 链超 ext4）：{len(t)}")
+        _check(len(t) + len(".jsonl") + len(".tli_manifest.json") <= 255,
+               f"sidecar 实名链超 ext4 255：{len(t) + 6 + 18}")
     # readable 中段截断占位存在（前缀保留）
     _check(t1.startswith(prefix + "-") and "..." in t1,
            "截断名应保留 dataset 前缀并以 ... 占位中段")
-    # 非 tli 名回退旧口径（旧代码 out_fn[:245]+"..." 语义）
+    # 非 tli 名回退旧口径（旧代码 out_fn[:limit]+"..." 语义，limit=230）
     fb = INFO.truncate_output_name_keep_hash(prefix, "quest_64_128", "0909")
-    _check(fb == (prefix + "-quest_64_128-0909")[:245] + "...",
+    _check(fb == (prefix + "-quest_64_128-0909")[:230] + "...",
            f"非 tli 名应回退旧截断口径，实际 {fb!r}")
     # split_method_name_hash：可拆回（readable + hash 段）
     r1, h1 = INFO.split_method_name_hash(mn1)

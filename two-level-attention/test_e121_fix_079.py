@@ -47,6 +47,13 @@ method hash 共用同一份 resolved manifest。
 内容变更同 manifest 且写门放行、R3 async/文件字段不触发 hash 变化、
 R4 仍红不了（行为在但身份测不出来）——本套件对主树可作红态复跑。
 
+081（TL-E121-OUTPUT-SNAPSHOT-081）口径同步：D′ 掩码改为有效值语义
+（enable_layer_skip=False 时路径声明不进 manifest）→ R2b/R2c 的 skip
+用例须显式开 enable；yarn_receipt 新增 tm↔basename _h 段闭包校验 →
+R5 的 prediction_basename 改用生产形态（含 _h<hash10>）。本套件其余
+断言（R1/R3/R4、basis 用例、_h<hash10> 锚点不受默认掩码影响——
+_base_ns 的 enable_layer_skip=False）逐位不变。
+
 用法：
   cd <repo>/two-level-attention && python3 test_e121_fix_079.py
   python -O 同上双跑；TLI079_ONLY=R1,R2 子集过滤。
@@ -196,15 +203,21 @@ def test_R2_file_identity_and_gate(base):
     _check(sc == sidecar, f"sidecar 路径约定漂移：{sc!r}")
 
     # b) layer_skip 同口径（n_skip 摘要）
+    # 081 口径更新：D′ 掩码按「有效值语义」解析——tli_enable_layer_skip
+    # =False 时路径声明不进 manifest（运行时不消费即不解析，079 的
+    # 「声明即解析」反向不对称已由 081 修复，见 test_e121_fix_081.py
+    # R4）；本内容身份用例须开 enable_layer_skip=True。
     sp = os.path.join(d, "skip.json")
     with open(sp, "w") as f:
         json.dump({"skip": [1, 3]}, f)
-    ms1 = INFO.get_treatment_manifest_json(_base_ns(tli_layer_skip_path=sp))
-    hs1 = INFO._treatment_hash(_base_ns(tli_layer_skip_path=sp))
+    _ns_skip = lambda: _base_ns(tli_enable_layer_skip=True,
+                               tli_layer_skip_path=sp)
+    ms1 = INFO.get_treatment_manifest_json(_ns_skip())
+    hs1 = INFO._treatment_hash(_ns_skip())
     with open(sp, "w") as f:
         json.dump({"skip": [1, 3, 5]}, f)       # 同路径内容变更
-    ms2 = INFO.get_treatment_manifest_json(_base_ns(tli_layer_skip_path=sp))
-    hs2 = INFO._treatment_hash(_base_ns(tli_layer_skip_path=sp))
+    ms2 = INFO.get_treatment_manifest_json(_ns_skip())
+    hs2 = INFO._treatment_hash(_ns_skip())
     _check(ms1 != ms2 and hs1 != hs2,
            f"079② 同路径 skip 内容变更未改 manifest/hash：{ms1!r}")
     _check(json.loads(ms1)["tli_layer_skip_path"]["n_skip"] == 2,
@@ -229,11 +242,14 @@ def test_R2_file_identity_and_gate(base):
     bad_s = os.path.join(d, "bad_skip.json")
     with open(bad_s, "w") as f:
         f.write("{not-json")
-    _expect_gate_fail(_base_ns(tli_layer_skip_path=bad_s), "skip 坏 JSON")
+    # 081 口径：skip 文件只在 enable_layer_skip=True 时解析（有效值语义）
+    _expect_gate_fail(_base_ns(tli_enable_layer_skip=True,
+                               tli_layer_skip_path=bad_s), "skip 坏 JSON")
     no_key = os.path.join(d, "nokey_skip.json")
     with open(no_key, "w") as f:
         json.dump({"other": [1]}, f)
-    _expect_gate_fail(_base_ns(tli_layer_skip_path=no_key),
+    _expect_gate_fail(_base_ns(tli_enable_layer_skip=True,
+                               tli_layer_skip_path=no_key),
                       "skip 缺 skip 键")
 
     # d) None → null；确定性（重复调用逐位稳定）
@@ -264,8 +280,13 @@ _R3_WHITELIST = {
     "twi_level1_topk": 64,
     "twi_level2_topp": 0.9,
 }
-# readable 编码字段：不进 manifest（ABD 三字符已单射），但全名必变
-_R3_READABLE = {"tli_enable_kmeans": False, "tli_enable_layer_skip": False}
+# 081 + kimi3 0316 追加修复 2：tli_enable_kmeans/tli_enable_layer_skip
+# 从 _R3_READABLE 升格入 _R3_MUTATIONS——076 residual「可读段 B/D 已
+# 单射」被 kimi3 反例推翻（极端长可读前缀截断吃掉 B/D 位 → 仅这两个
+# 开关不同的 treatment 截断后同名 + manifest 相同 + hash 相同 → 写门
+# 放行互覆），两字段入 manifest 后 hash 恒单射，R3 须验证 manifest/
+# hash/名三通道全变（readable 通道保留原断言——B/D 段仍进可读名）。
+_R3_READABLE = {}
 # manifest 文件字段：突变值 = 测试运行时在 base 下创建的真实文件
 # （内容身份解析路径；同路径内容变更通道由 R2 覆盖，此处测路径切换）
 _R3_FILE_FIELDS = ("tli_proj_basis", "tli_layer_skip_path")
@@ -276,6 +297,8 @@ _R3_MUTATIONS = {
     "tia_level2_topk": 512,
     "tia_level2_cmp_ratio": 4,
     "tia_enable_async_topk": True,
+    "tli_enable_kmeans": False,
+    "tli_enable_layer_skip": False,
     "tli_enable_subspace": False,
     "tli_subspace": "rope",
     "tli_alpha": 0.25,
@@ -467,6 +490,10 @@ def test_R4_async_behavior_divergence():
 def test_R5_receipt_treatment_manifest():
     ns = _base_ns(tli_proj_basis=None)
     manifest_json = INFO.get_treatment_manifest_json(ns)
+    # 081 口径更新：prediction_basename 须为生产形态（含与 manifest 同源
+    # 的 _h<hash10> 段）——yarn_receipt 的 081 闭包校验要求 tm.sha256[:10]
+    # == basename _h 段（无 _h 段但 manifest 存在 → fail closed）。
+    basename = f"vt-{INFO.get_method_name_with_info(ns)}-09090909.jsonl"
     receipt = build_yarn_receipt(
         yarn_enabled=False, effective_factor=None, yarn_factor_cli=None,
         rope_scaling=None, context_length=32768, task="vt",
@@ -476,13 +503,13 @@ def test_R5_receipt_treatment_manifest():
                            "method": "tli", "pred_postfix": "_x", "t": "1"},
         producer_script_path="benchmark/RULER/pred_ruler.py",
         producer_script_sha256=hashlib.sha256(b"079-test").hexdigest(),
-        run_id="r5-1", prediction_basename="vt-x.jsonl",
+        run_id="r5-1", prediction_basename=basename,
         prediction_sha256="a" * 64, prediction_lines=1,
         treatment_manifest_json=manifest_json)
     tm = receipt.get("treatment_manifest")
     _check(tm is not None and _validate_common_schema(
-        receipt, "vt-x.jsonl") is None,
-        f"含 treatment_manifest 的回执应过 schema：{tm!r}")
+        receipt, basename) is None,
+        f"含 treatment_manifest 的回执应过 schema（含 081 闭包）：{tm!r}")
     _check(tm["sha256"] == hashlib.sha256(
         manifest_json.encode("utf-8")).hexdigest(),
         "treatment_manifest.sha256 应等于 manifest json 字节的 sha256")
@@ -490,11 +517,11 @@ def test_R5_receipt_treatment_manifest():
     # 篡改 json / sha → schema 拒收（fail closed）
     bad = dict(receipt)
     bad["treatment_manifest"] = {"sha256": tm["sha256"], "json": "{}"}
-    _check(_validate_common_schema(bad, "vt-x.jsonl") is not None,
+    _check(_validate_common_schema(bad, basename) is not None,
            "篡改 treatment_manifest.json 后 schema 应拒收")
     bad2 = dict(receipt)
     bad2["treatment_manifest"] = {"sha256": "0" * 64, "json": tm["json"]}
-    _check(_validate_common_schema(bad2, "vt-x.jsonl") is not None,
+    _check(_validate_common_schema(bad2, basename) is not None,
            "篡改 treatment_manifest.sha256 后 schema 应拒收")
 
     # legacy/非 tli：无该键 → 前向兼容（不写不校验）
