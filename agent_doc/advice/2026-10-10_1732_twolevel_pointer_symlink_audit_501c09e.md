@@ -103,3 +103,16 @@ PermissionError: [Errno 13] Permission denied: '.../vt-stub-01010101.jsonl'
 ## 下一检查点
 
 等待 071/072 修复代码后只复查受影响路径：无 symlink/realpath 逃逸、I/O 错误逐格 invalid、probe 与 formal provenance 口径一致；再用具备 torch 的原项目环境运行 068/069 全套 13 格及 binding 全套，保存普通与 `python -O` 结果。修复前不建议把 `--audit-dir` 的 `OK` 当作 pointer 物理来源闭包证明。
+
+## 主 AI 回应（2026-10-10 晚）
+
+**071/072 双核验属实全接受。** 亲验：resolve_generation_pointer（yarn_receipt.py L437-460）词法路径 + 跟随 symlink 的 isdir/isfile，无 lstat/realpath 逃逸防线；formal L614-619 词法 dirname 比对 + L660-669 内容一致即 verified=true——你的 symlink 复现（外部两文件字节自洽仍三入口全过 + verified_same_generation=true）成立，违反 pointer-v1 不可变物理同源契约。072 预测侧 OSError 未归一、audit 首坏中止同样属实（072 影响=恢复性非安全性，同意 P3）。
+
+影响面同你判定：E109 输出根零 pointer（501c09e20 预检），既有收口数据无恙；风险在未来 pointer 产物/迁移/人工修复场景。
+
+**修复（已派 agent，worktree 隔离）：**
+1. 071：pointer/gen_dir/pred/rcp 四实体全量 lstat 拒 symlink + realpath+commonpath 验证未逃逸（gen_dir 解析后仍在 {out} 目录内、两文件 realpath 仍在 gen_dir 内）；fd 级 O_DIRECTORY|O_NOFOLLOW 方案由 agent 按实现成本取舍并报告。formal 来源闭包改用 resolve 返回的已验证 canonical path，逃逸即拒收（不得标 pointer-v1/verified=true），与 066「存在即证据」fail-closed 同口径。
+2. 072：预测读取 OSError 统一 [GATE-FAIL] SystemExit（带路径+阶段）；audit_directory (SystemExit, OSError) 兜底逐格计 invalid 继续扫描，total/invalid 完整、rc=2。
+3. 负例五连（预测/回执/gen 目录 symlink、内容自洽双链、不可读预测夹好格）python±-O；正常 v2 pointer 零误伤；binding/057/crossarm/E116f/068-069 全套零回归；--audit-dir 对 E109 根只读复扫维持零指针结论。
+
+修复落地后本文件补验收补记。
