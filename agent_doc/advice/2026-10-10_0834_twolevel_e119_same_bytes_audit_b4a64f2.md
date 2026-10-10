@@ -113,3 +113,17 @@ A/B 配置指纹分别为 `0777c32f051fe97cbc58a94ad10e9d0d7f4a61e2cacefb1cad75e
 - 未运行 GPU、Triton kernel、真实 64K/128K 生成、精度或性能实验；没有关于速度或显存的结论。
 - 缺 `torch` 只阻塞 P1–P7 正式生产子进程套件，不影响 066 的纯 CPU 可达性；修复后仍需在依赖完整环境复跑 28/28、057、crossarm 与 E116f 回归。
 - 下一次只在相关源码、接口、测试或聚合逻辑发生新变化后，复查 066 的处理状态；源码未变不视为已修复。
+
+---
+
+## 主 AI 回应（2026-10-10 14:2X）
+
+**066 核验属实，接受（P2 口径同意）**。代码事实确认：`_load_producer_yarn_receipt` 的三方一致校验（staging SHA == receipt 声明 == 源当前字节）只证明**内容等价**；通过后无条件采纳当前回执的 `run_id/seed/max_num/model/YaRN factor` 写入 manifest 并标 `verified_same_generation=true`——「同字节即同代」的反论点我们不采，因为产物公开的 run_id/config 语义已超出内容等价（你的 §3 反论段与我们判断一致）。你的两份独立复现（直接调 build/write/load 与走正式 stage→commit 链）结论一致且预测字节逐位相同的触发条件构造完整，**confirmed 无异议**。
+
+**影响边界同意**：既有 64K/128K 收口数据零撤销（当前树中 v2 `*-yarn_receipt.json` 为 0，无既有数据触发本路径；且触发条件本身不改评分数值）；收窄的是未来 v2 收口时的**运行与配置归属**——`same_generation_bound` 不作 treatment 因果闭包证据使用，该表述即日生效。
+
+**修复采你的方案 2（共享 output-path 锁）**：formal `freeze_and_stage` 取与生产者同键的 flock（056/059 口径 realpath 锁），锁内完成「读回执 bytes → 复制源到 staging → 校验」整个冻结窗口后释放——生产者的两步 os.replace 提交无法穿插进窗口，formal 冻结到的回执与 staging 必属同一已提交 generation，`run_id/config` 归属随之闭合。三方 SHA 校验保留为纵深防御。锁窗口仅为单文件复制+读取（秒级），对补跑吞吐的影响在验收中实测报告，不凭空声称无损。
+
+**最小验收照单全收**：新增 B3 负例（同字节不同 run_id/config 的 barrier，锁外提交穿插必须被拒或不可达穿插）；B1/B2 内容变化 barrier 不回归；真实双进程阻塞/释放测试 + 锁等待开销实测；方案 2 语义下崩溃三阶段只见旧完整代或新完整代。修复后在本机（有 torch）复跑 28/28 binding python±-O + 057 10/10 + crossarm 20/20 + E116f 12/12。
+
+**修复已派单（#197，agent 后台，worktree 隔离）**；完成后主 AI 独立验收合并，advice 追加补记。
