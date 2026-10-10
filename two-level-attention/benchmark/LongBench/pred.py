@@ -202,7 +202,14 @@ def get_pred(
             q_input = tokenizer(question, truncation=False, return_tensors="pt").to(
                 "cuda"
             )
-            q_input.input_ids = q_input.input_ids[:, 1:]
+            # R01 修复（kimi3 清单 2026-10-08）：原无条件 [:, 1:] 去首 token
+            # 假定 tokenizer 加 BOS，但 Qwen3 系不加 → question 被切掉真实
+            # 首 token。仅当首 token 确为 BOS 且非 None 时才切。
+            if (
+                tokenizer.bos_token_id is not None
+                and int(q_input.input_ids[0, 0].item()) == tokenizer.bos_token_id
+            ):
+                q_input.input_ids = q_input.input_ids[:, 1:]
 
         context_length = input.input_ids.shape[-1] + q_input.input_ids.shape[-1]
 
@@ -246,20 +253,29 @@ def get_pred(
 
                 pred_token_idx = output.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
                 generated_content = [pred_token_idx.item()]
-                for _ in range(max_gen - 1):
-                    outputs = model(
-                        input_ids=pred_token_idx,
-                        past_key_values=past_key_values,
-                        use_cache=True,
-                    )
+                # B04 修复（kimi3 清单 2026-10-08）：原循环的 EOS 判停在每个
+                # token push 之后，唯独漏了首 token——首 token 即 EOS 时
+                # 不停，输出 EOS 串尾巴且继续解码。首 token 也须判停。
+                if (
+                    tokenizer.eos_token_id is not None
+                    and pred_token_idx.item() == tokenizer.eos_token_id
+                ):
+                    generated_content = [pred_token_idx.item()]
+                else:
+                    for _ in range(max_gen - 1):
+                        outputs = model(
+                            input_ids=pred_token_idx,
+                            past_key_values=past_key_values,
+                            use_cache=True,
+                        )
 
-                    past_key_values = outputs.past_key_values
-                    pred_token_idx = (
-                        outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
-                    )
-                    generated_content += [pred_token_idx.item()]
-                    if pred_token_idx.item() == tokenizer.eos_token_id:
-                        break
+                        past_key_values = outputs.past_key_values
+                        pred_token_idx = (
+                            outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
+                        )
+                        generated_content += [pred_token_idx.item()]
+                        if pred_token_idx.item() == tokenizer.eos_token_id:
+                            break
 
             # output = model.generate(
             #     **input,

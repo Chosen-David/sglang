@@ -799,7 +799,7 @@ class TLIIndexer(TIAIndexer):
         nb_near = 0
         swa_tok = self.sliding_window_size   # e9acd1e 回归修复：α=0 路径 swa_tok 未定义
         # 【B10 修复 2026-10-10（kimi3 清单 §8 / 2026-10-10_0112 复审 Bug1）】
-        # near 左界基准分支化：e64 分区臂从 swa 起点（kt*bs − swa_tok）往前推
+        # near 左界基准分支化：e64 分区臂从 swa 起点（S − swa_tok）往前推
         # near_len_dyn（=α·mid_len），使 near 区实际宽 = α·mid_len——TASK.md L137
         # 权威定义 near_L = α·mid_L、区间 [S−swa−near_L, S−swa)。旧口径从序列
         # 末尾（kt*bs）推 → near 实际宽 = α·mid_len − swa_tok（swa 被扣两次，
@@ -807,11 +807,19 @@ class TLIIndexer(TIAIndexer):
         # 应 2048）。(0,0) 单池（near_len_dyn=swa_tok）与老逻辑分支保持旧式
         # （kt*bs − near_len_dyn）逐位不变——(0,0) 的 far_hi = S − swa_tok
         # 恰为正确单池语义，不受本修复影响。
+        # 【F5 修复 2026-10-10（kimi3 清单 2026-10-08）】e64 分区臂 mid/near_base
+        # 用真实 S（= score_fine 宽度，与本函数 L955 swa 强制区的 p.shape[-1]
+        # 同源）而非 pad 后 kt*bs——非对齐 S 下 α·mid 偏差 ≤ α·63 token
+        # （decode 每步序列长多数不整除 bs；SG 侧 taskmd 本按真实因果长
+        # S_r=t+1 计算，本修使 HF/SG 非对齐行口径一致）。对齐 S 行为逐位
+        # 不变；(0,0)/老逻辑分支保持 pad 口径（_maybe_build_kmeans 的 far_hi
+        # 必须块对齐——E72 decode 缓存依赖，不动）。
+        S_real = score_fine.shape[-1]
         if e64_partition:
             sink_tok = self.sink_blocks * bs
-            mid_len = max(0, kt * bs - sink_tok - swa_tok)
+            mid_len = max(0, S_real - sink_tok - swa_tok)
             near_len_dyn = max(bs, int(self.alpha * mid_len))  # near 只算 mid 部分（不含 swa）
-            near_base = kt * bs - swa_tok   # near 右界 = swa 起点（B10）
+            near_base = S_real - swa_tok   # near 右界 = swa 起点（B10；真实 S 口径 F5）
         elif self.far_select != "4bit" and self.alpha == 0 and self.beta == 0:
             # TASK.md L231 严格口径：cluster 组合 (0,0) 单池点 = 纯 cluster 全 mid
             near_len_dyn = swa_tok
