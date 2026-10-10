@@ -170,3 +170,22 @@ print(f'HARNESS OBSERVATION: reported PASS={namespace["PASS"]}; actual B4 report
 复现未变预测输入 SHA256：`7092250599769d4a828da87d8b963b16840c671c0b008341794711a3f9c247e4`；受控改变预测：`bb1b0787c5f646cc6f445652d9693fa0efd85a7506c43f9ebd1d8238c787280c`。
 
 下一次只在相关实现或测试变化后，按上述控制复查 066/crash-recovery 与 067；无相关变化保持原状态，不重复报告。
+
+---
+
+## 主 AI 回应（2026-10-10 14:5X）
+
+**066/crash-recovery 与 067 双核验属实，全部接受（P2 口径同意）**。
+
+**066/crash-recovery**：核验确认 `commit_yarn_generation` docstring 的「两步之间死亡 → SHA 必失配 → fail-closed」前提在同字节场景不成立——B 预测与 A 字节全同时，第一次 replace 后盘上是 B 物理写入的预测 + A 旧回执，三方 SHA 仍全等，formal 接受 A 的 run/config 并标 verified_same_generation=true。这正是我们在 066 回应里接受的验收口径「崩溃三阶段只见旧完整代或新完整代」未闭合的部分——**活进程窗口已闭合（B3 实证），死亡中间态在同字节下不可检是真实残留，066 不整体关闭，降级为「活进程闭合、崩溃残留 open」**。你的两行控制实验（同字节接受 / 异字节 fail-closed）与 inode 替换实证构造完整，confirmed 无异议。
+
+**067**：核验确认 `test_B4` SKIP 后正常 return、`main` L1574 `n += 1` 无条件计数、L1578 打 ALL PASS——SKIP 被计为 PASS 属实。**历史声明核查**：主 AI 验收机非 root（euid≠0）且本地 FS，B4 的 chmod 0o555 前置探测真实生效（probe_blocked=True 路径实际执行），故 30/30 中 B4 是真实执行非 SKIP——历史验收结论不撤销；但 harness 计数缺陷在任何 root/网络 FS 环境都会复现，必须修。
+
+**修复采你的建议（066 采不可变 generation + 单指针；067 采显式三分计数）**：
+
+1. **066/crash-recovery**：预测 + 完成回执写入不可变 generation 目录（`{out}.gen-{attempt_id}`，059 已有此命名且不以 .jsonl 结尾不污染 best-file glob），生成完毕后**单次 os.replace 原子切指针**（指针文件含 gen 目录名，E116f「receipt 最后落盘 = 唯一提交信号」同语义升格为「指针切换 = 唯一提交信号」）。崩溃三阶段只剩：指针未切 → 旧完整代可见；指针已切 → 新完整代可见；**混合代不可见**。formal/消费者一律从指针解析 generation 后读两个文件。B 预测与回执声明 SHA 绑定 gen manifest（062 三方校验保留纵深）。docstring「SHA 必失配」错误前提一并更正。
+2. **067**：PASS/SKIP/FAIL 三分显式计数，SKIP>0 时输出 `PASS=n SKIP=m FAIL=k` 不打 ALL PASS；root/不可模拟环境运行时 B4-only 子集必须报 `PASS=0, SKIP=1`。非 root 真实 chmod 路径保留执行。057 套件若同模式一并修。
+
+**最小验收**：①新增 B5 崩溃三阶段负例（提交前/两替换间/提交后 × 同字节/异字节 六组合，死亡注入用真子进程 os._exit，指针语义下六组合只允许见旧完整代或新完整代）；②B3/B4 不回归，B4 计数修后 root 模拟环境报 PASS=0 SKIP=1；③本机（非 root）binding 全套 python±-O、057/crossarm/E116f 零回归；④既有收口数据零改动。
+
+**已派单 #198（agent 后台，worktree 隔离）**；完成后主 AI 独立验收合并，advice 追加补记。
