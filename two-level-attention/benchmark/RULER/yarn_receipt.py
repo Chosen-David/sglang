@@ -96,6 +96,21 @@
 #   的 n += 1 无条件计数把 B4 的 SKIP 计为 PASS——PASS/SKIP/FAIL 三分
 #   显式计数，SKIP>0 时不打 ALL PASS（详见测试文件）。
 #
+# ===== #200（GPT 2026-10-10 1528 审计 TL-E119-PROBE-RECEIPT-
+#   VALIDATION-070，P2）=====
+#   完成探针 gen_completion_probe.py（068）对 pointer 候选只调
+#   resolve_generation_pointer（本模块，明确不校验回执内容）后数预测
+#   行数判 complete——「预测足量 + 回执存在但无效（半写 JSON/未知
+#   schema/非 complete/basename/SHA/行数失配）」被判 complete →
+#   run_ruler_e109.sh SKIP 该格，而正式汇总 score_ruler_formal.py 会
+#   fail-closed 拒收：调度与交付的完成定义分裂，坏格永久 SKIP 且正式
+#   评分永远拒绝。修复：抽出共享校验器 validate_committed_generation
+#   （回执 bytes 快照 → JSON → validate_producer_receipt → v2 同代
+#   字节绑定），probe 与 formal 共用——单一完成定义，防第三套回执
+#   判断漂移。版本接受集合与 formal 现行口径逐位一致（v1+v2；v1 无
+#   绑定字段 → 不做字节比对，与 formal 的降级消费同口径——指针协议
+#   生产路径只产 v2，v1 属理论边界，按 formal 既有行为不在此拒收）。
+#
 # 本模块刻意零重依赖（不 import torch/transformers/sparse_attn）——
 # 生成侧、消费侧与 CPU 红绿测试三方共享同一解析/校验口径，干净检出
 # 恒可单测。
@@ -638,6 +653,87 @@ def validate_producer_receipt(receipt, pred_path):
                     f"{receipt.get('prediction_lines')!r} 非正整数——"
                     f"fail closed（059）")
     return None
+
+
+def _count_lines(path):
+    """行数计数（与 wc -l / score_ruler._nlines / 探针同语义：逐行迭代）。"""
+    n = 0
+    with open(path, "rb") as f:
+        for _ in f:
+            n += 1
+    return n
+
+
+def validate_committed_generation(pred_path, rcp_path):
+    """070（TL-E119-PROBE-RECEIPT-VALIDATION，#200）：共享提交代回执
+    校验器——probe（完成探针）与 formal（正式汇总）单口径，防第三套
+    回执判断漂移。
+
+    参数：
+      pred_path：同代绑定比对对象（回执 prediction_basename/SHA256/行数
+        所指的预测文件）。probe 传 generation 内预测本体（指针解析的
+        物理同源文件）；formal 传 staging 评分副本（062② 语义：同代
+        绑定以评分对象比对——副本与源 basename 相同，schema 的
+        basename/task 前缀校验两种传法逐位一致）。
+      rcp_path：回执文件路径（单一 bytes 快照源）。
+
+    校验链（与 formal _load_producer_yarn_receipt 修复前行为同口径）：
+      ① 回执单一 bytes 快照（062①：解析与 receipt SHA 同源，防「读-
+         算之间被推进」的混合态回执摘要）；
+      ② JSON 解析失败 → SystemExit（存在即证据，半写 fail-closed）；
+      ③ validate_producer_receipt（协议版本集 v1+v2 + 060 严格 schema
+         + 059 v2 绑定格式层：status=complete / basename / SHA 格式 /
+         行数格式）；
+      ④ v2 同代字节绑定：实际预测 SHA256/行数 与回执声明逐位比对
+         （v1 无绑定字段 → 跳过，与 formal 的降级消费同口径）。
+    任一失败 raise SystemExit（[GATE-FAIL] 前缀，python -O 不失效）。
+
+    返回 dict：{"receipt": 解析后回执, "rcp_sha256": bytes 快照 SHA,
+    "binding_sha256": 实际预测 SHA（v2；v1 为 None）,
+    "binding_lines": 实际预测行数（v2；v1 为 None）}。
+    本函数保持零重依赖、纯只读（不写任何文件）。"""
+    # ---- 062①：回执单一 bytes 快照（解析与 SHA 同源）----
+    try:
+        with open(rcp_path, "rb") as f:
+            rcp_raw = f.read()
+    except OSError as e:
+        raise SystemExit(
+            f"[GATE-FAIL] {rcp_path}: 生产者 yarn receipt 读取失败（{e}）"
+            f"——存在即证据，半写/损坏 fail closed（057+070）")
+    try:
+        rcp = json.loads(rcp_raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise SystemExit(
+            f"[GATE-FAIL] {rcp_path}: 生产者 yarn receipt 解析失败（{e}）"
+            f"——存在即证据，半写/损坏 fail closed（057+070）")
+    rcp_sha = hashlib.sha256(rcp_raw).hexdigest()
+    err = validate_producer_receipt(rcp, pred_path)
+    if err:
+        raise SystemExit(f"[GATE-FAIL] {err}")
+    binding_sha = None
+    binding_lines = None
+    if rcp["receipt_version"] == RECEIPT_VERSION:
+        # ---- 070 核心新增：v2 同代字节绑定（回执声明 vs 实际预测）----
+        # 修复前只有 formal 做此比对，probe 只数行数 → 「预测足量 + 回执
+        # 声明错代」被调度判 complete/SKIP，正式评分却拒收（完成定义分裂）
+        binding_sha = _file_sha256(pred_path)
+        binding_lines = _count_lines(pred_path)
+        if binding_sha != rcp["prediction_sha256"]:
+            raise SystemExit(
+                f"[GATE-FAIL] {rcp_path}: 回执声明 prediction_sha256="
+                f"{rcp['prediction_sha256']} 与实际预测 "
+                f"{os.path.basename(pred_path)} 字节 SHA256={binding_sha} "
+                f"不一致——预测与回执不同代（同名重跑/中断重跑/并发/"
+                f"事后改写，或生产者在复制与验证之间提交了新一代），"
+                f"fail closed（059+062+070）")
+        if binding_lines != rcp["prediction_lines"]:
+            raise SystemExit(
+                f"[GATE-FAIL] {rcp_path}: 回执声明 prediction_lines="
+                f"{rcp['prediction_lines']} 与实际预测 "
+                f"{os.path.basename(pred_path)} 行数 {binding_lines} "
+                f"不一致——预测与回执不同代，fail closed（059+070）")
+    return {"receipt": rcp, "rcp_sha256": rcp_sha,
+            "binding_sha256": binding_sha, "binding_lines": binding_lines}
 
 
 def effective_config_sha256(receipt):

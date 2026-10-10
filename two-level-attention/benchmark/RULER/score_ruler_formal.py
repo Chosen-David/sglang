@@ -204,7 +204,6 @@
 import argparse
 import fcntl
 import glob
-import hashlib
 import json
 import os
 import random
@@ -235,7 +234,7 @@ from benchmark.RULER.yarn_receipt import (  # noqa: E402
     acquire_output_lock, effective_config_sha256,
     generation_pointer_path, producer_receipt_path_for,
     release_output_lock, resolve_generation_pointer,
-    validate_producer_receipt,
+    validate_committed_generation,
 )
 
 FORMAL_PATH = os.path.abspath(__file__)
@@ -589,8 +588,14 @@ def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum,
         = 指针所指目录，混合代不可达；
       - 无指针 → generation_binding="legacy-direct"（既有产物零改动，
         维持 062①②③ 的锁 + SHA 双层兜底口径）。
-    两种绑定下 ②③ 三方一致校验保留为纵深防御（防同代文件被事后改写）。"""
-    best_basename = os.path.basename(source_pred)
+    两种绑定下 ②③ 三方一致校验保留为纵深防御（防同代文件被事后改写）。
+
+    070（TL-E119-PROBE-RECEIPT-VALIDATION，#200）：回执 bytes 快照（062①）
+    + JSON 解析 + validate_producer_receipt（057/059/060）+ v2 staged 字节
+    绑定（062②）整体重构为调用 yarn_receipt.validate_committed_generation
+    共享校验器——完成探针 gen_completion_probe.py 与本正式入口单口径，
+    消灭「调度判 complete/SKIP 但正式评分 fail-closed 拒收」的完成定义
+    分裂；062③ 三方一致与 v1 降级分支保留在本函数（formal 专属语义）。"""
     # ---- 066/crash-recovery：先以 best-file 最终路径解析 generation 指针 ----
     # 有指针 = pointer-v1（预测与回执同置指针所指 gen 目录，物理来源同源，
     # 混合代不可达）；无指针 = legacy-direct（既有产物按旁挂约定路径直接读，
@@ -615,22 +620,16 @@ def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum,
         rcp_path = gen_info["rcp_path"]
     if not os.path.isfile(rcp_path):
         return None
-    # ---- 062①：回执单一 bytes 快照（解析与 SHA 同源）----
-    try:
-        with open(rcp_path, "rb") as f:
-            rcp_raw = f.read()
-    except OSError as e:
-        _fail(f"{rcp_path}: 生产者 yarn receipt 读取失败（{e}）——"
-              f"存在即证据，半写/损坏 fail closed（057）")
-    try:
-        rcp = json.loads(rcp_raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        _fail(f"{rcp_path}: 生产者 yarn receipt 解析失败（{e}）——"
-              f"存在即证据，半写/损坏 fail closed（057）")
-    rcp_sha = hashlib.sha256(rcp_raw).hexdigest()
-    err = validate_producer_receipt(rcp, source_pred)
-    if err:
-        _fail(err)
+    # ---- 070：回执内容 + v2 同代字节绑定统一走共享校验器 ----
+    # yarn_receipt.validate_committed_generation（probe 与 formal 单口径，
+    # 防第三套回执判断漂移）。绑定比对对象 = staging 评分副本（062②
+    # 语义逐位保持）；共享校验器内部承载 062① bytes 快照、057/059/060
+    # schema 与格式层、v2 字节级同代绑定（staged SHA/行数 vs 回执声明）。
+    # v1 无绑定字段 → 共享校验器跳过字节比对，与本函数下方 v1 降级
+    # 分支同口径（producer_receipt_v1_partial，只证 factor 口径）。
+    v = validate_committed_generation(staged_pred, rcp_path)
+    rcp = v["receipt"]
+    rcp_sha = v["rcp_sha256"]
     if rcp["context_length"] != Lnum:
         _fail(f"{rcp_path}: receipt.context_length={rcp['context_length']} "
               f"与所在目录档位 L{Lnum} 不一致——生产者证据与数据档位"
@@ -640,21 +639,10 @@ def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum,
     # 062③：source_sha256 在三方一致窗口内取值（调用方复用，不重算）
     source_sha = None
     if version == RECEIPT_VERSION:
-        # ---- 062②：同代绑定以 staging 副本（评分对象）比对 ----
-        staged_sha = _file_sha256(staged_pred)
-        staged_lines = _nlines(staged_pred)
-        if staged_sha != rcp["prediction_sha256"]:
-            _fail(f"{rcp_path}: 回执声明 prediction_sha256="
-                  f"{rcp['prediction_sha256']} 与 staging 评分副本 "
-                  f"{best_basename} 字节 SHA256={staged_sha} 不一致——"
-                  f"预测与回执不同代（同名重跑/中断重跑/并发/事后改写，"
-                  f"或生产者在复制与验证之间提交了新一代），fail closed"
-                  f"（059+062）")
-        if staged_lines != rcp["prediction_lines"]:
-            _fail(f"{rcp_path}: 回执声明 prediction_lines="
-                  f"{rcp['prediction_lines']} 与 staging 评分副本 "
-                  f"{best_basename} 实际行数 {staged_lines} 不一致——"
-                  f"fail closed（059）")
+        # 062② 的 staged SHA/行数比对已由共享校验器完成（失败即
+        # SystemExit fail-closed，不再重复计算——staged_sha 直接取共享
+        # 校验器对 staging 副本的字节快照结果；行数一致性同验）
+        staged_sha = v["binding_sha256"]
         # ---- 062③：三方一致（staging == 回执 == 源当前字节）----
         # 源失配重读一次（防瞬时读异常误杀）；仍失配 = 源在冻结窗口内
         # 被推进到新一代 → fail-closed 拒绝并重试，不发布混合代际

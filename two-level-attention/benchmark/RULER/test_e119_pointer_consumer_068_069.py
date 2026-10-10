@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""#199 红绿测试（GPT 2026-10-10 1330 审计，068/069 两项）：
+"""#199/#200 红绿测试（GPT 2026-10-10 1330/1528 审计）：
   TL-E119-POINTER-SKIP-068（P2）E109 调度器 SKIP 判定看不见指针代
   TL-E119-POINTER-SCORER-069（P3）基础 scorer direct CLI 与指针协议脱节
+  TL-E119-PROBE-RECEIPT-VALIDATION-070（P2）完成探针只数行数不校验回执——
+     「预测足量 + 回执存在但无效」被判 complete → SKIP，正式汇总却
+     fail-closed 拒收：调度与交付的完成定义分裂，坏格永久 SKIP（#200）
 
 违反事实（GPT 审计已 CPU 复现）：
   068  #198 指针协议（066/crash-recovery）提交后只留 {out}.tli_gen 指针 +
@@ -54,6 +57,15 @@
   RP 红探针：打桩 _discover_candidates(include_pointers=False) 复刻
      修复前「只看 .jsonl glob」行为 → pointer-only complete 判定必须
      红非 complete——证明 G1 断言确实行使指针解析，不是平凡通过
+  G8（070 审计复现格）：真实提交代上破坏 gen 内回执六负例（非 JSON/
+     {}/status!=complete/basename 错/SHA 错/行数错）→ 全部
+     STATE=invalid 非零退出 + [GATE-FAIL] + PROBE-FAIL（修复前只数行数
+     → complete/SKIP 假完成——审计最小复现闭合）；破坏前同代探针必须
+     complete/SKIP（共享校验器不误伤合法提交代）；legacy 直写分支不被
+     pointer 回执门禁误伤（G2 回归承载）
+  A1 --audit-dir 只读预检：全 valid root → rc=0；含破坏 pointer →
+     rc=2 + invalid 格清单；零 pointer 目录 → 如实报告 rc=0；全程零写
+     （目录内容快照前后逐位一致）
 
 065 纪律：零裸 assert（全部 _check 显式判定，python -O 不失效）；
 067 纪律：PASS/SKIP/FAIL 三分显式计数，SKIP>0 不打 ALL PASS。
@@ -394,6 +406,98 @@ def test_G7_lock_concurrent_only_committed(base):
           "在飞 5 行）；B 提交后只认新提交代（N=5）")
 
 
+# ================================================================ 070 回执证据闭包
+
+def _corrupt_committed_gen(base, name, why, raw_bytes=None, mutate=None):
+    """070 负例构造：先真实生产提交（v2 回执 + 指针），再在 committed
+    generation 上改写 gen 内回执——审计原文的可达触发条件（预测足量 +
+    回执存在但无效/错代），非手写伪指针。返回 (pred_dir, why)。
+
+    破坏前先断言探针 complete/SKIP（合法提交代不被共享校验器误伤，
+    负例非平凡——负例红证明 complete 判定确实行使回执校验）。"""
+    out, rc = _run_producer(base, name, "success", "A", rows=3)
+    _check(rc == 0, f"{name}: 生产者提交失败 rc={rc}: {out[-300:]}")
+    d = _pred_dir(base, name)
+    r0 = _probe(d, max_num=3)
+    _check_state(r0, "complete", n=3, src="pointer", tag=f"{name}-pre-green")
+    _check(_decision(r0) == "SKIP",
+           f"{name}: 破坏前合法提交代必须 complete/SKIP（共享校验器"
+           f"不得误伤真实代），得到 {_decision(r0)}")
+    gi = resolve_generation_pointer(_logical(base, name))
+    _check(gi is not None, f"{name} 前提：真实提交代指针可解析")
+    rcp_path = gi["rcp_path"]
+    if raw_bytes is not None:
+        with open(rcp_path, "wb") as f:
+            f.write(raw_bytes)
+    else:
+        with open(rcp_path, encoding="utf-8") as f:
+            rcp = json.load(f)
+        mutate(rcp)
+        with open(rcp_path, "w", encoding="utf-8") as f:
+            json.dump(rcp, f, ensure_ascii=False, indent=1)
+    return d, why
+
+
+def test_G8_receipt_binding_fail_closed(base):
+    """G8（070 审计复现格，#200）：「预测足量 + 回执存在但无效」六负例
+    ——修复前探针只数行数判 complete → SKIP（调度称完成、正式汇总
+    fail-closed 拒收的完成定义分裂）；修复后共享校验器必须全部
+    STATE=invalid 非零退出 + [GATE-FAIL] 透传 + 决策 PROBE-FAIL。
+    负例清单（GPT 建议 4 全集）：回执非 JSON / 回执 {} / status!=complete
+    / prediction_basename 错 / prediction_sha256 错 / prediction_lines 错。"""
+    import hashlib
+    cases = [
+        ("g8a", "回执非 JSON（半写截断）", {"raw_bytes":
+            b'{"receipt_version": "producer-yarn-config-v'}),
+        ("g8b", "回执 {}（合法 JSON 空对象）", {"raw_bytes": b"{}"}),
+        ("g8c", "status != complete", {"mutate":
+            lambda r: r.__setitem__("status", "partial")}),
+        ("g8d", "prediction_basename 错", {"mutate":
+            lambda r: r.__setitem__("prediction_basename",
+                                    "cwe-xxx-01010000.jsonl")}),
+        ("g8e", "prediction_sha256 错（合法 hex 假值）", {"mutate":
+            lambda r: r.__setitem__("prediction_sha256", "f" * 64)}),
+        ("g8f", "prediction_lines 错", {"mutate":
+            lambda r: r.__setitem__("prediction_lines", 999)}),
+    ]
+    for name, why, kw in cases:
+        d, _ = _corrupt_committed_gen(base, name, why, **kw)
+        r = _probe(d, max_num=3)
+        _check(r.returncode != 0,
+               f"{name}（{why}）: 无效回执必须非零退出，rc={r.returncode}"
+               f" out={r.stdout[-400:]}")
+        _check("STATE=invalid" in r.stdout,
+               f"{name}: 必须显式输出 STATE=invalid: {r.stdout!r}")
+        _check("[GATE-FAIL]" in r.stdout,
+               f"{name}: 必须 [GATE-FAIL] 原因透传: {r.stdout!r}")
+        _check(_decision(r) == "PROBE-FAIL",
+               f"{name}（{why}）: 无效回执的 shell 决策必须是 PROBE-FAIL"
+               f"（调度与正式交付完成定义统一，不 SKIP 假完成），"
+               f"得到 {_decision(r)}")
+        # 反证区分：invalid ≠ partial/missing（不触发盲目重跑烧 GPU）
+        _check("STATE=partial" not in r.stdout and
+               "STATE=missing" not in r.stdout,
+               f"{name}: 无效回执不得被解释为需要重跑: {r.stdout!r}")
+    # 对照正例：未破坏的真实提交代（同 fixture 生产）仍 complete/SKIP，
+    # 且 gen 预测字节与回执逐位一致（共享校验器对合法 v2 代零误伤）
+    out, rc = _run_producer(base, "g8ok", "success", "A", rows=3)
+    _check(rc == 0, f"g8ok: 生产者提交失败 rc={rc}: {out[-300:]}")
+    gi = resolve_generation_pointer(_logical(base, "g8ok"))
+    with open(gi["pred_path"], "rb") as f:
+        actual_sha = hashlib.sha256(f.read()).hexdigest()
+    with open(gi["rcp_path"], encoding="utf-8") as f:
+        rcp = json.load(f)
+    _check(rcp["prediction_sha256"] == actual_sha and
+           rcp["prediction_lines"] == 3,
+           "g8ok 前提：真实提交代回执与预测字节逐位一致（负例的绿基线）")
+    r = _probe(_pred_dir(base, "g8ok"), max_num=3)
+    _check_state(r, "complete", n=3, src="pointer", tag="G8-ok-control")
+    _check(_decision(r) == "SKIP", "G8: 合法 v2 提交代必须仍 SKIP")
+    print("G8 PASS  提交代回执破坏六负例（非JSON/{}/status/basename/SHA/"
+          "行数）→ STATE=invalid + [GATE-FAIL] + PROBE-FAIL；合法 v2 代"
+          "零误伤仍 SKIP（070 完成定义分裂闭合：调度=正式交付口径）")
+
+
 # ================================================================ 069 scorer
 
 def _scorer(root, out, expect_tasks=None, postfix="_stub", direct_script=False,
@@ -536,6 +640,93 @@ def test_RP_red_probe_ignore_pointer(base):
           "指针解析")
 
 
+# ================================================================ 070 只读预检
+
+def _audit(root, module_mode=False):
+    """--audit-dir 只读预检子进程（直接脚本 / -m 包两种调用）。"""
+    if module_mode:
+        argv = [sys.executable, "-u", "-m",
+                "benchmark.RULER.gen_completion_probe"]
+    else:
+        argv = [sys.executable, "-u", PROBE]
+    argv += ["--audit-dir", root]
+    return subprocess.run(argv, capture_output=True, text=True, cwd=REPO,
+                          env={**os.environ, "PYTHONPATH": REPO})
+
+
+def _tree_snapshot(root):
+    """目录全量快照（相对路径 → 内容 SHA256），只读预检的零写验收锚。"""
+    import hashlib
+    snap = {}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for fn in sorted(filenames):
+            p = os.path.join(dirpath, fn)
+            with open(p, "rb") as f:
+                snap[os.path.relpath(p, root)] = \
+                    hashlib.sha256(f.read()).hexdigest()
+    return snap
+
+
+def test_A1_audit_dir_readonly_prec_check(base):
+    """A1（070 建议 5）：--audit-dir 只读预检——遍历目录全部 pointer，
+    逐格验证回执绑定。全 valid → rc=0；含破坏 pointer → rc=2 +
+    invalid 格清单（定点重跑决策输入）；零 pointer → 如实报告 rc=0；
+    全程零写（快照逐位一致，E109 已收口数据零改动纪律）。"""
+    # 三个真实提交代 + 一个破坏代（回执 {}），分置不同子目录
+    for name in ("a1v1", "a1v2", "a1v3"):
+        out, rc = _run_producer(base, name, "success", "A", rows=3)
+        _check(rc == 0, f"A1: 生产者提交失败（{name}）rc={rc}: {out[-200:]}")
+    d, _ = _corrupt_committed_gen(base, "a1bad", "回执 {}", raw_bytes=b"{}")
+    root = os.path.join(base)
+    # 破坏代目录里只有它自己的指针；把 a1bad 的 pred 目录整体挪进独立
+    # 子树，避免与其他 valid 代混目录（--audit-dir 逐 pointer 独立验证）
+    bad_sub = os.path.join(base, "bad_cell", "L32768", "pred_stub")
+    os.makedirs(os.path.dirname(bad_sub), exist_ok=True)
+    shutil.move(d, bad_sub)
+    # 零 pointer 目录（legacy 直写无指针，也在 base 内）先建好，
+    # 再拍全量快照——测试自身的建目录动作不得混进只读验收窗口
+    empty = os.path.join(base, "a1empty", "out")
+    os.makedirs(os.path.join(empty, "L32768", "pred_stub"), exist_ok=True)
+    _write_legacy(os.path.join(empty, "L32768", "pred_stub"),
+                  "vt-stubm-01010000.jsonl", 3)
+    valid_root = os.path.join(base)   # 含 a1v1..a1v3 + bad_cell + a1empty
+    snap = _tree_snapshot(valid_root)
+    # ① 全量 root：3 valid + 1 invalid → rc=2 + invalid 清单
+    r = _audit(valid_root)
+    _check(r.returncode == 2,
+           f"A1: 含 invalid pointer 的预检必须 rc=2，得到 {r.returncode}"
+           f" out={r.stdout[-600:]}")
+    _check(r.stdout.count("POINTER") >= 4,
+           f"A1: 4 个 pointer 须逐一报告，得到 {r.stdout!r}")
+    _check("INVALID" in r.stdout,
+           f"A1: 必须输出 invalid 格清单: {r.stdout!r}")
+    _check("a1bad" in r.stdout or "bad_cell" in r.stdout,
+           f"A1: invalid 清单必须指认破坏格: {r.stdout!r}")
+    _check("[GATE-FAIL]" in r.stdout,
+           f"A1: invalid 项必须带拒绝原因: {r.stdout!r}")
+    # ② -m 包模式同口径
+    r_m = _audit(valid_root, module_mode=True)
+    _check(r_m.returncode == 2 and "INVALID" in r_m.stdout,
+           f"A1: -m 包模式预检同口径，rc={r_m.returncode} "
+           f"out={r_m.stdout[-400:]}")
+    # ③ valid-only 子树 → rc=0
+    r_ok = _audit(os.path.join(base, "a1v1"))
+    _check(r_ok.returncode == 0 and "invalid=0" in r_ok.stdout,
+           f"A1: 全 valid root 须 rc=0 且 invalid=0，rc={r_ok.returncode}"
+           f" out={r_ok.stdout[-400:]}")
+    # ④ 零 pointer 目录 → 如实报告 rc=0（不伪造对象；目录在快照前已建）
+    r0 = _audit(empty)
+    _check(r0.returncode == 0 and "total=0" in r0.stdout,
+           f"A1: 零 pointer 目录须如实报告 total=0 rc=0，"
+           f"rc={r0.returncode} out={r0.stdout[-400:]}")
+    # ⑤ 只读验收：全程零写（快照逐位一致）
+    _check(_tree_snapshot(valid_root) == snap,
+           "A1: 只读预检不得写/改任何数据文件（E109 已收口数据零改动）")
+    print("A1 PASS  --audit-dir 只读预检：4 pointer 逐格验证（3 OK + 1 "
+          "invalid → rc=2 + 清单）；valid-only rc=0；零 pointer 如实"
+          " total=0；目录快照逐位一致零写")
+
+
 # ================================================================ main
 
 def main():
@@ -551,10 +742,12 @@ def main():
         ("G5", lambda: test_G5_invalid_pointer_fail_closed(base)),
         ("G6", lambda: test_G6_crash_before_switch_old_gen_visible(base)),
         ("G7", lambda: test_G7_lock_concurrent_only_committed(base)),
+        ("G8", lambda: test_G8_receipt_binding_fail_closed(base)),
         ("N1", lambda: test_N1_direct_scorer_pointer_root_fail_loudly(base)),
         ("N2", lambda: test_N2_direct_scorer_legacy_root_regression(base)),
         ("N3", test_N3_shell_wiring_static),
         ("RP", lambda: test_RP_red_probe_ignore_pointer(base)),
+        ("A1", lambda: test_A1_audit_dir_readonly_prec_check(base)),
     ]
     only = os.environ.get("E119_ONLY", "")
     if only:

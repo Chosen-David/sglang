@@ -873,25 +873,32 @@ def test_B2_commit_after_snapshot_before_source_check(base):
     """B2（062 barrier）：生产者在「回执 bytes 快照读取后、源三方校验
     前」原子提交 B 代 → 回执快照与 staging 仍同为 A 代，但源目录已推进
     到 B——三方一致门禁（staging==receipt==源当前字节）必须 fail-closed
-    拒绝，不得发布 source_sha256 指向新一代的 manifest。注入点：
-    monkeypatch SF.validate_producer_receipt——该调用位于回执快照读取
-    之后、staged/源比对之前，首次调用先提交 B 代再委托原实现。"""
+    拒绝，不得发布 source_sha256 指向新一代的 manifest。
+    注入点（070 重构后迁移）：回执 bytes 快照与 staged 绑定比对已收进
+    共享校验器 yarn_receipt.validate_committed_generation（#200 单口径
+    重构，formal 不再直接调 validate_producer_receipt），formal 侧
+    「快照后、源三方校验前」的剩余缝隙 = 源校验对 _file_sha256(source_
+    pred) 的首次读取——monkeypatch SF._file_sha256 路径条件触发（仅
+    source_pred）先提交 B 代再委托原实现（不误触发在 _atomic_install/
+    manifest/data 等其他 _file_sha256 调用上）；拒绝门禁与消息断言
+    不变（三方一致「冻结窗口…062」）。"""
     root = _single_task_root(base, "b2_root")
     _write_receipts(root, 32768, 2.0)
     src_pred = _cell_file(root, BTASK)
     data_root = os.path.join(TESTDATA, "data_root")
     _assert_freeze_three_way_consistent(
         root, os.path.join(base, "b2_staging_ok"), src_pred, "B2-baseline")
-    real_vpr = SF.validate_producer_receipt
+    real_sha = SF._file_sha256
     fired = {"done": False}
 
-    def _vpr_commit_B_then_delegate(receipt, pred_path):
-        if not fired["done"]:
+    def _sha_commit_B_then_delegate(path):
+        if not fired["done"] and \
+                os.path.abspath(path) == os.path.abspath(src_pred):
             fired["done"] = True
             _commit_generation_B(src_pred, BTASK)   # 快照后、源校验前
-        return real_vpr(receipt, pred_path)
+        return real_sha(path)
 
-    SF.validate_producer_receipt = _vpr_commit_B_then_delegate
+    SF._file_sha256 = _sha_commit_B_then_delegate
     try:
         freeze_and_stage(root, "_fx", 1, True,
                          os.path.join(base, "b2_staging"), 2, data_root)
@@ -902,7 +909,7 @@ def test_B2_commit_after_snapshot_before_source_check(base):
         _check("冻结窗口" in blob and "062" in blob,
                f"B2: 拒绝原因非三方一致门禁: {blob}")
     finally:
-        SF.validate_producer_receipt = real_vpr
+        SF._file_sha256 = real_sha
     print("B2 PASS  回执快照后/源校验前提交 B 代 → 三方一致门禁"
           " fail-closed 拒绝（不发布 source_sha256 指向新一代的 manifest）")
 
