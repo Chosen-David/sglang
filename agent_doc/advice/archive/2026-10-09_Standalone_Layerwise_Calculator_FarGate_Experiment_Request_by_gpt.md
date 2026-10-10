@@ -278,3 +278,11 @@ S-T018 已将 off 定义为取消 L2 near/far 配额，让合法 mid 候选在�
 当前 frozen 主线取得的是汇总 verdict 和任务记录；声明的每臂 3200 行 prediction、配对样本身份、完成后的实际运行 receipt、scorer 输出 `_meta.scorer_backend` 及消费绑定未随之取得。归档 harness `757199e16afe2254081ce889c728135cc5e7e0d2` 的源码可读，但它在 register_patch 后、生成前写配置 receipt；源码存在不是该批预测已完成及与分数绑定的证明。可保留该静态负结果为“上游汇总报告”，不能把默认 scorer 后端推断为这次实际后端。
 
 请在既有任务中分别记录：静态 E117 小试的有限结论；动态计算器的未完成目标、接口与最小验收；S-T018 已有 γ-off 工作与尚缺的受控配额对照。缺件时标明具体缺件，不以“已归档/已接受/已派单”替代实现与独立验收。
+
+## 2026-10-10 E122 合并后核验：开关已实现，cavg 混池可比性仍未验收
+
+本补记只更新上节 C 的验收状态，固定源码 `1c530aee70eacf92870b4f839f70643099be07a9`。E122 已实现 HF `gamma=None` 旁路 L2 配额并单池 top-k，sink/SWA 与 `K2_mid` 保留。默认 far 与 near 同用 `p` 的分支（L1094–1099）不受这个原始点积/概率混池问题影响。本次仅作源码核查，未运行项目测试、模型或 GPU。
+
+但 cavg 的 [`_far_token_score` L710–728](https://github.com/Chosen-David/sglang/blob/1c530aee70eacf92870b4f839f70643099be07a9/two-level-attention/sparse_attn/indexer/tli_indexer.py#L710) 仍输出缩放点积的 GQA 求和，near 的 `p` 为各 query head softmax 后 GQA 均值（L963–968），新分支 L1078–1084 直接拼接二者。`far_method=avg` 选择 L1 分数源（L885–888），并不归一化 far L2 簇分。因此新注释 L1060–1063 及 S-T018 的“cavg 两侧量纲一致”尚无实现依据；不能以方法都叫 avg 关闭此验收门。
+
+作者报告 E122 6/6；[T2（L193 起）](https://github.com/Chosen-David/sglang/blob/1c530aee70eacf92870b4f839f70643099be07a9/two-level-attention/test_e122_gamma_off.py#L193) 检查人工 far 分 1/0 与 near 概率拼接后的索引映射，T6 的 cavg 部分（L458–475）检查建簇、形状、保护区、数量及范围，未检验共同尺度。请沿用上节 C 的最小 matched quota-vs-free 对照：两臂共同固定 scorer、聚合/归一化及 L1 候选等条件；若修 scorer，两臂同修。现有 E123 四臂的 method/alpha/beta/gamma 同时变化，仍应作为配置比较。这里不新增任务、资源或科学结论，也不把作者测试报告视为独立复跑。
