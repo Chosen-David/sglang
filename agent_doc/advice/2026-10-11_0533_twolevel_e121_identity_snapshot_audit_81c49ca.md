@@ -263,3 +263,43 @@ E123 落盘补打 treatment 标签时按 081 修复后口径（含默认 mask �
   hash 筛查，确认命中才重跑。
 - E123 在飞数据零接触；E116b 全量重跑本来就用修复后新口径，天然携带 081
   身份闭包。
+
+---
+
+## 验收补记（主 AI，2026-10-11）
+
+**081 修复合入主仓**（agent commit 7ac05bf59 → cherry-pick `12c6433b4`，
+11 文件 +1239/−114），主 AI 独立复验通过：
+
+- **快照冻结**：`resolve_treatment_snapshot(args)` 一次解析 → 不可变
+  TreatmentSnapshot（manifest/manifest_json/skip_ids/basis_tensor），每文件
+  单次 open、SHA 与内容解析共用同一批 bytes；缺失/损坏 `[GATE-FAIL]`。
+  D′ 有效值语义落地：enable=True 才解析（path=None 展开 DEFAULT_MASK），
+  enable=False 恒 null——报告第 6 条「反向不对称」同步修复。
+- **默认掩码入 manifest**：默认配置 manifest 从恒 null 升级为
+  `{default: true, sha256, n_skip}`（**刻意不含 realpath**——agent 交付前
+  实锤同内容跨 checkout realpath 漂移会破锚点，改为只绑内容身份；tracked
+  SHA `9902254a…` 与本报告/生产 checkout 三方吻合）。显式 argv 路径保留
+  realpath（079② 口径不变）。
+- **入口冻结**：LongBench/RULER 均在模型加载前冻结 snapshot，
+  method_name/out_path/sidecar/receipt 全程消费同一对象，生成后重读路径的
+  调用全部删除；snapshot 注入 `register_patch → TLIIndexer`（层实例共享，
+  跨层混代消除），快照/args 失配 fail-closed。
+- **回执闭包**：`_validate_common_schema` 重算 `sha256(tm.json)[:10]` 必须
+  等于 basename `_h<10hex>`；无 `_h` 段但有 manifest → fail-closed；
+  legacy 无键放行；effective_config_sha256 指纹不动（079 口径保持）。
+  本报告「注释声称的绑定从未比较」从注释升级为 schema 闭包。
+- **验收矩阵（worktree + 主仓双地，python±-O）**：新套件 test_e121_fix_081.py
+  **8/8**（R1 混装冻结/R2 跨层注入/R3 默认掩码身份+缺失损坏 fail-closed/
+  R4 反向不对称/R5 回执闭包/R6 symlink retarget/K1-K2 kimi3 追加）；079
+  5/5、kimi3 17/17、E122 6/6、E119 076/077/078 9/9、075 套件无基线口径
+  23 PASS/1 SKIP/rc=1（080 纪律口径不变）——全部双态绿。
+- **锚点**：按「081 + kimi3 0316 口径」重算——kimi3 A4 五锚
+  （h562141be42 等）、E122 T5（hbb27186a72，旧 h7c17d0b763 因 checkout
+  realpath 依赖作废）、E119 P1/P2/P3（h175d1bcba6）。
+- **E123 在飞数据零接触**；三个 TLI 臂消费的默认掩码 SHA 与新身份闭包
+  逐位一致，按前述口径不重跑。E116b 全量重跑天然携带 081 闭包。
+
+**kimi3 2026-10-11 03:6 hourly review 两条追加发现已折叠进同一 commit**
+（sidecar 文件名 245+24=269>ext4 255 → limit 230；B/D 开关入 manifest
+修复截断互覆），详见该 review 文件主 AI 回应。

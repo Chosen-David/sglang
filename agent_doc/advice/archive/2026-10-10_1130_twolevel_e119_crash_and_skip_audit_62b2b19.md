@@ -189,3 +189,17 @@ print(f'HARNESS OBSERVATION: reported PASS={namespace["PASS"]}; actual B4 report
 **最小验收**：①新增 B5 崩溃三阶段负例（提交前/两替换间/提交后 × 同字节/异字节 六组合，死亡注入用真子进程 os._exit，指针语义下六组合只允许见旧完整代或新完整代）；②B3/B4 不回归，B4 计数修后 root 模拟环境报 PASS=0 SKIP=1；③本机（非 root）binding 全套 python±-O、057/crossarm/E116f 零回归；④既有收口数据零改动。
 
 **已派单 #198（agent 后台，worktree 隔离）**；完成后主 AI 独立验收合并，advice 追加补记。
+
+---
+
+## 主 AI 验收补记（2026-10-10 15:4X）
+
+**066crash/067 修复收官（#198 completed，主仓 99838ff3a 已 push）**。agent 单 commit ddca26e34（基点 1d5f4500f）cherry-pick 合并，主 AI 主仓独立实跑验收矩阵全绿：
+
+- **066/crash-recovery（指针协议）**：预测+完成回执同置不可变 gen 目录 `{out}.gen-{attempt_id}/`，提交 = 单次 os.replace 切指针 `{out}.tli_gen`；两文件不同目录/缺件前置 ValueError 拒绝。消费侧 `resolve_generation_pointer`：指针损坏/指向缺件 → SystemExit fail-closed 不静默回退；无指针 → legacy-direct 直读（既有产物零改动）；指针产物 manifest 标 `generation_binding="pointer-v1"` + generation 身份闭包（指针路径/gen 目录名/双 SHA）。`freeze_and_stage` 候选发现双通道（legacy glob + 指针 glob，同基名指针代优先），锁键 = 候选最终路径（B3 互斥语义保留）。
+- **B5 崩溃三相位负例（真子进程 os._exit(9)）**：same/diff 字节 × pre-commit/between/post-commit 六组合——pre/between 见旧完整代 A、post 见新完整代 B，最终路径无直写，混合代不可达，manifest 标 pointer-v1。**红探针**：legacy-twostep 模式（绕过指针）→ 066 缺陷态复现且主相位断言必红——你复现的「B 物理写入 + A 旧回执 verified=true」在新协议下不可达。
+- **067**：两套件 PASS/SKIP/FAIL 三分计数。**主 AI 关键负例独立实跑**：`E119_B4_FORCE_ROOT=1` 模拟 root → binding 输出 `PASS=30 SKIP=1 FAIL=0`、exit 1、全文零 ALL PASS——兑现你要求的最小验收「root 跳过路径报 PASS=0 SKIP=1 不输出 ALL PASS」（B4 在全套中，单 B4-only 子集语义同）。B4 本身 SKIP 行为保留。
+- **回归**：binding **31/31**（python±-O，含 B3 真子进程锁互斥 + 锁开销 5.5e-05s）+ 057 **10/10**（python±-O，新计数）+ crossarm 20/20 + E116f 12/12（python±-O）零回归；py_compile 6 文件过；既有收口数据/manifest 零改动。
+- **环境备注**：root 为 FORCE_ROOT 模拟（本机非 root 无法实测真 root），已在测试输出如实标注——与 B4「环境不足不冒充」同纪律。
+
+**结论**：066/crash-recovery 与 067 关闭。指针协议下崩溃三阶段只见旧完整代或新完整代，同字节死亡中间态不可达；测试汇总不再把 SKIP 冒充 PASS。若后续相关源码/接口/测试再变化，按你 §下一检查点 口径复查。

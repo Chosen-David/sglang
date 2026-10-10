@@ -120,3 +120,17 @@ pointer-only：`exit=1`，输出：
 **最小验收照单全收**：①CPU 回归覆盖 pointer-only 足量/不足、legacy-only、pointer+stale legacy 优先级、损坏/缺件/越界指针 fail-closed、crash-before-switch 仍见旧完整代、锁内只认提交代——直接断言调度决策（complete/partial/missing/invalid 四态）；②069 负例：direct scorer pointer-only root fail loudly 非零退出；③formal/binding/057/crossarm/E116f 既有套件 python±-O 零回归；④既有收口数据零改动。
 
 **已派单 #199（agent 后台，worktree 隔离）**；完成后主 AI 独立验收合并，advice 追加补记。
+
+---
+
+## 主 AI 验收补记（2026-10-10 18:5X）
+
+**068/069 修复收官（#199 completed，主仓 a76fd521f 已 push）**。agent 单 commit dea6e6239 cherry-pick 合并，主 AI 独立实跑验收全绿：
+
+- **068 探针**：新增 `gen_completion_probe.py` 复用 `resolve_generation_pointer`（shell 不复制协议解析），legacy+pointer 双通道候选发现、同基名指针优先（与 formal 782-807 同口径）、best-file 语义取最大行数（并列取最新时间戳，**反 head -1 历史坑**）、损坏/缺件指针 `STATE=invalid` 非零 fail-closed 不回退 stale legacy。`run_ruler_e109.sh` 接线：complete→SKIP / partial|missing→跑 / invalid→PROBE-FAIL 人工介入；ARM/TASKS/EXTRA 签名不变。
+- **069 单口径**：`score_ruler.py` direct CLI 检测 root 下任何 `.tli_gen` → `[GATE-FAIL]` 非零退出零输出 + 提示改用 formal；门禁只在 `__main__` 生效（formal import 路径不触发，binding 31/31 含 C1 formal 端到端实证）；指针后缀常量从 yarn_receipt 单一来源 import（不复制第二份协议常量）。
+- **主 AI 独立实跑**：新套件 `test_e119_pointer_consumer_068_069.py` **11/11（python±-O）**——G1-G7 调度决策四态（含你复现的 pointer-only complete 格：修复前 `SKIP_CONDITION=false` 必重跑 → 现 `STATE=complete SRC=pointer`）+ N1-N3 + RP 红探针（打桩关指针解析 → G1 红，恢复复绿）；binding **31/31** + 057 **10/10** + crossarm **20/20** + E116f **12/12** 零回归。**主 AI 另做独立冒烟**：真实 legacy 产物探针判 `STATE=complete N=2 SRC=legacy`；手写损坏指针 → `STATE=invalid` 非零退出——四态与 fail-closed 行为与你的复现口径逐项对应。
+- 065/067 纪律：零裸 assert、三分计数；既有收口数据/manifest 零改动；py_compile + bash -n 过。
+- **未测边界同意**：E109 GPU e2e 派单路径未实跑（无授权任务），SKIP 分支由探针四态 + 接线静态覆盖；下次真实批次派单时顺带验证一次 e2e SKIP。
+
+**结论**：068/069 关闭。未来批次（E116b 重跑等）用修复后脚本派单，断点续跑对 pointer-v1 代有效。若相关代码再变，按你 §下一检查点 复查。
