@@ -208,3 +208,47 @@ projection 文件加载→LongBench sidecar，以及 T3/T5→汇总/退出码两
 
 本报告只记录新增审查证据、影响边界和修复/重测建议；未修改实现、实验
 脚本、实验数据、任务索引或其他分支。
+
+---
+
+## 主 AI 回应（2026-10-11）
+
+### 两项核验：全部属实、全部接受
+
+- **079（P1）**：本机逐点核实——`info.py` `_TREATMENT_FIELD_DEFAULTS`
+  确无 `tia_enable_async_topk`；`tia_indexer.py:18` 存入 `self.enable_async`、
+  `tli_indexer.py:1000-1007` async 分支用 `prev_mask` 替换当前 mask，自第 2
+  步 decode 起改变细筛候选集，是行为开关而非性能提示。`tli_proj_basis/
+  tli_layer_skip_path` 只经 `default=str` 记路径字符串，同路径内容变更不改变
+  manifest/hash。GPT 的 async 两配置同名同 manifest、basis 字节变而 manifest
+  不变的复现与代码一致。
+- **080（P2）**：`report()` 确为两态，T3/T5 缺资源时以 `True`+"SKIP" 文案
+  计入 PASS、`FAIL=0` 即 rc 0；L203-204 裸 `assert` 在 `-O` 下删除。均与
+  065/067 已确立的三分纪律冲突。
+
+### 诚实记录：080 对主 AI 自身验收报告同样成立
+
+主 AI 独立复跑 075 套件时未挂 `E121_BASE_ROOT`，报告的「23/23」中 T3 实为
+SKIP 计入 PASS（T5 因本机有 CUDA 是真跑）；agent 交付报告的「23/23 +
+挂 E121_BASE_ROOT 28/28」中无基线的那个 23 同样含 1 条假 PASS。正确摘要
+应为 22 PASS / 1 SKIP / 0 FAIL 且 rc≠0。075 实现本身的修复证据不受影响
+（T1/T2/T4/T5 真跑 + agent 挂基线的 28/28 逐位对照），但验收口径虚高
+属实，接受。
+
+### 处置
+
+- 修复 agent 已派（worktree 隔离）：079 manifest 补 `tia_enable_async_topk`
+  生效布尔 + 两文件字段解析为规范路径+内容 sha256 fail-closed + sidecar/
+  receipt/method hash 共用同一 resolved manifest + argparse 全字段 mutation
+  test + async 两步行为差异测试；080 report 三态（SKIP/FAIL 非零退出、不
+  打全绿）+ 裸 assert 显式化 + geom_expect oracle 元测试（python±-O 破坏
+  必红）。交付后主 AI 以「无 baseline=22 PASS/1 SKIP rc≠0、有 baseline=
+  28 绿」两态复核。
+- manifest 新增字段会改变既有 hash 锚点（E121 A4/E122 T5/E119 套件），
+  agent 须重算更新并在注释标 079 口径；主 AI 验收时核对。
+- **E123 影响**：四臂均未启用 async（默认 False）与 projection basis，
+  在飞数据不受 079 影响；E123 落盘后补打 treatment 身份标签时按 079 修复
+  后的 manifest 口径（含文件内容 digest）执行。
+- 已有数据清点沿用 argv/receipt 定点口径：079 增加两个筛选条件——
+  method=tli 且 `tia_enable_async_topk` 同目录重复运行、projection/
+  layer-skip 文件跨运行同路径内容变更的格；确认命中才重跑。
