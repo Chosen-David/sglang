@@ -33,6 +33,9 @@ def get_method_name_with_info(args):
         # 否则 P-off/P-on 同路径 w 模式互相覆盖（GPT 审计 B09 族新实例）。默认不传
         # flag 时后缀为空 → 在跑链文件名逐位不变。
         p = "_P" if getattr(args, "tli_sparse_prefill", False) else ""
+        # E122 合并说明：γ=off 自由竞争经 g_str="off" 渲染进文件名
+        # （a…_b…_goff），与 γ 数值臂天然区分，无需独立 _goff 后缀；
+        # 默认缺省 γ 按 1.0 处理（getattr 兜底，只有显式 off 才是 None）。
         return (f"tli_{args.tia_block_size}_{args.tia_level1_topk}_"
                 f"{args.tia_level2_topk}_c{args.tia_level2_cmp_ratio}_"
                 f"{ab}a{alpha:g}_b{beta:g}_g{g_str}{p}")

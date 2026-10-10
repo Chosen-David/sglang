@@ -150,6 +150,9 @@ class TLIIndexer(TIAIndexer):
         # ---- E64 框架参数化：α/β/γ 分区 + sup_wsvd 投影基（B 配置帕累托点）----
         self.alpha = getattr(args, "tli_alpha", 0.0)
         self.beta = getattr(args, "tli_beta", 0.0)
+        # E122：tli_gamma 可为 None（CLI 'off'，大小写不敏感）= 自由竞争模式
+        # （取消 L2 near/far 配额分割，mid 单池 topk，见 compute_mask use_partition
+        # 分支的 γ=off 段）；数值照旧 float。缺省 1.0 兼容不传该参数的旧 harness。
         self.gamma = getattr(args, "tli_gamma", 1.0)
         self._basis_all = None
         bp_path = getattr(args, "tli_proj_basis", None)
@@ -1045,6 +1048,60 @@ class TLIIndexer(TIAIndexer):
             sink_tok = far_tok_lo
             swa_lo_tok = max(0, p.shape[-1] - self.sliding_window_size)
             K2_mid = max(0, K2 - sink_tok - (p.shape[-1] - swa_lo_tok))
+            # ---- E122：γ=off 自由竞争（用户 2026-10-10 指令，cavg 探索臂）----
+            # 取消 near/far 配额分割：全部 mid 候选在统一预算 K2_mid 内单池
+            # topk 竞争。语义边界（全部保持不变）：
+            #   * sink/swa 保护带：正交强制区必选不占预算（下方直接置位）；
+            #   * L1 的 β near 块预算：γ 只作用于 L2 配额，L1 双池照旧；
+            #   * far 池空 guard（C-1）/near 区宽截断：单池天然覆盖
+            #     （far 段宽 w_far = max(0, min(Tfar, 区宽))，near 段 = 区切片）；
+            #   * 下方 nt_near/far_budget/k2_far/k2_near 配额逻辑整体旁路。
+            # 【量纲混合风险】far_tok_score 路径（cavg/ccluster）下 far 侧簇分数
+            # （_far_token_score 为 group-sum 点积原始量纲）与 near 侧细筛
+            # softmax 概率 p 混池竞争量纲不一致，minmax 系簇分可能系统性偏置
+            # 挤出/霸榜；建议配 cavg（cluster + far_method=avg，簇分与 near
+            # avg 分数量纲一致）。默认路径（far 也用细筛分 p）两侧同源无此问题。
+            # ccluster 臂注意：γ=off 下 near 段固定用细筛分 p（本探索臂口径），
+            # near 簇分数（near_tok_score）不参与自由竞争。
+            if self.gamma is None:
+                if far_tok_score is not None:
+                    # cavg/ccluster 路径：far 区簇分数 + near 区细筛分拼接，
+                    # 单次 topk 后索引回映射。far 段截到 far 区上界
+                    # （far_tok_hi）：簇覆盖区（_km_far_lo 起 Tfar 宽）与
+                    # near 段 [far_tok_hi, swa_lo_tok) 不重叠不漏——簇覆盖
+                    # 越界块（far_hi_blk 用 max(sink+1,·) 可能比 near_blks 多
+                    # 一块）的 token 由 near 段细筛分代表（质量 ≥ 簇代表分），
+                    # 不重复占 K2_mid 预算。
+                    # 短序列退化（far_tok_hi > swa_lo_tok，near 区倒挂）时 far 段
+                    # 上界收到 swa_lo_tok：swa 强制区 token 不进竞争不占预算
+                    w_far = max(0, min(far_tok_score.shape[-1],
+                                       min(far_tok_hi, swa_lo_tok) - far_tok_lo))
+                    fs = far_tok_score[..., :w_far]
+                    near_seg = p[..., far_tok_hi:swa_lo_tok] \
+                        if swa_lo_tok > far_tok_hi else p[..., :0]
+                    cat_sc = torch.cat(
+                        [fs.unsqueeze(0).unsqueeze(0), near_seg], dim=-1)
+                    k2_free = min(K2_mid, cat_sc.shape[-1])
+                    idx_free = torch.topk(cat_sc, k2_free, dim=-1).indices
+                    # 索引回映射：拼接向量内 < w_far 是 far 段（簇分数相对
+                    # _km_far_lo 偏移），否则 near 段（far_tok_hi 偏移）
+                    i_tok = torch.where(
+                        idx_free < w_far,
+                        idx_free + self._km_far_lo,
+                        idx_free - w_far + far_tok_hi,
+                    )
+                else:
+                    # 默认路径：far 与 near 同用细筛分 p，整个 mid 一体竞争
+                    mid_p = p[..., far_tok_lo:swa_lo_tok]
+                    k2_free = min(K2_mid, mid_p.shape[-1])
+                    i_tok = torch.topk(mid_p, k2_free, dim=-1).indices \
+                        + far_tok_lo
+                m_off = torch.zeros_like(p, dtype=torch.bool)
+                m_off.scatter_(-1, i_tok, True)
+                # 正交强制区直接置位（必选不占预算）：sink 头部 + swa 尾部
+                m_off[..., :sink_tok] = True
+                m_off[..., swa_lo_tok:] = True
+                return m_off
             nt_near = 0
             # 【C-1 修复 2026-10-08（pool_starvation_audit §5-1）】far token 池空
             # （near_blks==sink_blocks：α=1 / 短序列 mid≤1 块 / α·mid 舍入<bs）时

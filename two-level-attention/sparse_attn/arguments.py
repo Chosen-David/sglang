@@ -22,6 +22,18 @@ def _add_quest_args(parser: argparse.ArgumentParser):
     group.add_argument('--quest_topk', type=int, default=16)
     return parser
 
+def _parse_gamma(x):
+    """E122：γ 支持 'off'（大小写不敏感）→ None = 自由竞争模式。
+
+    γ=off 语义（用户 2026-10-10 指令，cavg 探索臂）：取消 L2 near/far 配额
+    分割，全部 mid 候选在统一预算 K2_mid 内单池 topk 竞争（消费端
+    tli_indexer.compute_mask 的 use_partition 分支）。数值照旧解析为 float。
+    """
+    if str(x).strip().lower() == "off":
+        return None
+    return float(x)
+
+
 def _add_tli_args(parser: argparse.ArgumentParser):
     group = parser.add_argument_group(title='TLI (Two-Level Indexer)')
     group.add_argument('--tli_enable_subspace', type=lambda x: str(x).lower() != 'false', default=True)
@@ -60,8 +72,9 @@ def _add_tli_args(parser: argparse.ArgumentParser):
                        help='near 区占 mid 长度比（E64 alpha；0=单池老逻辑）')
     group.add_argument('--tli_beta', type=float, default=0.0,
                        help='near 块预算占 K1 比（E64 beta）')
-    group.add_argument('--tli_gamma', type=float, default=1.0,
-                       help='near 细筛 token 折扣（E64 gamma）')
+    group.add_argument('--tli_gamma', type=_parse_gamma, default=1.0,
+                       help='near 细筛 token 折扣（E64 gamma）；off=自由竞争'
+                            '（E122：取消 near/far L2 配额分割，mid 单池 topk 竞争）')
     group.add_argument('--tli_subspace', type=str, default='full',
                        choices=['full', 'rope', 'nope', 'tail', 'random', 'highfreq'],
                        help='子空间选择: full=全128维(默认) / rope=前64旋转维 / nope=后64非旋转维 / tail=旧口径低频尾维32(E71/B7/C0复现)')
