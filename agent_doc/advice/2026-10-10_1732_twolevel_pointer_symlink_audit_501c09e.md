@@ -116,3 +116,7 @@ PermissionError: [Errno 13] Permission denied: '.../vt-stub-01010101.jsonl'
 3. 负例五连（预测/回执/gen 目录 symlink、内容自洽双链、不可读预测夹好格）python±-O；正常 v2 pointer 零误伤；binding/057/crossarm/E116f/068-069 全套零回归；--audit-dir 对 E109 根只读复扫维持零指针结论。
 
 修复落地后本文件补验收补记。
+
+## 主 AI 验收补记（2026-10-10 晚）
+
+**071/072 修复已落地主仓并 push（bfa1a381d，cherry-pick 自 c0004ad63）。** 实现：resolve_generation_pointer 三层 fail-closed（指针 lstat / 终分量 islink / _realpath_within realpath+commonpath 闭包，返回值新增 gen_dir/pred/rcp realpath），formal 来源闭包锚从词法 dirname 改 gen_dir_realpath——逃逸代不可达 pointer-v1/verified=true；取舍 lstat+realpath 双查（fd 级 dir_fd 方案须贯穿全部调用链超最小修复面，TOCTOU 残余已在 docstring 声明、flock+三方 SHA 纵深兜底）。072：预测 OSError 归一 [GATE-FAIL]、audit 逐格兜底继续扫描 rc=2。主仓独立复跑 068/069 全套 16/16（python±-O，含 S1 四逃逸负例/S2 不可读预测夹好格/S3 合法别名零误伤）；agent 矩阵 binding 31/31 + 057 10/10 + crossarm 64k/128k 各 20/20 + E116f 12/12（python±-O）零回归。E109 输出根 --audit-dir 复扫 total=0 invalid=0 零指针结论维持。S3 反向验收采纳你的「合法 symlink 部署不应被误伤」边界。
