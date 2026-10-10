@@ -129,6 +129,20 @@
 #       转 [GATE-FAIL] SystemExit（带路径+阶段）；audit_directory 逐格
 #       以 (SystemExit, OSError) 兜底捕获，坏格计 invalid 后继续下一格
 #       （gen_completion_probe.py 侧落地）。
+#   TL-E119-POINTER-DECODE-073（P3，resolve_generation_pointer，#202）：
+#       072 的异常分类缺口——指针文本 open(encoding="utf-8").read() 抛
+#       UnicodeDecodeError（UnicodeError 族，非 OSError）穿透 except
+#       OSError，坏 .tli_gen（非法 UTF-8）单格裸 traceback 无四态、
+#       audit 首坏格中止。修复：bytes 读 + 同一受控分支严格解码，
+#       except 扩为 (OSError, UnicodeError) 统一转带路径 [GATE-FAIL]
+#       SystemExit（单口径在共享解析器，入口只兜底）。
+#   TL-E119-AUDIT-WALK-COVERAGE-074（P3，gen_completion_probe.audit_
+#       directory，#202）：os.walk 无 onerror + followlinks=False 静默
+#       跳过 symlink 子目录 → 父审计根对实际含坏 pointer 的树可返回
+#       total=0 invalid=0 rc=0（「没看到」被表述成「零对象」）。修复：
+#       onerror 收集覆盖错误 + symlink 子目录记覆盖错误（不开
+#       followlinks；聚合 realpath+commonpath 边界留 residual），
+#       覆盖错误与 invalid 口径分开但 fail-closed（rc=2）。
 #
 # 本模块刻意零重依赖（不 import torch/transformers/sparse_attn）——
 # 生成侧、消费侧与 CPU 红绿测试三方共享同一解析/校验口径，干净检出
@@ -515,12 +529,21 @@ def resolve_generation_pointer(pred_out_path):
             f"文件——存在即证据，不得静默回退直接读路径，"
             f"fail closed（066/crash-recovery+071）")
     try:
-        with open(pointer_path, "r", encoding="utf-8") as f:
-            gen_name = f.read().strip()
-    except OSError as e:
+        # 073（TL-E119-POINTER-DECODE）：指针文本以 bytes 读 + 同一受控
+        # 分支严格解码。此前 open(..., encoding="utf-8") 的 f.read() 抛
+        # UnicodeDecodeError（UnicodeError 族，非 OSError），穿透本
+        # except → probe 单格裸 traceback 无四态、audit 首坏格中止
+        # （072 的错误归一与逐格继续契约失效）。单口径归一在共享解析器
+        # 完成——probe/audit/formal 三入口不各自实现解码重试逻辑，
+        # 入口只保留 (…, UnicodeError) 最后防线兜底。
+        with open(pointer_path, "rb") as f:
+            pointer_bytes = f.read()
+        gen_name = pointer_bytes.decode("utf-8").strip()
+    except (OSError, UnicodeError) as e:
         raise SystemExit(
-            f"[GATE-FAIL] {pointer_path}: generation 指针读取失败（{e}）"
-            f"——存在即证据，fail closed（066/crash-recovery）")
+            f"[GATE-FAIL] {pointer_path}: generation 指针读取失败/解码"
+            f"失败（{type(e).__name__}: {e}）——存在即证据，fail closed"
+            f"（066/crash-recovery+073）")
     if not gen_name or os.path.basename(gen_name) != gen_name or \
             gen_name in (".", "..") or "/" in gen_name:
         raise SystemExit(

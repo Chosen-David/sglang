@@ -66,6 +66,16 @@ schema → v2 同代字节绑定（实际 SHA/行数 vs 回执声明逐位比对
   072 预测读取 OSError 由共享校验器归一为 [GATE-FAIL] SystemExit；
       audit_directory 逐格以 (SystemExit, OSError) 兜底捕获，坏格计
       invalid 后继续下一格（total/invalid 计数完整，rc=2）。
+#202（GPT 2026-10-10 1930 审计 073/074）：
+  073 指针文本非法 UTF-8 → UnicodeDecodeError 穿透 072 兜底（非
+      OSError 族）——共享解析器 bytes 读+受控解码单口径归一为
+      [GATE-FAIL] SystemExit（带路径+073），probe/audit 入口最后
+      防线同步加 UnicodeError，不各自实现解码重试。
+  074 audit_directory 的 os.walk 挂 onerror + symlink 子目录记
+      覆盖错误（不开 followlinks；聚合边界留 residual）——覆盖缺失
+      fail-closed rc=2，不得在清单不完整时返回干净摘要；coverage
+      error 与 invalid 口径分开（TRAVERSAL-COVERAGE-ERROR 行 +
+      AUDIT RESULT: total=N invalid=M coverage_errors=K）。
 
 用法：
   python benchmark/RULER/gen_completion_probe.py \
@@ -218,15 +228,53 @@ def audit_directory(root):
     """070 建议 5：只读预检——遍历 root 下全部 generation 指针，逐格
     验证回执绑定（resolve + 共享校验器同口径），输出 OK/INVALID 清单。
 
+    074（TL-E119-AUDIT-WALK-COVERAGE，#202）：默认 os.walk 静默跳过
+    symlink 子目录（followlinks=False 列入 dirnames 但不入）且无
+    onerror——父审计根对实际含坏 pointer 的 symlink 子树可返回
+    total=0 invalid=0 rc=0，「没看到」被表述成「零 pointer 产物」。
+    修复（覆盖缺失必须 fail-closed，成功摘要才可证明清单完整）：
+      - os.walk 挂 onerror：scandir 错误（不可读/消失/坏挂载子树）
+        收集为 (path, exception) 覆盖错误，不静默忽略；
+      - symlink 子目录（dirpath 下 os.path.islink 的目录项）记覆盖
+        错误并明示「须从别名根直接审计」——最小安全修复，不开
+        followlinks=True（环/重复计数/逃逸根目录风险）。合法别名部署
+        不回归：输出树整体位于 symlinked 路径下时从别名根直接审计
+        仍可见全部 pointer（S3 语义）。residual：聚合跨 symlink 子树
+        的 realpath+commonpath 边界与 (st_dev, st_ino) 去重防环未
+        实现（当前无聚合别名需求），如需聚合支持再补，此处只声明；
+      - 覆盖错误不计入 invalid（口径分开），但 fail-closed：任一存在
+        → 每条打印 TRAVERSAL-COVERAGE-ERROR，rc=2（total=0 亦然）。
+
     全程零写（不修改任何数据——E109 已收口数据零改动纪律）。
-    返回 (total, invalid_count)；invalid 项打印 [GATE-FAIL] 拒绝原因，
-    供定点重跑决策。目录不存在 → 如实报零对象（非协议错误）。"""
+    返回 (total, invalid_count, coverage_errors)；invalid 项打印
+    [GATE-FAIL] 拒绝原因，coverage 项为 (路径, 异常/原因) 列表，
+    供定点重跑与可达性修复决策。目录不存在 → 如实报零对象
+    （非协议错误）。"""
     if not os.path.isdir(root):
         raise SystemExit(
             f"[GATE-FAIL] --audit-dir {root!r} 不存在或非目录——预检"
             f"目标非法，fail closed（070）")
     pointers = []
-    for dirpath, _dirnames, filenames in os.walk(root):
+    coverage_errors = []
+
+    def _on_walk_error(err):
+        # 074：os.walk 的 scandir 错误（不可读/消失/坏挂载子树）——
+        # 不静默忽略，收集为覆盖错误（OSError 带 filename；缺省回退
+        # root 使报告仍有路径上下文）
+        coverage_errors.append((getattr(err, "filename", None) or root,
+                                err))
+
+    for dirpath, dirnames, filenames in os.walk(root,
+                                                onerror=_on_walk_error):
+        # 074：symlink 子目录不入聚合审计（followlinks=False 语义）——
+        # 记覆盖错误并明示合法出口（从别名根直接审计）；每别名一条
+        # （同一目录两个别名 → 两条，去重/防环由「不入」保证）
+        for d in sorted(dirnames):
+            full = os.path.join(dirpath, d)
+            if os.path.islink(full):
+                coverage_errors.append((
+                    full, "symlink 子目录不入聚合审计，"
+                          "须从别名根直接审计（074）"))
         for fn in sorted(filenames):
             if fn.endswith(GENERATION_POINTER_SUFFIX):
                 pointers.append(os.path.join(dirpath, fn))
@@ -237,6 +285,8 @@ def audit_directory(root):
         # 继续下一格（修复前首个 I/O 坏格直接 traceback 中止，后续好格
         # 与坏格均未列出，无法形成定点重跑清单；validate 内部已把预测
         # 读取 OSError 归一为 SystemExit，此处 OSError 为最后防线）。
+        # 073：UnicodeError 加入最后防线（共享解析器已把指针解码失败
+        # 归一为 SystemExit，此处只兜残余解码异常，不实现重试逻辑）。
         try:
             gen = resolve_generation_pointer(logical)
             if gen is None:
@@ -244,12 +294,14 @@ def audit_directory(root):
                     f"[GATE-FAIL] {ptr}: 指针文件存在但 resolve 返回 None"
                     f"——指针协议解析内部矛盾（070 预检）")
             validate_committed_generation(gen["pred_path"], gen["rcp_path"])
-        except (SystemExit, OSError) as e:
+        except (SystemExit, OSError, UnicodeError) as e:
             invalid += 1
             print(f"POINTER {ptr} INVALID: {e}", flush=True)
             continue
         print(f"POINTER {ptr} OK", flush=True)
-    return len(pointers), invalid
+    for cov_path, cov_err in coverage_errors:
+        print(f"TRAVERSAL-COVERAGE-ERROR: {cov_path} {cov_err}", flush=True)
+    return len(pointers), invalid, coverage_errors
 
 
 def main(argv=None):
@@ -265,28 +317,37 @@ def main(argv=None):
                     help="调度阈值 N（行数 >= N → complete/SKIP）")
     ap.add_argument("--audit-dir",
                     help="只读预检模式：遍历该目录下全部 .tli_gen 指针，"
-                         "逐格验证回执绑定（零写；invalid 存在 → exit 2）")
+                         "逐格验证回执绑定（零写；invalid 或遍历覆盖错误"
+                         "存在 → exit 2）")
     args = ap.parse_args(argv)
     if args.audit_dir is not None:
         # 只读预检模式（与单格探查互斥）
         if args.out_dir or args.task or args.max_num is not None:
             ap.error("--audit-dir 与 --out-dir/--task/--max-num 互斥")
-        total, invalid = audit_directory(args.audit_dir)
-        note = "（零 pointer 产物，预检无对象）" if total == 0 else ""
-        print(f"AUDIT RESULT: total={total} invalid={invalid}{note}",
-              flush=True)
-        return 2 if invalid else 0
+        total, invalid, cov_errors = audit_directory(args.audit_dir)
+        # 074：覆盖不完整时不得把「没看到」表述成「零 pointer 产物」
+        # （零对象注记只在覆盖完整的零对象时出现）
+        note = ("（零 pointer 产物，预检无对象）"
+                if total == 0 and not cov_errors else "")
+        print(f"AUDIT RESULT: total={total} invalid={invalid} "
+              f"coverage_errors={len(cov_errors)}{note}", flush=True)
+        # 074：coverage error 不计入 invalid（口径分开）但 fail-closed
+        # ——覆盖不完整不得返回干净摘要 rc=0（total=0 亦然）
+        return 2 if (invalid or cov_errors) else 0
     if not args.out_dir or not args.task or args.max_num is None:
         ap.error("单格探查须同时提供 --out-dir/--task/--max-num"
                  "（或改用 --audit-dir 只读预检）")
     try:
         info = probe_task(args.out_dir, args.task, args.max_num)
-    except (SystemExit, OSError) as e:
+    except (SystemExit, OSError, UnicodeError) as e:
         # invalid：非零退出（shell 分支 PROBE-FAIL，不当需要重跑处理）。
         # str(SystemExit(msg)) == msg，GATE-FAIL 原因原样透传。
         # 072：OSError（validate_committed_generation 已归一为 SystemExit，
         # 此处覆盖 probe_task 自身 _count_lines 的残余 I/O 异常——如
         # 检查后消失/权限翻转）同样归一为四态 invalid，不留裸 traceback。
+        # 073：UnicodeError 加入最后防线（共享解析器已把指针解码失败
+        # 归一为带路径 SystemExit，此处只兜残余解码异常，不重复实现
+        # 解码重试——单口径归一在 yarn_receipt 完成）。
         print(f"STATE={STATE_INVALID} REASON={e}", flush=True)
         return 2
     print(f"STATE={info['state']} N={info['n']} "

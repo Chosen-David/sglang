@@ -80,6 +80,21 @@
      逃逸）不得误伤——经链路径与真实路径双入口 probe complete、
      resolve canonical realpath 闭合、formal 消费入口接受
      （防 071 门禁把父目录分量是 symlink 的正常部署误判成逃逸）
+  S4（073 审计复现格，#202）非法 UTF-8（单字节 0xff）坏 .tli_gen 夹在
+     两个合法好格之间——单格 STATE=invalid rc=2 + [GATE-FAIL]+073
+     （修复前 UnicodeDecodeError 裸 traceback rc=1）；audit 坏格居中
+     不中止 → 三格全列出 total=3 invalid=1 rc=2
+  S5（074 审计复现格，#202）父审计根下 linked-cell -> 目录外 real-cell
+     （real 内放坏 pointer）——聚合审计必须报 symlink 子目录覆盖错误
+     + rc=2（修复前 total=0 invalid=0 rc=0 把「没看到」表述成「零
+     pointer 产物」）；从 real/别名根直接审计仍发现该 pointer（S3
+     合法别名行为不回归）
+  S6（074）两个别名指向同一真实目录（real-cell 在审计根内）——每实体
+     格一份不重复计数（修复前 followlinks 缺省跳过即一份，但零覆盖
+     报告 rc=0）；两别名各报一条覆盖错误，rc=2
+  S7（074）不可读子树（chmod 000 目录含 pointer）——os.walk onerror
+     收集 scandir 错误为覆盖错误 + rc=2（修复前静默忽略 rc=0）；
+     可见好格仍列出；权限恢复后复扫干净 rc=0（fixture 无残留）
 
 065 纪律：零裸 assert（全部 _check 显式判定，python -O 不失效）；
 067 纪律：PASS/SKIP/FAIL 三分显式计数，SKIP>0 不打 ALL PASS。
@@ -999,6 +1014,206 @@ def test_S3_symlinked_output_tree_no_false_positive(base):
           "formal 接受并标 pointer-v1/verified（071 门禁不误伤正常部署）")
 
 
+# ================================================================ 073/074（#202）
+
+def test_S4_invalid_utf8_pointer_normalized_invalid(base):
+    """S4（073 审计复现格，#202）：非法 UTF-8（单字节 0xff）坏
+    .tli_gen 夹在两个合法好格之间。修复前 open(..., encoding="utf-8")
+    的 f.read() 抛 UnicodeDecodeError（UnicodeError 族，非 OSError），
+    穿透 resolve 的 except OSError 与 probe/audit 的
+    (SystemExit, OSError) 兜底 → 单格裸 traceback rc=1（无 STATE=
+    invalid，四态契约失效）、audit 首坏格中止（后续格不列出）。
+    修复后（单口径在共享解析器 bytes 读+受控解码）：单格
+    STATE=invalid rc=2 + [GATE-FAIL]+073 解码失败；audit 坏格计
+    invalid 后继续 → 三格全列出 total=3 invalid=1 coverage_errors=0
+    rc=2（无 traceback）。"""
+    root = os.path.join(base, "s4root")
+    # 字典序 g1good < m2bad < z3last → 坏格居中（audit 按路径排序）
+    for name in ("g1good", "m2bad", "z3last"):
+        out, rc = _run_producer(root, name, "success", "A", rows=3)
+        _check(rc == 0, f"S4: 生产者提交失败（{name}）rc={rc}: {out[-300:]}")
+    bad_ptr = generation_pointer_path(
+        os.path.join(_pred_dir(root, "m2bad"), "vt-stubm-09090909.jsonl"))
+    _check(os.path.exists(bad_ptr), "S4 前提：坏格指针存在（真实提交代）")
+    with open(bad_ptr, "wb") as f:
+        f.write(b"\xff")   # 单字节非法 UTF-8（审计原文最小复现输入）
+    # ① 单格探针：四态 invalid（073 共享解析器单口径归一，无裸 traceback）
+    r = _probe(_pred_dir(root, "m2bad"), max_num=3)
+    _check(r.returncode == 2,
+           f"S4: 非法 UTF-8 指针必须 rc=2（STATE=invalid），得到 "
+           f"{r.returncode} out={r.stdout[-300:]} err={r.stderr[-300:]}")
+    _check("STATE=invalid" in r.stdout,
+           f"S4: 必须显式输出 STATE=invalid（四态契约）: {r.stdout!r}")
+    _check("[GATE-FAIL]" in r.stdout and "073" in r.stdout,
+           f"S4: 必须 [GATE-FAIL]+073（指针读取失败/解码失败）: "
+           f"{r.stdout!r}")
+    _check("解码" in r.stdout,
+           f"S4: 拒绝原因须注明解码失败: {r.stdout!r}")
+    _check("Traceback" not in (r.stdout + r.stderr),
+           f"S4: 修复前 UnicodeDecodeError 裸 traceback 不得复现: "
+           f"{r.stderr[-300:]!r}")
+    _check(_decision(r) == "PROBE-FAIL",
+           f"S4: 非法 UTF-8 指针的决策必须 PROBE-FAIL（协议错误不盲目"
+           f"重跑），得到 {_decision(r)}")
+    # ② --audit-dir：坏格计 invalid 后继续（修复前首坏格 traceback 中止）
+    ra = _audit(root)
+    _check(ra.returncode == 2,
+           f"S4: audit 含坏格必须 rc=2，得到 {ra.returncode}"
+           f" out={ra.stdout[-400:]} err={ra.stderr[-300:]}")
+    _check("AUDIT RESULT: total=3 invalid=1 coverage_errors=0" in ra.stdout,
+           f"S4: 必须 total=3 invalid=1 coverage_errors=0（计数完整），"
+           f"得到: {ra.stdout[-300:]!r}")
+    lines = [l for l in ra.stdout.splitlines() if l.startswith("POINTER")]
+    _check(len(lines) == 3,
+           f"S4: 三格必须均有记录（修复前首坏格中止），得到 {lines}")
+    bad_idx = [i for i, l in enumerate(lines) if "m2bad" in l]
+    _check(len(bad_idx) == 1 and "INVALID" in lines[bad_idx[0]],
+           f"S4: 坏格必须计 INVALID: {lines}")
+    _check(sum(1 for l in lines if l.endswith(" OK")) == 2,
+           f"S4: 坏格前后两个好格均须报 OK: {lines}")
+    _check("Traceback" not in (ra.stdout + ra.stderr),
+           f"S4: audit 不得留裸 traceback: {ra.stderr[-300:]!r}")
+    print("S4 PASS  非法 UTF-8（0xff）坏格：单格 STATE=invalid rc=2 + "
+          "[GATE-FAIL]+073 解码失败归一（无 traceback）；audit 坏格居中"
+          "不中止 → total=3 invalid=1 coverage_errors=0 rc=2 三格均有"
+          "记录（073 闭合：错误归一与逐格继续契约恢复）")
+
+
+def test_S5_nested_symlink_subtree_coverage_fail_closed(base):
+    """S5（074 审计复现格，#202）：父审计根下 linked-cell -> 目录外
+    real-cell，real 内放坏 pointer——修复前 os.walk 默认静默跳过
+    symlink 子目录（followlinks=False 列入 dirnames 但不入）且无
+    onerror，聚合审计 total=0 invalid=0 rc=0 把「没看到」表述成
+    「零 pointer 产物」。修复后：聚合审计报 symlink 子目录覆盖错误
+    + rc=2（不得在覆盖不完整时返回干净摘要）；从 real-cell 根与
+    别名根直接审计仍发现该 pointer（S3 合法别名行为不回归）。"""
+    root = os.path.join(base, "s5root")   # 父审计根（聚合入口）
+    real = os.path.join(base, "s5real")   # 真实目录（root 外）
+    os.makedirs(real, exist_ok=True)
+    os.makedirs(root, exist_ok=True)
+    link = os.path.join(root, "linked-cell")
+    os.symlink(real, link)
+    _check(os.path.islink(link), "S5 前提：linked-cell 须为 symlink")
+    # real 内真实提交代 + 坏 pointer（内容为空 → 非法 generation 目录名）
+    out, rc = _run_producer(real, "cell", "success", "A", rows=3)
+    _check(rc == 0, f"S5: 生产者提交失败 rc={rc}: {out[-300:]}")
+    ptr = generation_pointer_path(
+        os.path.join(_pred_dir(real, "cell"), "vt-stubm-09090909.jsonl"))
+    with open(ptr, "w", encoding="utf-8") as f:
+        f.write("\n")   # 空 gen 目录名 → 坏格（GATE-FAIL，非协议外逃逸）
+    # ① 聚合审计（父根）：symlink 子目录不入 → coverage error + rc=2
+    ra = _audit(root)
+    _check(ra.returncode == 2,
+           f"S5: 覆盖不完整的聚合审计必须 rc=2（修复前 total=0 rc=0），"
+           f"得到 {ra.returncode} out={ra.stdout[-400:]}")
+    _check("TRAVERSAL-COVERAGE-ERROR" in ra.stdout and
+           "linked-cell" in ra.stdout,
+           f"S5: 必须报 symlink 子目录覆盖错误: {ra.stdout!r}")
+    _check("symlink 子目录不入聚合审计" in ra.stdout,
+           f"S5: 覆盖错误须明示「须从别名根直接审计」: {ra.stdout!r}")
+    _check("AUDIT RESULT: total=0 invalid=0 coverage_errors=1"
+           in ra.stdout,
+           f"S5: 聚合根零 pointer 但 coverage_errors=1，得到: "
+           f"{ra.stdout[-300:]!r}")
+    _check("零 pointer 产物" not in ra.stdout,
+           f"S5: 覆盖不完整时不得把「没看到」表述成「零 pointer 产物」: "
+           f"{ra.stdout!r}")
+    # ② 从 real-cell 根直接审计：发现该坏 pointer（覆盖语义不误伤直查）
+    r_real = _audit(_pred_dir(real, "cell"))
+    _check(r_real.returncode == 2 and
+           "AUDIT RESULT: total=1 invalid=1 coverage_errors=0"
+           in r_real.stdout,
+           f"S5: real-cell 根直查须发现坏 pointer（total=1 invalid=1"
+           f" 零覆盖错误），得到: {r_real.stdout[-300:]!r}")
+    # ③ 从别名根直接审计：同发现（S3 合法别名行为不回归）
+    r_alias = _audit(os.path.join(link, "cell", "out", "L32768",
+                                  "pred_stub"))
+    _check(r_alias.returncode == 2 and
+           "AUDIT RESULT: total=1 invalid=1 coverage_errors=0"
+           in r_alias.stdout and
+           "TRAVERSAL-COVERAGE-ERROR" not in r_alias.stdout,
+           f"S5: 别名根直查须发现 pointer 且零覆盖错误（S3 不回归），"
+           f"得到: {r_alias.stdout[-300:]!r}")
+    print("S5 PASS  嵌套 symlink 子树（linked-cell -> 目录外 real，real 内"
+          "坏 pointer）：聚合审计 TRAVERSAL-COVERAGE-ERROR + rc=2（修复前"
+          " total=0 rc=0 零对象假摘要）；real/别名根直查仍发现 pointer"
+          "（074 闭合：覆盖缺失 fail-closed，别名直查零回归）")
+
+
+def test_S6_two_aliases_same_dir_no_double_count(base):
+    """S6（074）：两个别名指向同一真实目录（real-cell 在审计根内）——
+    每实体格一份（不重复计数），两个别名各报一条覆盖错误；invalid=0
+    但 coverage_errors=2 → 仍 rc=2（覆盖 fail-closed 与 invalid 口径
+    分开）。不开 followlinks（最小安全修复：环/重复计数/逃逸根风险）。"""
+    root = os.path.join(base, "s6root")
+    out, rc = _run_producer(root, "real-cell", "success", "A", rows=3)
+    _check(rc == 0, f"S6: 生产者提交失败 rc={rc}: {out[-300:]}")
+    for a in ("aliasA", "aliasB"):
+        os.symlink(os.path.join(root, "real-cell"), os.path.join(root, a))
+    ra = _audit(root)
+    _check(ra.returncode == 2,
+           f"S6: 覆盖不完整（两别名未入）必须 rc=2（invalid=0 亦然），"
+           f"得到 {ra.returncode} out={ra.stdout[-400:]}")
+    _check("AUDIT RESULT: total=1 invalid=0 coverage_errors=2" in ra.stdout,
+           f"S6: 须 total=1 invalid=0 coverage_errors=2，得到: "
+           f"{ra.stdout[-300:]!r}")
+    plines = [l for l in ra.stdout.splitlines() if l.startswith("POINTER")]
+    _check(len(plines) == 1 and plines[0].endswith(" OK"),
+           f"S6: 每实体格一份（同一目录两个别名不得重复计数，"
+           f"followlinks-on 会数出 3 份），得到 {plines}")
+    clines = [l for l in ra.stdout.splitlines()
+              if l.startswith("TRAVERSAL-COVERAGE-ERROR")]
+    _check(len(clines) == 2 and
+           sum("aliasA" in l for l in clines) == 1 and
+           sum("aliasB" in l for l in clines) == 1,
+           f"S6: 两别名须各报一条覆盖错误: {clines}")
+    print("S6 PASS  两个别名指向同一目录：实体格一份（不重复计数）+ "
+          "两别名各一条 TRAVERSAL-COVERAGE-ERROR + invalid=0 但 "
+          "coverage_errors=2 → rc=2（074：覆盖 fail-closed 与 invalid "
+          "口径分开）")
+
+
+def test_S7_unreadable_subtree_coverage_error(base):
+    """S7（074）：不可读子树（chmod 000 目录含 pointer）——os.walk
+    onerror 收集 scandir 错误为覆盖错误，不静默忽略；可见好格仍列出；
+    rc=2（修复前 total=1 invalid=0 rc=0 干净假摘要）。权限恢复后
+    复扫干净 rc=0（fail-open 路径 + fixture 无残留）。"""
+    root = os.path.join(base, "s7root")
+    for name in ("s7vis", "s7lock"):
+        out, rc = _run_producer(root, name, "success", "A", rows=3)
+        _check(rc == 0, f"S7: 生产者提交失败（{name}）rc={rc}: {out[-300:]}")
+    locked = _pred_dir(root, "s7lock")
+    os.chmod(locked, 0)   # 存在但不可 scandir（stat 过、列出拒）
+    try:
+        ra = _audit(root)
+        _check(ra.returncode == 2,
+               f"S7: 不可读子树必须 rc=2（覆盖缺失 fail-closed），得到 "
+               f"{ra.returncode} out={ra.stdout[-400:]}")
+        _check("TRAVERSAL-COVERAGE-ERROR" in ra.stdout and
+               "s7lock" in ra.stdout,
+               f"S7: 必须报不可读子树覆盖错误: {ra.stdout!r}")
+        _check("AUDIT RESULT: total=1 invalid=0 coverage_errors=1"
+               in ra.stdout,
+               f"S7: 可见格一份 + 覆盖错误一条，得到: "
+               f"{ra.stdout[-300:]!r}")
+        _check(any(l.startswith("POINTER") and l.endswith(" OK") and
+                   "s7vis" in l for l in ra.stdout.splitlines()),
+               f"S7: 可见好格仍须列出（覆盖错误不中止）: {ra.stdout!r}")
+        _check("Traceback" not in (ra.stdout + ra.stderr),
+               f"S7: audit 不得留裸 traceback: {ra.stderr[-300:]!r}")
+    finally:
+        os.chmod(locked, 0o755)   # 恢复权限，防 fixture 残留
+    # 权限恢复后复扫：覆盖完整 → rc=0 干净摘要（fail-open 路径验证）
+    ra2 = _audit(root)
+    _check(ra2.returncode == 0 and
+           "AUDIT RESULT: total=2 invalid=0 coverage_errors=0" in ra2.stdout,
+           f"S7: 权限恢复后须 total=2 invalid=0 coverage_errors=0 rc=0，"
+           f"得到 rc={ra2.returncode}: {ra2.stdout[-300:]!r}")
+    print("S7 PASS  不可读子树（chmod 000）：TRAVERSAL-COVERAGE-ERROR + "
+          "可见好格仍列出 + rc=2（修复前静默忽略 rc=0）；权限恢复后复扫"
+          " total=2 coverage_errors=0 rc=0（074 闭合 + fixture 无残留）")
+
+
 # ================================================================ main
 
 def main():
@@ -1023,6 +1238,10 @@ def main():
         ("S1", lambda: test_S1_symlink_escape_fail_closed(base)),
         ("S2", lambda: test_S2_unreadable_pred_probe_invalid_audit_continues(base)),
         ("S3", lambda: test_S3_symlinked_output_tree_no_false_positive(base)),
+        ("S4", lambda: test_S4_invalid_utf8_pointer_normalized_invalid(base)),
+        ("S5", lambda: test_S5_nested_symlink_subtree_coverage_fail_closed(base)),
+        ("S6", lambda: test_S6_two_aliases_same_dir_no_double_count(base)),
+        ("S7", lambda: test_S7_unreadable_subtree_coverage_error(base)),
     ]
     only = os.environ.get("E119_ONLY", "")
     if only:
