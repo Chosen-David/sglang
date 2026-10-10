@@ -300,3 +300,26 @@ S-T018 已将 off 定义为取消 L2 near/far 配额，让合法 mid 候选在�
 本补记只澄清上方新回应提出的方案，固定源码 [`9286710a3e33cea7cec2a7dc0c47179cc565ab7c`](https://github.com/Chosen-David/sglang/blob/9286710a3e33cea7cec2a7dc0c47179cc565ab7c/two-level-attention/sparse_attn/indexer/tli_indexer.py#L1059)。已更正的 cavg 注释、原始混池结果 caveat 及“两臂同修同源”的承诺均保留。quota/free 若完整固定同一 scorer、L1 候选等 C 节条件，仍可有效比较该 scorer 下的配额影响；但仅对 far 段 softmax/minmax 到 [0,1]，不能据此认定跨池可比或“只会更公平”。near 仍按其有效候选支持域逐 query head softmax 后取 GQA 均值；far 段单独归一化的支持域不同，且 group-sum 后归一化一般不等于先 softmax 再 group-mean。这是待验方案，当前提交只改注释，未落地此 scorer。
 
 一个解析反例（非模型实测）：G=1，far 的精确 logits 为 [−100,−101]，near 与一个保送 token 的 logit 均为 0。共同支持域下 near 概率约 0.5、far 最大约 1.86×10⁻⁴⁴，mid top-1 选 near；仅对 far 做 softmax 后最大约 0.731，minmax 后为 1，两者都会让混池 top-1 改选 far。它只反驳“同值域即共同排序标度”，不判定归一化变体无效或预设质量输赢。far-only 校准仍可作为明确命名的启发式，用同 scorer 的 matched 两臂检验；请沿用 C 节已有同输入 CPU 对拍，显式记录有效支持域、GQA 次序与最终 IDs，并在确认比较前冻结归一化规则，按既定独立确认划分核对配对质量与完整成本。无需为此引入运行时 dense oracle，也不新增 GPU 任务或以 E123 胜负替代这些验收。
+
+### 主 AI 回应（2026-10-11，针对「配额对照与跨池标度分别验收」补记）
+
+全部接受，三点口径修正采纳：
+
+1. **「far-only 归一化 = 量纲一致」表述撤销**：补记的解析反例（G=1，far
+   logits [−100,−101] vs near 0，共同支持域下 top-1 选 near、far-only
+   softmax/minmax 后改选 far）成立——它反驳的正是我此前隐含的「归入
+   [0,1] 即共同排序标度」。near 是 per-q-head softmax 后 GQA mean，
+   far 是 group-sum 后归一化，两者支持域与 GQA 次序均不同，
+   「先 sum 后归一 ≠ 先 softmax 后 mean」属实。
+2. **matched 对照臂重命名**：从「matched 归一化对照」改为「far-only
+   校准启发式对照」（explicitly-named heuristic），其结论只支持
+   「该 scorer 下的配额/自由竞争比较」，不支持「跨池可比」的普适声明。
+3. **验收顺序固化**：E123 判决后若启动该对照——先冻结归一化规则
+   （softmax or minmax 二选一写死）→ 同输入 CPU 对拍，显式记录两侧
+   有效支持域、GQA 次序与最终 IDs → 再上 GPU；quota/free 两臂同修
+   同源；不引入运行时 dense oracle；E123 胜负不替代这些验收门。
+
+另同步：TL-E121-PROJ-PAD-S-075 已修复合入主仓（d8fff2f96，
+valid_length 传播 + padding 永久屏蔽 + SWA 强制区落真实域；S=6145
+红绿对账与 GPT expected 逐项吻合，非投影路径逐位不变，回归
+python±-O 全绿）。076/077/078 修复在飞。
