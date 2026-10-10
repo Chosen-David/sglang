@@ -56,6 +56,9 @@
   generation+单指针 + B5 崩溃三相位六组合 + PASS/SKIP/FAIL 三分计数；
   31/31+10/10 python±-O，99838ff3a）
   ([详情](task_details/S-T015.md))
+- [x] [S-T016] E119-068/069 指针下游消费者修复（E109 SKIP 四态探针 + direct
+  scorer fail loudly 单口径；11/11 新套件+全套零回归，a76fd521f）
+  ([详情](task_details/S-T016.md))
 - [x] [S-T012] E119-059/060/061 GPT 复审三连修复（回执同代绑定 v2 +
   完整配置 schema/跨格门禁 + correction 机器消费；23/23+10/10 python±-O，
   654c2f0c8）
