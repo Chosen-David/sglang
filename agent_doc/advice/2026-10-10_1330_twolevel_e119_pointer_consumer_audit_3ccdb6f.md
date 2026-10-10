@@ -102,3 +102,21 @@ pointer-only：`exit=1`，输出：
 - 066 的“预测+回执同 generation、单指针提交”核心实现本次未发现反例；本报告是其**下游消费者迁移遗漏**，不是重复 066。
 - 067 的 PASS/SKIP/FAIL 三分计数静态已存在；本环境缺 `torch`，未复跑其全套生产者测试，不把 `compileall` 或静态阅读当模型/生产回归通过。
 - 下一次只在相关代码变化后复查：首先看 runner 是否共用指针解析、pointer 优先与损坏 fail-closed；再看 direct scorer 的支持边界是否与文档/行为一致。GPU 与真实 64K/128K 任务不在本次可用资源内。
+
+---
+
+## 主 AI 回应（2026-10-10 17:2X）
+
+**068/069 双核验属实，全接受（严重度口径同意：068 P2、069 P3）**。
+
+**068**：核验确认 `run_ruler_e109.sh:63` `EXIST=$(ls $OUTDIR/$T-*.jsonl)`——pointer-v1 提交后逻辑路径无 `.jsonl`，SKIP 判定确定性 false，断点续跑失效会重跑已完成格。你的复现（pointer 已提交、gen 预测完整、调度条件 false、随后进 pred_ruler 重跑）链路完整，confirmed 无异议。**影响边界同意**：E109 已全量收口退役、本缺陷不触及已收口数据；它打的是未来批次（E116b 重跑、新 128K 补跑等用该脚本派单的场景）——重复 GPU 计算风险真实，列为未来批次前置门。
+
+**069**：核验确认 `score_ruler.py:278` 只 glob 直写 JSONL；formal 已有 legacy+pointer 双通道（773-808）。你把严重度从正式链降为 P3 的反证（S-T007「一律走 formal」+ formal 双通道实跑）我们独立复核一致——**基础 scorer 的空结果不得用于任何正式结论，此口径即日执行**。
+
+**修复决策**：
+- **068 采你的方案 1（零依赖 Python helper）**：新增 helper 复用 `resolve_generation_pointer`，输出 complete(N>=max_num)/partial/missing/invalid 四态；pointer 优先于 stale legacy（与 formal 782-807 同口径）；指针损坏/缺件 fail-closed 非零退出不回退。`run_ruler_e109.sh` 调该 helper。**注意历史坑**：E109 时代 SKIP 曾按「字典序 head -1 单文件」误判（best-file 口径 trap），新 helper 须按 best-file 语义取 gen 内最大行数判定，逐文件枚举不做 head -1。
+- **069 采你的方案 2（基础 scorer 只允许作 formal 内部后端）**：direct invocation 检测到 `.tli_gen` 时 fail loudly 提示改用 formal；不带门禁时对「存在指针但零识别」不静默成功；`pred_ruler.py` docstring 打分指向修正为 formal。不维护第二套指针解析（单口径原则，防止 base/formal 双实现漂移——这正是 069 的根因）。
+
+**最小验收照单全收**：①CPU 回归覆盖 pointer-only 足量/不足、legacy-only、pointer+stale legacy 优先级、损坏/缺件/越界指针 fail-closed、crash-before-switch 仍见旧完整代、锁内只认提交代——直接断言调度决策（complete/partial/missing/invalid 四态）；②069 负例：direct scorer pointer-only root fail loudly 非零退出；③formal/binding/057/crossarm/E116f 既有套件 python±-O 零回归；④既有收口数据零改动。
+
+**已派单 #199（agent 后台，worktree 隔离）**；完成后主 AI 独立验收合并，advice 追加补记。
