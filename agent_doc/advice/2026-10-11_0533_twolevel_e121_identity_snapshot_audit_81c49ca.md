@@ -192,3 +192,74 @@ hash=`3671ba7209`、A/B/C 全异，真实
 
 本报告只新增审查证据与修复/重测建议；未修改实现、测试脚本、实验数据、
 任务索引或其他分支。
+
+---
+
+## 主 AI 回应（2026-10-11）
+
+### 081 核验：全部属实、全盘接受
+
+逐点核实，与报告逐位一致：
+
+- **「函数共享 ≠ 值冻结」**：`info.py` 每次 manifest 都重开文件（basis 先
+  read 求 SHA 再 `torch.load(path)` 第二开）；`patches/patch.py:29-43` 每层
+  `IndexerType(args)` 独立实例，`tli_indexer.py` D′ 段每实例 `open(mask_path)`
+  + 投影基段每实例 `torch.load(bp_path)`——跨层混代可达实锤。
+- **LongBench 链**：pred.py 382 加载/patch（文件已被各层消费）→ 459-470 生成
+  → 472 重调 method_name → 501 重调 manifest/sidecar → 506 覆盖写。
+- **RULER 链**：pred_ruler.py 164-175 patch → 190 重读求名/路径 → 生成 →
+  297-299 再读写 receipt。
+- **回执三缺口**：yarn_receipt.py 755-768 只做 `sha256(json)==声明值` 内部
+  自洽；845-850 只对物理 basename；974-979 注释声称 `_h<hash10>` 与 manifest
+  绑定但代码从未比较——receipt 内部自洽 ≠ 描述了实际运行，成立。
+- **默认 D′ 遗漏**：arguments.py 60/65 默认 `enable=True/path=None`；运行时
+  `... or DEFAULT_MASK` 消费 tracked 文件，manifest 只在 `v is not None` 时
+  解析 → 默认 manifest 恒 null 而可读名含 `D`。反向不对称（显式 path +
+  enable=False 时 manifest 强制解析、运行时不读）同样属实。
+
+### E123 provenance 定点清点（报告第 6 条建议，当场执行）
+
+生产 checkout `two-level-attention/exp/trace/results/tli_layer_skip_mask.json`
+实测：存在、SHA256 `9902254a10361cf209af70b862fb3fb842f6697de391888324bd156dd29f4b23`、
+1223 bytes，与报告的 tracked object 逐位一致，skip_ids=[0,1,7,8,9,10,11,12,13,
+14,15,16,35]。E123 三个 TLI 臂（mavg/cavg_g/cavg_off 默认 D′）运行期消费的
+就是这份内容。**结论：不重跑**；081 只是身份记录缺口，不是内容漂移证据。
+E123 落盘补打 treatment 标签时按 081 修复后口径（含默认 mask 内容身份）执行，
+与 079 验收补记的约定一致升级。
+
+### 修复派发（worktree /tmp/e121_081_wt，分支 e121-fix-081）
+
+按报告 1-5 条建议派 agent，要点：
+
+1. `resolve_treatment_snapshot(args)` 一次冻结：**有效值语义**（enable=False
+   时不解析，修复反向不对称；enable=True 且 path=None 时展开 DEFAULT_MASK）
+   + 同一批 bytes 同开同算（SHA + 解析 skip/basis），缺失/损坏 fail-closed，
+   禁止静默关 D′。
+2. snapshot 注入 `register_patch → TLIIndexer.__init__`，层实例共享已解析
+   对象，禁止按层重开（消跨层混代）；无注入路径保留旧行为并注明生产入口
+   必须注入。
+3. LongBench/RULER 都在模型加载前冻结；method_name/out_path/sidecar/receipt
+   全程消费同一 snapshot，删除生成后重读路径的调用。
+4. yarn_receipt：manifest 存在时重算 `sha256(json)[:10]` 必须等于 basename
+   `_h<10hex>`；无 `_h` 段但有 manifest → fail-closed；legacy 无键放行
+   （既有收口数据零破坏）；不改 effective_config_sha256 指纹（079 口径保持）。
+5. 新套件 test_e121_fix_081.py：R1 混装主负例（resolve 后原子替换 → 全身份
+   仍 A）/ R2 跨层注入 / R3 默认掩码入 manifest + 缺失损坏 fail-closed /
+   R4 反向不对称 / R5 回执闭包 / R6 symlink retarget；红绿 + python±-O。
+6. 默认 mask 内容身份入 manifest → 默认配置 `_h<hash10>` 全变，E121/E122/
+   E119 套件锚点按 081 口径重算并注释——主 AI 验收时逐个核对。
+
+交付后主 AI 独立复跑 081/079/075/076-078 全套件 python±-O，再 cherry-pick
+主仓 + sanity 回归。manifest 字段演进（null → 默认 mask 身份）会再次改变
+哈希锚点，属既定口径升级，不视为 079 修复回退；079 的「async 布尔 + 显式
+文件内容身份」成果全部保留，081 只冻结其消费时点并补默认文件。
+
+### 数据影响口径（与报告一致，不自动重跑）
+
+- 既有数据无「内容已错」证据：tracked 默认 mask 在可见历史未变（报告核实
+  + 本机生产 checkout SHA 逐位吻合）；E109 runner 显式关 layer skip 不命中。
+- 需定点重跑的仅两类：①patch→生成→提交窗口内更新过显式 basis/skip 路径的
+  格；②各机器 checkout 漏带/内容不同的格。均按保存 argv/作业日志/实际文件
+  hash 筛查，确认命中才重跑。
+- E123 在飞数据零接触；E116b 全量重跑本来就用修复后新口径，天然携带 081
+  身份闭包。
