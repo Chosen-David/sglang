@@ -164,6 +164,27 @@
 #       旧 yarn_factor 不再当 effective，返回 operator_declared_
 #       not_effective + null + 纠偏绑定哈希；target hash 失配 fail
 #       closed）；正式消费接线在 analyze_e119_ruler128k_formal.py。
+# ===== #197（GPT 2026-10-10 0834 审计 TL-E119-YARN-SAME-BYTES-PROVENANCE-066）=====
+#   062 的三方 SHA 一致只证「内容等价」不证「运行同代」：两个配置不同
+#   的运行产生【字节完全相同】的预测 JSONL 时（GPT 两份独立复现：直接
+#   调 build/write/_load 三函数与走正式 stage→commit 生产提交函数，均
+#   得到 staging=A 配 run-B/seed=99/max_num=100 回执且 verified_same_
+#   generation=true），「复制到 staging 后、读回执前」的 B 代两步提交
+#   穿插三方校验全过——manifest 的 run_id/seed/max_num/model 归属错挂
+#   （provenance 破坏；评分数值不变，故 P2；据此声称 treatment 因果闭包
+#   则升 P1）。修复（GPT 方案 2 共享锁）：freeze_and_stage 对每个
+#   (task, method) 格的完整冻结窗口（候选复制 → best-file 仲裁 → 回执
+#   bytes 快照 → 三方校验）全程持有与生产者同键的 flock
+#   （yarn_receipt.acquire_output_lock，056/059 realpath(父目录)+basename
+#   键口径；候选多键按锁键排序获取、逆序释放，043 写集锁同款防死锁纪律）
+#   ——生产者的生成→提交生命周期同样持锁（pred_ruler.py），窗口内两步
+#   os.replace 提交不可穿插，run_id/config 归属闭合；锁释放后的新一代
+#   提交不改变已冻结 generation 的身份（062④）。062 三方 SHA 校验保留
+#   为纵深防御：锁防【活进程】穿插，SHA 防【死亡中间态】（crash-between
+#   失配代际仍由三方校验拒收）。锁不可用/获取失败 → fail-closed 不静默
+#   降级（同代冻结窗口无锁即不可闭合；只读 root 须先复制到可写位置）；
+#   acquire 等待时长逐格记入 manifest cells freeze_lock 轻量审计字段
+#   （长时间持锁对补跑吞吐的影响据此可审计）。
 # 用法（单臂单 root）：
 #   python -u benchmark/RULER/score_ruler_formal.py \
 #     --root exp/results_ruler/e109_full_Qwen3-8B/L32768 \
@@ -191,6 +212,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
@@ -202,9 +224,12 @@ from benchmark.RULER.score_ruler import (  # noqa: E402
 )
 # 057：生产者原生 yarn receipt 探查/自洽校验（协议与生成侧共享同一口径）
 # 059/060（#195）：v2 同代绑定校验 + 严格 schema + 跨格配置一致性门禁
+# 066（#197）：acquire/release_output_lock——freeze 冻结窗口与生产者
+#   同键互斥（056/059 口径 realpath 输出路径锁原语，见 yarn_receipt.py）
 from benchmark.RULER.yarn_receipt import (  # noqa: E402
-    RECEIPT_V1_VERSION, RECEIPT_VERSION, effective_config_sha256,
-    producer_receipt_path_for, validate_producer_receipt,
+    RECEIPT_V1_VERSION, RECEIPT_VERSION, acquire_output_lock,
+    effective_config_sha256, producer_receipt_path_for,
+    release_output_lock, validate_producer_receipt,
 )
 
 FORMAL_PATH = os.path.abspath(__file__)
@@ -528,7 +553,16 @@ def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum):
     064① 新增：model_config_sha256=None（远端模型 ID / config.json
     不在 model_path）→ config_fingerprint.config_identity=missing 如实
     降级——「完整模型配置闭包」不成立，不冒充（producer_evidence.
-    model_config_closure 由 _resolve_yarn_identity 汇总降级标注）。"""
+    model_config_closure 由 _resolve_yarn_identity 汇总降级标注）。
+
+    066（TL-E119-YARN-SAME-BYTES-PROVENANCE）锁上下文声明：本函数的
+    回执 bytes 快照与三方校验运行在调用方 freeze_and_stage 持有的【与
+    生产者同键输出路径锁】窗口内——活进程的两步提交穿插（同字节不同
+    配置的 B 代换代）不可达，锁窗口内读取的 receipt 与源/staging 属同
+    一代际；三方 SHA 校验仍保留为纵深防御（锁防活进程穿插，SHA 防死亡
+    中间态——crash-between 留下的「新预测配旧回执」失配代际不经过锁，
+    由 ②③ 拒收）。单独调用本函数（无调用方锁）时只有内容等价语义，
+    不得据此宣称运行同代（测试直查场景 staged==source 同文件退化）。"""
     best_basename = os.path.basename(source_pred)
     rcp_path = producer_receipt_path_for(source_pred)
     if not os.path.isfile(rcp_path):
@@ -651,7 +685,15 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
     返回 (tasks_manifest, cells_info, src_data_sha, producer_yarn)；
     producer_yarn = {"cells": {格键: receipt 摘要}, "missing": [格键]}——
     best-file 旁挂 receipt 的存在性即生产者证据（存在即证据，半写/损坏/
-    自相矛盾一律 fail-closed，见 _load_producer_yarn_receipt）。"""
+    自相矛盾一律 fail-closed，见 _load_producer_yarn_receipt）。
+
+    066（TL-E119-YARN-SAME-BYTES-PROVENANCE）：每个 (task, method) 格的
+    完整冻结窗口（候选复制 → best-file 仲裁 → 回执 bytes 快照 → 三方
+    校验）在【与生产者同键的输出路径锁】内执行（acquire_output_lock，
+    候选多键按锁键排序获取、逆序释放）——生产者生成/提交生命周期同样
+    持锁（pred_ruler.py 059 口径），窗口内 B 代两步提交不可穿插，「同
+    字节不同配置」的回执/预测换代不可达；锁获取失败 fail-closed；
+    acquire 等待时长逐格记入 cells[].tasks[].freeze_lock。"""
     staged_root = os.path.join(staging, "pred_root")
     tasks_manifest = {}   # {task: {ids, answers_sha, lengths, identity_mode}}
     cells_info = {}       # {key: {length_dir, identity_mode, tasks: {...}}}
@@ -687,114 +729,167 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
                     .rsplit("-", 1)[0]
                 groups.setdefault(method, []).append(f)
             for method, gfiles in groups.items():
-                # ---- 036：只读拷贝 + legacy 补刻（派生副本）----
-                staged_files = []
-                stamped_flags = {}
-                for f in gfiles:
-                    dst = os.path.join(staged_root, Lname, f"pred{postfix}",
-                                       os.path.basename(f))
-                    stamped, rows = _stamp_or_copy(f, dst, task, stamp=stamp)
-                    staged_files.append(dst)
-                    stamped_flags[dst] = stamped
-                    if stamped:
-                        n_stamped += 1
-                        print(f"[formal] legacy 补刻 _id（派生副本）: {f}")
-                    # ---- 032 长度身份门禁 ①：行 length ≤ L 档位 ----
-                    # （length=实际 token 数；128K 数据混入 32K 目录 → 拒）
-                    for r in rows:
-                        if r.get("length") is None:
-                            _fail(f"{os.path.basename(f)}: 行缺 length 字段"
-                                  f"——无法做长度身份门禁，fail closed")
-                        if r["length"] > Lnum:
-                            _fail(
-                                f"{Lname}/{method}/{task}: 行 length="
-                                f"{r['length']} > 目录档位 {Lnum}（疑似 "
-                                f"{r['length']} 档数据混入 {Lname} 目录）"
-                                f"——长度身份门禁 fail closed")
-                # ---- best-file 仲裁（行数最多，并列取时间戳最新）----
-                best = max(staged_files, key=lambda f: (
-                    _nlines(f), _ts_of(os.path.basename(f))))
-                rows = [json.loads(l)
-                        for l in open(best, encoding="utf-8")]
-                ids = [r["_id"] for r in rows]
-                shas = {r["_id"]: r["_answers_sha"] for r in rows}
-                lengths = [r["length"] for r in rows]
-                if len(ids) != len(set(ids)):
-                    _fail(f"{os.path.basename(best)}: _id 重复——fail closed")
-                # ---- 030：min-samples 发布硬门禁 ----
-                if len(rows) < min_samples:
-                    _fail(
-                        f"{Lname}/{method}/{task}: n={len(rows)} < "
-                        f"--min-samples {min_samples}——样本数不完整，"
-                        f"拒绝发布（min-samples 是发布门禁不是展示开关），"
-                        f"不发布任何产物")
-                identity_mode = ("native" if not stamped_flags[best]
-                                 else "legacy-partial")
-                key = f"{Lname}/{method}"
-                print(f"[formal] {key}/{task}: best-file "
-                      f"{os.path.basename(best)} (n={len(rows)}) 冻结进 "
-                      f"manifest（identity_mode={identity_mode}）")
-                # ---- 跨 method/L 身份一致性（032：ids + answers_sha +
-                # 逐行 length 三重比对）----
-                if task in tasks_manifest:
-                    prev = tasks_manifest[task]
-                    if set(prev["ids"]) != set(ids) or \
-                            prev["answers_sha"] != shas:
-                        _fail(f"task={task}: 跨方法/跨 L 目录的样本身份不一致"
-                              f"（ids 或 answers_sha 漂移）——fail closed，"
-                              f"manifest 拒绝生成")
-                    if prev["lengths"] != lengths:
+                # ---- 066（TL-E119-YARN-SAME-BYTES-PROVENANCE，GPT 方案 2 共享锁）----
+                # 062 的三方 SHA 一致只证明内容等价（staging == 回执声明 ==
+                # 源当前字节）；两个配置不同的运行产生【字节完全相同】的
+                # 预测时（GPT 复现 run-A/seed=42/max_num=1 vs run-B/seed=99/
+                # max_num=100），「复制到 staging 后、读回执前」的 B 代两步
+                # 提交穿插三方校验全过 → staging 配 A 代字节、manifest 归属
+                # B 代 run_id/config 且 verified_same_generation=true——运行
+                # provenance 错挂（数值不变故 P2；当 treatment 因果闭包证据
+                # 用则升 P1）。修复：本格完整冻结窗口（候选复制 → best-file
+                # 仲裁 → 回执 bytes 快照 → 三方校验）全程持有与生产者同键
+                # 的 flock（yarn_receipt.acquire_output_lock，056/59 键口径：
+                # realpath(父目录) + basename + .attempt.lock）——生产者的
+                # 生成→提交生命周期同样持锁（pred_ruler.py），窗口内两步
+                # os.replace 提交不可穿插；锁释放后的新一代提交不改变已冻结
+                # generation 的身份（062④ 绑定 staging bytes）。纵深防御：
+                # 锁防【活进程】穿插（run_id/config 归属闭合），062 三方
+                # SHA 校验保留防【死亡中间态】（crash-between 失配代际不经
+                # 锁，仍由三方校验拒收）。候选多键按锁键排序获取、逆序释放
+                # （043 写集锁同款纪律；生产者单键持有、formal 同序获取 →
+                # 无死锁环）。锁不可用/获取失败 → fail-closed 不静默降级
+                #（同代冻结窗口无锁即不可闭合）；acquire 等待时长逐格记入
+                # manifest（cells[].tasks[].freeze_lock 轻量审计字段，长
+                # 时间 formal 持锁对补跑吞吐的影响据此可审计）。----
+                lock_keys = sorted(gfiles)
+                lock_fds = []
+                _lock_t0 = time.perf_counter()
+                for _lf in lock_keys:
+                    try:
+                        lock_fds.append(acquire_output_lock(_lf))
+                    except OSError as e:
+                        # 已获取的锁逆序释放后再 fail-closed（不留半持有态）
+                        for _fd in reversed(lock_fds):
+                            try:
+                                release_output_lock(_fd)
+                            except OSError:
+                                pass
+                        _fail(f"{_lf}: 冻结窗口输出路径锁获取失败（{e}）——"
+                              f"与生产者的同代互斥不可建立（066），run_id/"
+                              f"config 归属无法闭合，fail closed；只读/权限"
+                              f"受限的 root 须先复制到可写位置再跑 formal")
+                _lock_wait_s = time.perf_counter() - _lock_t0
+                try:
+                    # ---- 036：只读拷贝 + legacy 补刻（派生副本）----
+                    staged_files = []
+                    stamped_flags = {}
+                    for f in gfiles:
+                        dst = os.path.join(staged_root, Lname, f"pred{postfix}",
+                                           os.path.basename(f))
+                        stamped, rows = _stamp_or_copy(f, dst, task, stamp=stamp)
+                        staged_files.append(dst)
+                        stamped_flags[dst] = stamped
+                        if stamped:
+                            n_stamped += 1
+                            print(f"[formal] legacy 补刻 _id（派生副本）: {f}")
+                        # ---- 032 长度身份门禁 ①：行 length ≤ L 档位 ----
+                        # （length=实际 token 数；128K 数据混入 32K 目录 → 拒）
+                        for r in rows:
+                            if r.get("length") is None:
+                                _fail(f"{os.path.basename(f)}: 行缺 length 字段"
+                                      f"——无法做长度身份门禁，fail closed")
+                            if r["length"] > Lnum:
+                                _fail(
+                                    f"{Lname}/{method}/{task}: 行 length="
+                                    f"{r['length']} > 目录档位 {Lnum}（疑似 "
+                                    f"{r['length']} 档数据混入 {Lname} 目录）"
+                                    f"——长度身份门禁 fail closed")
+                    # ---- best-file 仲裁（行数最多，并列取时间戳最新）----
+                    best = max(staged_files, key=lambda f: (
+                        _nlines(f), _ts_of(os.path.basename(f))))
+                    rows = [json.loads(l)
+                            for l in open(best, encoding="utf-8")]
+                    ids = [r["_id"] for r in rows]
+                    shas = {r["_id"]: r["_answers_sha"] for r in rows}
+                    lengths = [r["length"] for r in rows]
+                    if len(ids) != len(set(ids)):
+                        _fail(f"{os.path.basename(best)}: _id 重复——fail closed")
+                    # ---- 030：min-samples 发布硬门禁 ----
+                    if len(rows) < min_samples:
                         _fail(
-                            f"task={task}: 跨方法逐行 length 不一致（同 "
-                            f"row index/answers 而 length 漂移——输入身份"
-                            f"不闭合）——fail closed（032 长度身份门禁）")
-                else:
-                    tasks_manifest[task] = {
-                        "ids": ids, "answers_sha": shas,
-                        "lengths": lengths,
+                            f"{Lname}/{method}/{task}: n={len(rows)} < "
+                            f"--min-samples {min_samples}——样本数不完整，"
+                            f"拒绝发布（min-samples 是发布门禁不是展示开关），"
+                            f"不发布任何产物")
+                    identity_mode = ("native" if not stamped_flags[best]
+                                     else "legacy-partial")
+                    key = f"{Lname}/{method}"
+                    print(f"[formal] {key}/{task}: best-file "
+                          f"{os.path.basename(best)} (n={len(rows)}) 冻结进 "
+                          f"manifest（identity_mode={identity_mode}）")
+                    # ---- 跨 method/L 身份一致性（032：ids + answers_sha +
+                    # 逐行 length 三重比对）----
+                    if task in tasks_manifest:
+                        prev = tasks_manifest[task]
+                        if set(prev["ids"]) != set(ids) or \
+                                prev["answers_sha"] != shas:
+                            _fail(f"task={task}: 跨方法/跨 L 目录的样本身份不一致"
+                                  f"（ids 或 answers_sha 漂移）——fail closed，"
+                                  f"manifest 拒绝生成")
+                        if prev["lengths"] != lengths:
+                            _fail(
+                                f"task={task}: 跨方法逐行 length 不一致（同 "
+                                f"row index/answers 而 length 漂移——输入身份"
+                                f"不闭合）——fail closed（032 长度身份门禁）")
+                    else:
+                        tasks_manifest[task] = {
+                            "ids": ids, "answers_sha": shas,
+                            "lengths": lengths,
+                            "identity_mode": identity_mode,
+                        }
+                    # ---- 057：生产者 yarn receipt 探查（best-file 旁挂）----
+                    # best 是 staging 派生副本（与原始文件同名）；receipt 在
+                    # 原始 pred_dir 探查。缺 receipt = legacy（missing 如实
+                    # 记录，由 _resolve_yarn_identity 裁决 provenance）。
+                    # 062：staged=评分对象、source=回执旁挂探查对象——同代
+                    # 绑定与三方一致校验在 _load_producer_yarn_receipt 内
+                    # 以 staging bytes 为锚完成。
+                    src_best = os.path.join(pred_dir, os.path.basename(best))
+                    cell_rcp = _load_producer_yarn_receipt(
+                        best, src_best, task, Lnum)
+                    cell_key = f"{key}/{task}"
+                    if cell_rcp is None:
+                        producer_yarn["missing"].append(cell_key)
+                    else:
+                        producer_yarn["cells"][cell_key] = cell_rcp
+                    # 062③：source_sha256 复用冻结窗口内的三方一致值
+                    # （v2 时 = staging SHA = 回执 SHA；v1/legacy 无绑定语义
+                    # 则为当前字节现算）——不得事后重算源 SHA：生产者在
+                    # 冻结后推进源路径不改变已冻结 generation 的身份，
+                    # 事后重算会捡到新一代造成 manifest 自相矛盾
+                    if cell_rcp is not None:
+                        cell_source_sha = cell_rcp["source_sha256"]
+                    else:
+                        cell_source_sha = _file_sha256(src_best)
+                    cells_info.setdefault(key, {
+                        "length_dir": Lnum,
                         "identity_mode": identity_mode,
+                        "tasks": {},
+                    })["tasks"][task] = {
+                        "n": len(rows),
+                        "best_file": os.path.basename(best),
+                        "source_path": os.path.abspath(
+                            # best 与 staged 同名，映射回原始源文件
+                            src_best),
+                        "source_sha256": cell_source_sha,
+                        # v2 时三者已断言一致（staged == receipt == source）
+                        "derived_sha256": _file_sha256(best),
+                        # 057：生产者证据按格绑定（null=missing，legacy）；
+                        # path+sha256 把 receipt 字节冻结进 manifest
+                        "producer_yarn_receipt": cell_rcp,
+                        # 066：冻结窗口锁审计字段（轻量）——acquire
+                        # 等待秒数（生产者持锁时 formal 串行化等待的
+                        # 吞吐影响据此可审计）
+                        "freeze_lock": {
+                            "n_files": len(gfiles),
+                            "acquire_wait_seconds": round(_lock_wait_s, 6),
+                        },
                     }
-                # ---- 057：生产者 yarn receipt 探查（best-file 旁挂）----
-                # best 是 staging 派生副本（与原始文件同名）；receipt 在
-                # 原始 pred_dir 探查。缺 receipt = legacy（missing 如实
-                # 记录，由 _resolve_yarn_identity 裁决 provenance）。
-                # 062：staged=评分对象、source=回执旁挂探查对象——同代
-                # 绑定与三方一致校验在 _load_producer_yarn_receipt 内
-                # 以 staging bytes 为锚完成。
-                src_best = os.path.join(pred_dir, os.path.basename(best))
-                cell_rcp = _load_producer_yarn_receipt(
-                    best, src_best, task, Lnum)
-                cell_key = f"{key}/{task}"
-                if cell_rcp is None:
-                    producer_yarn["missing"].append(cell_key)
-                else:
-                    producer_yarn["cells"][cell_key] = cell_rcp
-                # 062③：source_sha256 复用冻结窗口内的三方一致值
-                # （v2 时 = staging SHA = 回执 SHA；v1/legacy 无绑定语义
-                # 则为当前字节现算）——不得事后重算源 SHA：生产者在
-                # 冻结后推进源路径不改变已冻结 generation 的身份，
-                # 事后重算会捡到新一代造成 manifest 自相矛盾
-                if cell_rcp is not None:
-                    cell_source_sha = cell_rcp["source_sha256"]
-                else:
-                    cell_source_sha = _file_sha256(src_best)
-                cells_info.setdefault(key, {
-                    "length_dir": Lnum,
-                    "identity_mode": identity_mode,
-                    "tasks": {},
-                })["tasks"][task] = {
-                    "n": len(rows),
-                    "best_file": os.path.basename(best),
-                    "source_path": os.path.abspath(
-                        # best 与 staged 同名，映射回原始源文件
-                        src_best),
-                    "source_sha256": cell_source_sha,
-                    # v2 时三者已断言一致（staged == receipt == source）
-                    "derived_sha256": _file_sha256(best),
-                    # 057：生产者证据按格绑定（null=missing，legacy）；
-                    # path+sha256 把 receipt 字节冻结进 manifest
-                    "producer_yarn_receipt": cell_rcp,
-                }
+                finally:
+                    # ---- 066：逆序释放本格全部冻结窗口锁 ----
+                    for _fd in reversed(lock_fds):
+                        release_output_lock(_fd)
     if expect_tasks > 0 and len(tasks_manifest) < expect_tasks:
         missing = sorted(set(TASKS[:expect_tasks]) - set(tasks_manifest))
         _fail(f"root={root} postfix={postfix}: manifest 只覆盖 "

@@ -9,6 +9,8 @@
   TL-E119-YARN-CORRECTION-SCHEMA-063（P2）纠偏 sidecar schema 太弱
   TL-E119-YARN-CONFIG-PARTIAL-064（P2）config 闭包两处残缺
   TL-E119-YARN-TEST-ORACLE-065（P1）测试断言 -O 失效
+#197 增量红绿测试（GPT 2026-10-10 0834 审计）：
+  TL-E119-YARN-SAME-BYTES-PROVENANCE-066（P2）三方 SHA 一致 ≠ 运行同代
 
 违反事实（GPT 审计已复现）：
   059  pred_ruler.py 直接截断最终预测路径 + 回执在生成循环之前落最终
@@ -31,7 +33,12 @@
        成立）+ effective_config_sha256 漏掉必需键 generation_params.
        max_num（max_num=1 与 100 同指纹 a09b4ef6...）；
   065  本套件含 62 个 AST assert 节点——python -O 删除全部判定，validator
-       被破坏后 -O 仍 exit 0 打印 PASS（门禁失效）。
+       被破坏后 -O 仍 exit 0 打印 PASS（门禁失效）；
+  066  三方 SHA 一致只证「内容等价」不证「运行同代」：run-A（seed=42/
+       max_num=1）与 run-B（seed=99/max_num=100）可产出字节完全相同的
+       预测 JSONL——062 门禁全绿，formal 仍把冻结 A 代的 manifest 标上
+       B 代的 run_id/seed/config（066 CPU 复现：verified_same_generation=
+       true 但身份字段错配）。
 
 用例矩阵：
   059 生产侧（e119_yarn_producer_runner_059.py 真实子进程，056 同款——
@@ -70,6 +77,17 @@
                         拒绝（不得 verified=true 发布混合代际）；
     B2 回执快照后/源校验前提交 B → 三方一致门禁（staging==receipt==源）
                         必须拒绝；两例均先跑无注入正例（三方一致自洽）。
+  066 同字节异代 provenance 锁窗口（#197：formal 与生产者复用同一把
+    realpath 输出路径 flock，冻结全程锁内，生产者两步提交不可穿插）：
+    B3 same-bytes 互斥  run-A（seed=42/max_num=1）冻结进行中，真子进程
+                        在 best-file 仲裁点提交字节全同的 B 代（seed=99/
+                        max_num=100，同键 flock）→ 子进程必须被锁阻塞
+                        （done 标记在冻结窗口内不出现）→ 冻结身份保持
+                        A 代（run-A/seed=42），manifest 记录 freeze_lock
+                        审计字段；锁释放后 B 代完整落盘（同代自洽）；
+    B4 锁不可获 fail-closed 源目录只读 → 锁获取失败必须 [GATE-FAIL]
+                        非零退出拒收（不静默降级）；root/网络 FS 无法
+                        模拟只读时显式 SKIP（不虚报）。
   060 schema/跨格：
     S1 schema 负例      beta_fast=999 / seed=-1 / 缺键 / 坏 hex / 假枚举 /
                         MPE 失配 / rope_type 错 / status!=complete /
@@ -195,10 +213,12 @@ def _copy_native_fixture(base, name):
 
 
 def _receipt_for(f, context_length, task, factor=2.0, enabled=True,
-                version=RECEIPT_VERSION, run_id=None, max_num=500):
+                version=RECEIPT_VERSION, run_id=None, max_num=500, seed=42):
     """为预测文件 f 的【当前字节】构建 v2 完成回执（062 barrier 的
     B 代提交与 _write_receipts 共用；SHA/行数对当前文件现算——生产者
-    提交语义：先改预测字节，再用本函数对新字节出回执）。"""
+    提交语义：先改预测字节，再用本函数对新字节出回执）。066 B3：seed
+    参数化——run-A（seed=42/max_num=1）与 run-B（seed=99/max_num=100）
+    预测字节相同、配置不同。"""
     if enabled:
         eff, scaling = factor, {
             "rope_type": "yarn", "type": "yarn", "factor": factor,
@@ -218,7 +238,7 @@ def _receipt_for(f, context_length, task, factor=2.0, enabled=True,
         rope_scaling=scaling, context_length=context_length, task=task,
         model_path="/synthetic/Qwen3-8B", model_config_sha256=None,
         native_mpe=NATIVE_MPE,
-        generation_params={"max_gen": 64, "max_num": max_num, "seed": 42,
+        generation_params={"max_gen": 64, "max_num": max_num, "seed": seed,
                            "method": "tli", "pred_postfix": "_fx",
                            "t": "01010000"},
         producer_script_path="benchmark/RULER/pred_ruler.py",
@@ -795,6 +815,185 @@ def test_B2_commit_after_snapshot_before_source_check(base):
           " fail-closed 拒绝（不发布 source_sha256 指向新一代的 manifest）")
 
 
+# ================================================================ 066
+
+# B3 提交子进程脚本（测试运行时写进临时目录，真子进程执行）：
+# 与生产者/formal 同键 acquire_output_lock（真实 flock）——formal 持锁
+# 期间阻塞；获锁后按生产提交语义提交 B 代：预测字节保持与 A 完全相同
+# （066 审计前提：同字节不同配置），回执最后落盘 = 提交信号。
+_B3_COMMIT_SUBPROC = """\
+import json, os, sys
+repo, src, rcp_json, ready_marker, done_marker = sys.argv[1:6]
+sys.path.insert(0, repo)
+from benchmark.RULER import yarn_receipt as YR
+open(ready_marker, "wb").close()      # 已就绪、即将取锁（父进程据此推进）
+fd = YR.acquire_output_lock(src)      # 与生产者/formal 同键 flock
+try:
+    raw = open(src, "rb").read()      # A 代当前字节
+    tmp = src + ".commitB.tmp"
+    with open(tmp, "wb") as f:
+        f.write(raw)                  # B 代预测字节 == A（066 审计前提）
+    os.replace(tmp, src)              # 生产提交语义第一步（预测）
+    YR.write_yarn_receipt(src, json.load(open(rcp_json)))   # 第二步（回执）
+finally:
+    YR.release_output_lock(fd)
+open(done_marker, "wb").close()        # 提交完成（阻塞/释放的终点信号）
+"""
+
+
+def test_B3_same_bytes_provenance_locked(base):
+    """B3（066 同字节代际来源负例）：run-A（seed=42/max_num=1）与 run-B
+    （seed=99/max_num=100）预测字节完全相同、配置不同；在「staging 复制
+    与回执读取之间」的精确窗口内用【真子进程】（同键 flock）提交 B 代。
+
+    修复语义（GPT 方案 2 共享锁）：formal 在本格冻结窗口（候选复制 →
+    best-file 仲裁 → 回执 bytes 快照 → 三方校验）全程持生产者同键锁 →
+    真子进程的提交在锁上阻塞、窗口内不可穿插；formal 冻结 A 代自洽
+    （run_id=run-A/seed=42/max_num=1，verified 同 A 代）；锁释放后子
+    进程完成 B 代自洽落盘。验收红路径（修复前）：formal 无锁 → 子进程
+    即时完成提交 → done marker 在窗口内出现（红）+ 冻结身份被 B 代
+    抢注（staging 配 A 字节 + 回执配 B 配置且 verified=true，066 审计
+    复现态）。不得出现 staging 配 A 回执配 B 且 verified=true。"""
+    root = _single_task_root(base, "b3_root")
+    src_pred = _cell_file(root, BTASK)
+    data_root = os.path.join(TESTDATA, "data_root")
+    # ---- A 代（run-A / seed=42 / max_num=1）提交在位 ----
+    write_yarn_receipt(src_pred, _receipt_for(
+        src_pred, 32768, BTASK, run_id="run-A-066", max_num=1, seed=42))
+    a_sha = _sha(src_pred)
+    a_lines = _nlines(src_pred)
+    # ---- B 代回执（字节与 A 完全相同、run_id/seed/max_num 不同）----
+    rcp_b = _receipt_for(src_pred, 32768, BTASK, run_id="run-B-066",
+                         max_num=100, seed=99)
+    _check(rcp_b["prediction_sha256"] == a_sha and
+           rcp_b["prediction_lines"] == a_lines,
+           "B3 前提：B 代回执绑定字段须与 A 代字节完全相同（同字节前提）")
+    rcp_b_path = os.path.join(base, "b3_rcp_b.json")
+    json.dump(rcp_b, open(rcp_b_path, "w", encoding="utf-8"), indent=1,
+              ensure_ascii=False)
+    helper = os.path.join(base, "b3_commitB_locked.py")
+    with open(helper, "w", encoding="utf-8") as f:
+        f.write(_B3_COMMIT_SUBPROC)
+    ready = os.path.join(base, "b3_ready.marker")
+    done = os.path.join(base, "b3_done.marker")
+    # ---- 注入点：首次 _nlines 调用 = best-file 仲裁（候选复制已完成、
+    #      回执尚未读取——066 审计的精确穿插窗口；此时 formal（本进程）
+    #      已按 066 修复持有生产者同键锁）→ 起真子进程提交 B 代 ----
+    real_nlines = SF._nlines
+    fired = {"done": False}
+    spawned = {}
+
+    def _nlines_spawn_commit_B(path):
+        if not fired["done"]:
+            fired["done"] = True
+            spawned["p"] = subprocess.Popen(
+                [sys.executable, helper, REPO, src_pred, rcp_b_path,
+                 ready, done],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env={**os.environ, "PYTHONPATH": REPO})
+            deadline = time.time() + 60
+            while time.time() < deadline and not os.path.exists(ready):
+                time.sleep(0.02)
+            _check(os.path.exists(ready), "B3: 提交子进程未在 60s 内就绪")
+            # 锁互斥实测：formal 持锁窗口内 B 代提交不可完成（修复前
+            # formal 无锁 → 子进程即时完成 → done 出现 → 红）
+            time.sleep(0.4)
+            _check(not os.path.exists(done),
+                   "B3: 锁窗口内 B 代提交完成——formal 未持生产者同键锁"
+                   "（066 修复失效，穿插可达）")
+        return real_nlines(path)
+
+    SF._nlines = _nlines_spawn_commit_B
+    b3_cell = {}
+    try:
+        _, cells_info, _, _ = freeze_and_stage(
+            root, "_fx", 1, True, os.path.join(base, "b3_staging"), 2,
+            data_root)
+        b3_cell = cells_info[f"L32768/fxm"]["tasks"][BTASK]
+    finally:
+        SF._nlines = real_nlines
+    # ---- 冻结成功：A 代自洽冻结，身份归属未被 B 代抢注 ----
+    rcp = b3_cell["producer_yarn_receipt"]
+    b = rcp["prediction_binding"]
+    _check(b is not None and b["verified_same_generation"] is True,
+           f"B3: A 代自洽冻结的 binding 异常: {b}")
+    _check(b["run_id"] == "run-A-066",
+           f"B3: 冻结身份被 B 代抢注（run_id={b['run_id']!r}）——同字节"
+           f"不同配置的穿插不可达才对（066）")
+    _check(rcp["config_fingerprint"]["seed"] == 42 and
+           rcp["config_fingerprint"]["max_num"] == 1,
+           f"B3: 冻结配置指纹须属 A 代: {rcp['config_fingerprint']}")
+    _check(b["staged_sha256"] == b["source_sha256_at_freeze"] == a_sha ==
+           b["prediction_sha256"],
+           f"B3: 冻结窗口三方应全为 A 代字节: {b}")
+    _check(b["staged_sha256"] == b3_cell["source_sha256"] ==
+           b3_cell["derived_sha256"],
+           f"B3: manifest SHA 与冻结窗口不一致: {b3_cell}")
+    # ---- 066 锁审计字段（轻量）在位 ----
+    fl = b3_cell.get("freeze_lock")
+    _check(isinstance(fl, dict) and fl.get("n_files") == 1 and
+           isinstance(fl.get("acquire_wait_seconds"), (int, float)) and
+           fl["acquire_wait_seconds"] >= 0,
+           f"B3: freeze_lock 审计字段异常: {fl}")
+    # ---- 释放后子进程获锁 → B 代自洽落盘（阻塞/释放实测的正向终点）----
+    p = spawned["p"]
+    out, _ = p.communicate(timeout=120)
+    _check(p.returncode == 0, f"B3: 提交子进程失败: {out[-500:]}")
+    _check(os.path.exists(done), "B3: 锁释放后子进程未完成提交（死锁？）")
+    rcp_after = json.load(open(producer_receipt_path_for(src_pred),
+                               encoding="utf-8"))
+    _check(rcp_after["run_id"] == "run-B-066" and
+           rcp_after["prediction_sha256"] == _sha(src_pred),
+           f"B3: 释放后 B 代应自洽落盘（预测与回执同代）: {rcp_after}")
+    _check(_sha(src_pred) == a_sha, "B3 前提复核：B 代预测字节与 A 完全相同")
+    print(f"B3 PASS  同字节不同配置的 B 代真子进程在「复制→读回执」窗口内"
+          f"提交 → 同键锁窗口内阻塞不可穿插；formal 冻结身份保持 run-A/"
+          f"seed=42/max_num=1 且三方一致；锁释放后 B 代自洽落盘"
+          f"（freeze_lock.acquire_wait_seconds={fl['acquire_wait_seconds']}s）")
+
+
+def test_B4_lock_unavailable_fail_closed(base):
+    """B4（066 锁不可用 fail-closed）：冻结窗口输出路径锁获取失败
+    （只读源目录，锁文件不可创建）→ freeze_and_stage 必须 fail-closed
+    拒收，不得静默降级为无锁冻结。环境无法模拟只读（root 用户/无效
+    chmod 的网络 FS）时如实 SKIP 不冒充。"""
+    if os.geteuid() == 0:
+        print("B4 SKIP  以 root 运行，chmod 无法模拟只读目录——不冒充通过")
+        return
+    root = _single_task_root(base, "b4_root")
+    _write_receipts(root, 32768, 2.0)
+    pred_dir = os.path.dirname(_cell_file(root, BTASK))
+    os.chmod(pred_dir, 0o555)
+    try:
+        # 前置探测：chmod 确实使新文件创建失败（否则环境不可模拟 → SKIP）
+        probe = os.path.join(pred_dir, ".b4_probe")
+        try:
+            open(probe, "wb").close()
+        except OSError:
+            probe_blocked = True
+        else:
+            os.remove(probe)
+            probe_blocked = False
+        if not probe_blocked:
+            print("B4 SKIP  chmod 0o555 未使目录只读（网络 FS/root-squash"
+                  "等）——环境无法模拟锁不可用，不冒充通过")
+            return
+        try:
+            freeze_and_stage(root, "_fx", 1, True,
+                             os.path.join(base, "b4_staging"), 2,
+                             os.path.join(TESTDATA, "data_root"))
+            raise AssertionError("B4: 锁不可用时未 fail-closed 拒收"
+                                "（066 静默降级漏洞）")
+        except SystemExit as e:
+            blob = str(e)
+            _check("锁获取失败" in blob and "066" in blob,
+                   f"B4: 拒绝原因非锁不可用 fail-closed: {blob}")
+    finally:
+        os.chmod(pred_dir, 0o755)
+    print("B4 PASS  锁不可用（只读源目录）→ fail-closed 拒收"
+          "（不静默降级为无锁冻结）")
+
+
 # ================================================================ 060
 
 def test_S1_schema_negatives():
@@ -1364,6 +1563,9 @@ def main():
         ("B2", lambda: test_B2_commit_after_snapshot_before_source_check(base)),
         ("S4", lambda: test_S4_config_closure_negatives(base)),
         ("R5", lambda: test_R5_correction_schema_negatives(base)),
+        # #197 增量用例：066 同字节异代 provenance 锁窗口
+        ("B3", lambda: test_B3_same_bytes_provenance_locked(base)),
+        ("B4", lambda: test_B4_lock_unavailable_fail_closed(base)),
         ("TOR", test_T_oracle_meta),
     ]
     try:
