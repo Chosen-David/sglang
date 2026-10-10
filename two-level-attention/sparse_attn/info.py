@@ -19,6 +19,23 @@ import torch
 # 缺省 namespace 与显式默认值 namespace 必须同 hash（同配置稳定）。
 # tli_enable_kmeans/tli_enable_layer_skip 已由可读段 B/D 二值编码、
 # 不重复进 manifest（取舍：ABD 三字符对这两个 flag 本身已单射）。
+#
+# ---- 079（TL-E121-OUTPUT-ID-079，GPT 2026-10-11 0332 复审）两个残余 ----
+# ① tia_enable_async_topk 进 manifest：TLI 继承 TIA
+#   （sparse_attn/indexer/tia_indexer.py:18 self.enable_async =
+#   args.tia_enable_async_topk；tli_indexer.py compute_mask async 分支
+#   缓存 prev_mask 并在下一步替换）——异步第 2 个 decode 步起的细筛
+#   候选集与同步路径可不同，是输出相关参数而非性能提示。getattr 缺省
+#   False 与 argparse store_true 缺省/TIAIndexer 运行时读取三方同源。
+# ② tli_proj_basis/tli_layer_skip_path 由「词法路径」升级为「内容身份」：
+#   只记路径时同路径不同内容 → 同 manifest/hash → LongBench sidecar
+#   写门放行覆盖、RULER 复用同逻辑指针（GPT CPU 复现实锤）。现于
+#   manifest 构造时解析为 {path, sha256, shape/n_skip}（值非 None 时），
+#   文件缺失/读取失败/解析失败一律 [GATE-FAIL] 079 SystemExit fail
+#   closed——解析发生在 get_method_name_with_info 内，即输出路径确定
+#   之前；不再用 default=str 隐去身份。LongBench sidecar（pred.py 写
+#   门）与 method hash 共用本函数产出的同一份 resolved manifest，
+#   两个入口零字段子集各自维护。
 _TREATMENT_FIELD_DEFAULTS = {
     # 既有可读名字段（hash 同样纳入——可读段整体单射的最强保证）
     "tia_block_size": 64,
@@ -46,10 +63,17 @@ _TREATMENT_FIELD_DEFAULTS = {
     "tli_moba": False,
     "tli_sigma": 8.0,
     "tli_per_q_head": False,
-    "tli_proj_basis": None,         # 路径级身份（内容身份由 argv/receipt 承载）
+    # 079①：TIA 继承的异步开关改变第 2 步起的细筛候选集，必须进身份
+    "tia_enable_async_topk": False,
+    # 079②：文件型配置——值非 None 时经 _resolve_file_identity 解析为
+    # 内容身份 {path, sha256, shape/n_skip}（fail closed），不再只记路径
+    "tli_proj_basis": None,
     "tli_static_pair": False,
     "tli_layer_skip_path": None,
 }
+
+# 079②：文件型配置字段集合（值非 None → 内容身份解析，见上）
+_FILE_IDENTITY_FIELDS = ("tli_proj_basis", "tli_layer_skip_path")
 
 # treatment hash 尾段格式：_h + 10 hex。锚定尾正则拆分（可读段以
 # g 段/_P 结尾、非 tli 名以数值/async/none 结尾，不与该模式误撞）。
@@ -59,11 +83,75 @@ _TREATMENT_HASH_RE = re.compile(
     re.DOTALL)
 
 
+def _resolve_file_identity(field, path):
+    """079②：文件型配置的内容身份解析（fail closed）。
+
+    返回 {"path": 规范路径, "sha256": 文件字节 sha256, 摘要}：
+      - tli_proj_basis：附加 shape（torch.load weights_only 提取——
+        与 TLIIndexer.__init__ 同一加载口径；加载失败意味着运行时
+        同样会失败，提前 fail closed 不留「能算名不能跑」的半配置）；
+      - tli_layer_skip_path：附加 n_skip（解析 JSON 并要求含 "skip"
+        键——TLIIndexer.__init__ 对坏文件静默关 D' 的旧语义属「静默
+        退化」家族，生产入口不再放行）。
+
+    文件缺失/读取失败/解析失败 → [GATE-FAIL] 079 SystemExit。
+    刻意不做 mtime/size 键的解析缓存：同 size 同 mtime_ns 的陈旧缓存
+    会让「同路径、内容已变」拿到旧身份（079 正是要修的缺陷形态）；
+    身份宁可每次重读（两文件均为 MB 级以内），不允许任何陈旧身份。
+    声明了路径但 tli_enable_layer_skip=False 的惰性组合同样解析：
+    声明了就必须存在可读（fail-closed 优先于「反正不生效」）。
+    """
+    if not isinstance(path, str) or not path:
+        raise SystemExit(
+            f"[GATE-FAIL] 079: {field} 路径非法（{path!r}）——文件型配置"
+            f"必须绑定实际内容，拒绝运行，fail loudly")
+    rp = os.path.realpath(path)
+    try:
+        with open(rp, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        raise SystemExit(
+            f"[GATE-FAIL] 079: {field} 文件读取失败（{path} → "
+            f"{type(e).__name__}: {e}）——文件型配置必须绑定实际内容，"
+            f"拒绝运行，fail loudly")
+    ident = {"path": rp, "sha256": hashlib.sha256(raw).hexdigest()}
+    if field == "tli_proj_basis":
+        try:
+            t = torch.load(rp, map_location="cpu", weights_only=True)
+            ident["shape"] = [int(x) for x in t.shape]
+        except SystemExit:
+            raise
+        except Exception as e:   # 加载失败/非裸 tensor——运行时同样会失败
+            raise SystemExit(
+                f"[GATE-FAIL] 079: tli_proj_basis 加载/取 shape 失败"
+                f"（{path} → {type(e).__name__}: {e}）——生产路径要求裸"
+                f"tensor [n_layers,Hkv,128,r]，TLIIndexer 稍后同样会失败，"
+                f"拒绝运行，fail loudly")
+    else:
+        try:
+            doc = json.loads(raw.decode("utf-8"))
+            ident["n_skip"] = len(doc["skip"])
+        except (UnicodeDecodeError, ValueError, KeyError, TypeError) as e:
+            raise SystemExit(
+                f"[GATE-FAIL] 079: tli_layer_skip_path 解析失败（{path} → "
+                f"{type(e).__name__}: {e}）——须为含 \"skip\" 键的 JSON；"
+                f"旧口径静默关 D' 属静默退化，生产入口拒绝运行")
+    return ident
+
+
 def _treatment_manifest(args):
     """076：canonical treatment manifest——全部输出相关参数的
-    规范化字典（getattr 兜底缺省与 TLIIndexer 运行时同源）。"""
-    return {f: getattr(args, f, d)
-            for f, d in _TREATMENT_FIELD_DEFAULTS.items()}
+    规范化字典（getattr 兜底缺省与 TLIIndexer 运行时同源）。
+
+    079②：文件型配置字段（_FILE_IDENTITY_FIELDS）值非 None 时解析为
+    内容身份（realpath + 字节 sha256 + shape/n_skip，fail closed）。"""
+    manifest = {}
+    for f, d in _TREATMENT_FIELD_DEFAULTS.items():
+        v = getattr(args, f, d)
+        if f in _FILE_IDENTITY_FIELDS and v is not None:
+            v = _resolve_file_identity(f, v)
+        manifest[f] = v
+    return manifest
 
 
 def get_treatment_manifest_json(args):
@@ -71,7 +159,10 @@ def get_treatment_manifest_json(args):
 
     与 _treatment_hash 同源同字节（hash 输入 = 本串 utf-8 编码）——
     sidecar 记录与 hash 计算共用单一序列化口径，sidecar 内容可独立
-    复核 hash（审计可再算）。排序键 + default=str 兜不可序列化值。"""
+    复核 hash（审计可再算）。排序键 + default=str 兜不可序列化值。
+    079：文件型配置已解析为内容身份（realpath/sha256/shape/n_skip），
+    同配置多次调用逐位稳定（确定性不依赖缓存）；LongBench 写门与
+    RULER receipt 均消费本函数，不各自维护字段子集。"""
     return json.dumps(_treatment_manifest(args), sort_keys=True,
                       ensure_ascii=False, default=str)
 

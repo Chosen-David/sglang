@@ -245,7 +245,7 @@ def build_yarn_receipt(*, yarn_enabled, effective_factor, yarn_factor_cli,
                        producer_script_path, producer_script_sha256,
                        receipt_version=RECEIPT_VERSION, run_id=None,
                        prediction_basename=None, prediction_sha256=None,
-                       prediction_lines=None):
+                       prediction_lines=None, treatment_manifest_json=None):
     """构造 receipt dict（写入前内存成型，字段集稳定可校验）。
 
     effective_factor = 实际写进 model config 的值（自动档解析或显式覆盖
@@ -280,6 +280,24 @@ def build_yarn_receipt(*, yarn_enabled, effective_factor, yarn_factor_cli,
         "producer_script": {"path": producer_script_path,
                             "sha256": producer_script_sha256},
     }
+    # 079（TL-E121-OUTPUT-ID-079）：resolved treatment manifest 入回执——
+    # 与 method hash / LongBench sidecar 共用 sparse_attn/info.py 的同一
+    # 份 resolved manifest（单一事实源，pred_ruler.py 不再各自维护治疗
+    # 身份字段子集）。存 {sha256, json} 对：10-hex 文件名段碰撞时回执侧
+    # 仍有全长 sha256 可仲裁；schema（_validate_common_schema）校验二者
+    # 自洽（sha256(json utf-8) 必须等于声明值）。None = 非 tli 臂
+    # （其 treatment 身份由可读名整体编码）或 legacy 调用方，不写键。
+    if treatment_manifest_json is not None:
+        if not isinstance(treatment_manifest_json, str) or \
+                not treatment_manifest_json:
+            raise ValueError(
+                "treatment_manifest_json 须为非空 str（resolved manifest "
+                "JSON，来自 sparse_attn.info.get_treatment_manifest_json）")
+        receipt["treatment_manifest"] = {
+            "sha256": hashlib.sha256(
+                treatment_manifest_json.encode("utf-8")).hexdigest(),
+            "json": treatment_manifest_json,
+        }
     if receipt_version == RECEIPT_VERSION:
         missing = [k for k, v in (
             ("run_id", run_id), ("prediction_basename", prediction_basename),
@@ -734,6 +752,20 @@ def _validate_common_schema(receipt, pred_path):
         if not chk(gp[k]):
             return (f"{pred_path}: generation_params.{k}={gp[k]!r} 类型"
                     f"非法——fail closed（060）")
+    # 079：treatment_manifest（可选键——legacy 回执无此键，前向兼容）。
+    # 存在时必须自洽：{sha256: 64 位十六进制, json: 非空 str} 且
+    # sha256(json utf-8 字节) == 声明值——篡改 json 或 sha 任一 → 拒收。
+    tm = receipt.get("treatment_manifest")
+    if tm is not None:
+        if not isinstance(tm, dict) or not _is_hex64(tm.get("sha256")) \
+                or not isinstance(tm.get("json"), str) or not tm["json"]:
+            return (f"{pred_path}: treatment_manifest 非法（须为 "
+                    f"{{sha256: 64 位十六进制, json: 非空 str}}）"
+                    f"——fail closed（079）")
+        if hashlib.sha256(tm["json"].encode("utf-8")).hexdigest() \
+                != tm["sha256"]:
+            return (f"{pred_path}: treatment_manifest.sha256 与 json 内容"
+                    f"不一致（篡改/损坏）——fail closed（079）")
     # 057 核心不变量 + 060 rope_scaling 完整规范
     eff = receipt["effective_yarn_factor"]
     if enabled:
@@ -937,7 +969,14 @@ def effective_config_sha256(receipt):
     064② 修复：generation_params.max_num 此前「schema 必需 + 类型校验
     但不进指纹」——GPT 复现 max_num=1 与 100 两份合法回执同指纹
     a09b4ef6...，属「必需但不比较」漏洞；现纳入 canon（负例
-    max_num=1 vs 100 必须不同指纹）。"""
+    max_num=1 vs 100 必须不同指纹）。
+
+    079：receipt.treatment_manifest（可选键）刻意不进指纹——它是
+    per-arm 的治疗身份（异臂必不同、同臂跨格必同），不是「同档内应
+    逐位一致」的配置语义；且纳入会使 legacy 回执（无此键 → None）与
+    新回执指纹失配，破坏在飞批次（E123）与既有收口数据的跨格比较。
+    其身份绑定由 prediction_basename 的 _h<hash10> 段 + 键内全长
+    sha256（schema 自洽校验）承载。"""
     gp = receipt.get("generation_params") or {}
     ps = receipt.get("producer_script") or {}
     canon = {

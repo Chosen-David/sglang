@@ -209,9 +209,11 @@ def test_P1_matrix_pairwise_injective():
            == "tli_64_128_2048_c4_a0.25_b0.125_g0.625",
            f"c6 readable 应与审计矩阵一致（组 3 与组 1 同 readable），实际 {r}")
     # c1 精确名硬锚点：_TREATMENT_FIELD_DEFAULTS 固定后逐位稳定；
-    # 字段集变更时此锚点必须重算（同步更新 A4/T5 同理）
+    # 字段集变更时此锚点必须重算（同步更新 A4/T5 同理）。
+    # 079 口径：manifest 新增 tia_enable_async_topk（getattr 缺省
+    # False）→ 全部 tli hash 重算，锚点由 he797a70df5 更新。
     _check(names["c1 minmax/avg/4bit/4bit"]
-           == "tli_64_128_2048_c4_a0.25_b0.125_g0.625_he797a70df5",
+           == "tli_64_128_2048_c4_a0.25_b0.125_g0.625_h046b987e01",
            f"c1 稳定性锚点失配（字段集被改？须重算锚点）："
            f"{names['c1 minmax/avg/4bit/4bit']!r}")
     return "PASS"
@@ -241,7 +243,8 @@ def test_P2_order_independent_and_default_equivalent():
            f"argparse 全缺省 vs 程序化最小 ns 应同名（缺省等价）："
            f"{name_argparse!r} vs {name_min!r}")
     # 与 P1 的 c1（同一配置）也须一致——跨构造路径单射到同一身份
-    _check(name_min == "tli_64_128_2048_c4_a0.25_b0.125_g0.625_he797a70df5",
+    # （079 口径锚点：async 字段入 manifest 后重算）
+    _check(name_min == "tli_64_128_2048_c4_a0.25_b0.125_g0.625_h046b987e01",
            f"跨构造路径身份漂移：{name_min!r}")
 
     # 乱序构造（字段注入顺序不影响 sort_keys 序列化）
@@ -276,7 +279,7 @@ def test_P3_gate_fail_closed_no_overwrite(base):
     os.makedirs(d, exist_ok=True)
     out = os.path.join(
         d, "hotpotqa-tli_64_128_2048_c4_a0.25_b0.125_g0.625_"
-          "he797a70df5-09090909.jsonl")
+          "h046b987e01-09090909.jsonl")   # 079 口径：与 P1 c1 同步重算
     data_bytes = b'{"pred": "arm-A"}\n'
     with open(out, "wb") as f:
         f.write(data_bytes)

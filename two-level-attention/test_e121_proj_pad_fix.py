@@ -32,7 +32,17 @@ GPT 纯公式复现基准（S=6145, α=0.125, bs=64, sink=128, swa=128）：
       mask 哈希比对；α/β/γ 冠军配置、(0,0) 单池、per_q_head、σ 分支 × 对齐/
       非对齐 S）。同时记录基线投影路径的实测红值（应为 5312/65——审计复现）。
   T4  外部合成 score_dict（无 valid_length）回退宽度口径——既有 harness 兼容
-  T5  GPU 冒烟（cuda 可用时 T1 几何在 GPU 重放）
+  T5  GPU 冒烟（cuda 可用时 T1 几何在 GPU 重放；无 cuda → SKIP）
+  T6  oracle 元测试（080，TL-E121-TEST-SKIP-080）：E121_BREAK_GEOM=1
+      子进程故意破坏 geom_expect → python / python -O 双口径都必须红
+      （非零退出）——证明 T1 手算锚定是显式检查而非可被 -O 删除的
+      裸 assert。
+
+080 三态纪律（065/067 对齐）：
+  T3（无 E121_BASE_ROOT）与 T5（无 cuda）记 SKIP 不记 PASS；汇总显式
+  打印 PASS/SKIP/FAIL 三类；任一 SKIP/FAIL 都非全绿且非零退出——
+  默认命令无基线时的正确摘要形如「N PASS / 1 SKIP / 0 FAIL」rc≠0，
+  挂 E121_BASE_ROOT 后 T3 展开为 6 条实测、全套全绿 rc=0。
 
 红/绿用法：
   绿：python3 test_e121_proj_pad_fix.py            （修复态全 PASS）
@@ -43,6 +53,7 @@ GPT 纯公式复现基准（S=6145, α=0.125, bs=64, sink=128, swa=128）：
 import hashlib
 import importlib
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -55,13 +66,23 @@ torch.set_num_threads(1)
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 
-RESULTS = []   # (name, status, detail)  status ∈ {"PASS", "FAIL"}
+RESULTS = []   # (name, status, detail)  status ∈ {"PASS", "SKIP", "FAIL"}
 
 
-def report(name, ok, detail=""):
-    status = "PASS" if ok else "FAIL"
+def report(name, status, detail=""):
+    """080（TL-E121-TEST-SKIP-080）：PASS/SKIP/FAIL 三态显式记录
+    （065/067 已确立纪律）——SKIP 不再计入 PASS；汇总三类分别计数，
+    任一 SKIP/FAIL 都使套件非全绿且非零退出（未执行的覆盖不得被
+    默认命令的 rc=0「代签」）。"""
+    if status not in ("PASS", "SKIP", "FAIL"):
+        raise ValueError(f"report 非法状态 {status!r}")
     RESULTS.append((name, status, detail))
     print(f"{status}  {name}" + (f"  -- {detail}" if detail else ""))
+
+
+def report_ok(name, ok, detail=""):
+    """布尔判定便捷入口（ok=True → PASS，否则 FAIL）。"""
+    report(name, "PASS" if ok else "FAIL", detail)
 
 
 def load_sparse_attn(name, root):
@@ -138,11 +159,19 @@ def geom_expect(S, alpha):
 
     mid = S - sink - swa；near_len = max(bs, α·mid)；near_blks =
     max(sink_blocks, (S - swa - near_len)//bs)；far_hi = near_blks·bs。
+
+    080 oracle 元测试钩子：E121_BREAK_GEOM=1 时故意破坏手算公式——
+    T1 的显式锚定检查（非裸 assert，python -O 下同样执行）必须把
+    套件打红；T6 以子进程双口径（python / python -O）验证该红。
     """
     mid = max(0, S - SINK - SWA)
     near_len = max(BS, int(alpha * mid))
     near_blks = max(2, (S - SWA - near_len) // BS)
     far_hi = near_blks * BS
+    if os.environ.get("E121_BREAK_GEOM") == "1":
+        mid += BS
+        near_len += BS
+        far_hi += BS
     return mid, near_len, near_blks, far_hi, S - SWA
 
 
@@ -200,32 +229,39 @@ def mask_hash(t):
 def t1_gpt_exact():
     S = 6145
     mid_e, near_e, nblk_e, far_hi_e, swa_lo_e = geom_expect(S, 0.125)
-    assert (mid_e, near_e, far_hi_e) == (5889, 736, 5248), \
-        f"手算公式自身与 GPT 审计基准不符: {(mid_e, near_e, far_hi_e)}"
+    # 080（TL-E121-TEST-SKIP-080）：原裸 assert 在 python -O 下被删除，
+    # 且后续 K2/边界全由同一 geom_expect 派生 → oracle 回归可自洽假绿。
+    # 改显式检查（if + report FAIL + 提前返回；-O 下同样执行）；
+    # T6 oracle 元测试以 E121_BREAK_GEOM=1 子进程验证 python/-O 双红。
+    if (mid_e, near_e, far_hi_e) != (5889, 736, 5248):
+        report("T1 手算 oracle 锚定 GPT 审计基准 (5889,736,5248)", "FAIL",
+               f"手算公式自身与 GPT 审计基准不符: "
+               f"{(mid_e, near_e, far_hi_e)} != (5889, 736, 5248)")
+        return
     K2 = (far_hi_e - SINK) + SINK + SWA          # = far 宽 + sink + swa → far 全覆盖
     args = make_args(tli_proj_basis=BASIS_PATH, tli_alpha=0.125, tli_beta=0.125,
                      tli_gamma=0.0, tia_level2_topk=K2)
     idx, sd, mask = chain(FIX, args, S, keep_score_dict=True)
 
     ok = sd.get("valid_length") == S
-    report("T1a valid_length 透传（prepare_index→compute_score→score_dict）",
-           ok, f"valid_length={sd.get('valid_length')} (期望 {S})")
+    report_ok("T1a valid_length 透传（prepare_index→compute_score→score_dict）",
+              ok, f"valid_length={sd.get('valid_length')} (期望 {S})")
 
     sf = sd["score_fine"]
     ok = sf.shape[-1] == 6208
-    report("T1b 投影路径 score_fine 宽 = Tpad=6208（pad 后）", ok,
-           f"width={sf.shape[-1]} (期望 6208)")
+    report_ok("T1b 投影路径 score_fine 宽 = Tpad=6208（pad 后）", ok,
+              f"width={sf.shape[-1]} (期望 6208)")
 
     ok = bool((sf[..., S:] == float("-inf")).all().item()) and sf.shape[-1] > S
-    report("T1c padding 段永久 -inf（compute_mask 后 score_dict 内实测）", ok,
-           f"padding 段 max={sf[..., S:].max().item()} (期望 -inf)")
+    report_ok("T1c padding 段永久 -inf（compute_mask 后 score_dict 内实测）", ok,
+              f"padding 段 max={sf[..., S:].max().item()} (期望 -inf)")
 
     g = observe_geometry(mask, S)
     ok = (g["width"] == 6208 and g["far_hi_obs"] == far_hi_e
           and g["near_gap_clean"] and g["swa_real_forced"] == SWA
           and g["pad_clean"] and g["sink_ok"])
-    report("T1d GPT S=6145 几何：mid=5889 near=736 far_hi=5248 SWA=128 padding=0",
-           ok, f"观测 width={g['width']} far_hi={g['far_hi_obs']} "
+    report_ok("T1d GPT S=6145 几何：mid=5889 near=736 far_hi=5248 SWA=128 padding=0",
+              ok, f"观测 width={g['width']} far_hi={g['far_hi_obs']} "
                 f"near_gap_clean={g['near_gap_clean']} swa_real_forced="
                 f"{g['swa_real_forced']}/128 pad_clean={g['pad_clean']} "
                 f"sink_ok={g['sink_ok']}（修复前 actual: far_hi=5312 SWA=65）")
@@ -262,15 +298,18 @@ def t2_matrix(device="cpu"):
                     sub.append("padding_selected")
                 if not g["sink_ok"]:
                     sub.append("sink_lost")
-                report(f"T2[{tag}] a)padding不入选 b)SWA全保 c)边界按真实S",
-                       not sub, "; ".join(sub) if sub else "OK")
+                report_ok(f"T2[{tag}] a)padding不入选 b)SWA全保 c)边界按真实S",
+                          not sub, "; ".join(sub) if sub else "OK")
 
 
 # ================================================================ T3：非投影逐位对照 + 基线红值
 def t3_bitidentity():
     if BASE is None:
-        report("T3 非投影路径与基线逐位一致", True,
-               "SKIP（E121_BASE_ROOT 未提供；独立红跑见任务报告）")
+        # 080：SKIP 三态显式记录（不再计入 PASS；任一 SKIP → 套件非全绿
+        # 且非零退出——未执行的逐位对照不得被默认命令的 rc=0 代签）。
+        report("T3 非投影路径与基线逐位一致", "SKIP",
+               "E121_BASE_ROOT 未提供（须指向修复前基线 d8fff2f96^ 的 "
+               "two-level-attention/ checkout）；独立红跑见任务报告")
         return
     cases = [
         ("冠军 mavg 配置 α.125/β.125/γ.625", dict(tli_alpha=0.125,
@@ -287,8 +326,8 @@ def t3_bitidentity():
             _, m_fix = chain(FIX, make_args(**kw), S, q=q, k=k)
             _, m_base = chain(BASE, make_args(**kw), S, q=q, k=k)
             h_fix, h_base = mask_hash(m_fix), mask_hash(m_base)
-            report(f"T3 非投影逐位一致 [{name}] S={S}",
-                   h_fix == h_base, f"fix={h_fix} base={h_base}")
+            report_ok(f"T3 非投影逐位一致 [{name}] S={S}",
+                      h_fix == h_base, f"fix={h_fix} base={h_base}")
     # 基线投影路径红值观测（审计 actual 列的实测复核，只记录不断言修复态）
     S = 6145
     _, near_e, _, far_hi_e, _ = geom_expect(S, 0.125)
@@ -298,9 +337,9 @@ def t3_bitidentity():
     q, k = gen_input(S)
     _, m_base = chain(BASE, make_args(**kw), S, q=q, k=k)
     g = observe_geometry(m_base, S)
-    report("T3 基线投影路径红值 = 审计 actual（far_hi=5312, SWA=65）",
-           g["far_hi_obs"] == 5312 and g["swa_real_forced"] == 65,
-           f"基线实测 far_hi={g['far_hi_obs']} swa_real_forced="
+    report_ok("T3 基线投影路径红值 = 审计 actual（far_hi=5312, SWA=65）",
+              g["far_hi_obs"] == 5312 and g["swa_real_forced"] == 65,
+              f"基线实测 far_hi={g['far_hi_obs']} swa_real_forced="
            f"{g['swa_real_forced']}（审计 actual: 5312/65）")
 
 
@@ -324,17 +363,19 @@ def t4_fallback():
         mask = idx.compute_mask(torch.tensor([S - 1]), score_dict)
         ok = mask.shape[-1] == S and bool(mask[..., :128].all().item()) \
             and bool(mask[..., S - SWA:].all().item())
-        report("T4 合成 score_dict 无 valid_length → 回退宽度口径（SWA/SINK 正常）",
-               ok, f"width={mask.shape[-1]}")
+        report_ok("T4 合成 score_dict 无 valid_length → 回退宽度口径（SWA/SINK 正常）",
+                  ok, f"width={mask.shape[-1]}")
     except Exception as e:
-        report("T4 合成 score_dict 无 valid_length → 回退宽度口径", False,
+        report("T4 合成 score_dict 无 valid_length → 回退宽度口径", "FAIL",
                f"异常: {type(e).__name__}: {e}")
 
 
 # ================================================================ T5：GPU 冒烟
 def t5_gpu():
     if not torch.cuda.is_available():
-        report("T5 GPU 冒烟", True, "SKIP（无 cuda）")
+        # 080：无 cuda 时 SKIP 三态显式记录；GPU 实跑须另行真跑，
+        # 不由 CPU 跑代签（rc 仍非零——覆盖不完整）。
+        report("T5 GPU 冒烟", "SKIP", "无 cuda——GPU job 须另行实跑")
         return
     S = 6145
     _, _, _, far_hi_e, _ = geom_expect(S, 0.125)
@@ -345,23 +386,70 @@ def t5_gpu():
     g = observe_geometry(mask, S)
     ok = (g["far_hi_obs"] == far_hi_e and g["near_gap_clean"]
           and g["swa_real_forced"] == SWA and g["pad_clean"])
-    report("T5 GPU 冒烟（投影 on, S=6145）", ok,
-           f"far_hi={g['far_hi_obs']} swa={g['swa_real_forced']}/128 "
+    report_ok("T5 GPU 冒烟（投影 on, S=6145）", ok,
+              f"far_hi={g['far_hi_obs']} swa={g['swa_real_forced']}/128 "
            f"pad_clean={g['pad_clean']}")
 
 
+# ================================================================ T6：oracle 元测试
+def t6_oracle_meta():
+    """080 oracle 元测试：E121_BREAK_GEOM=1 子进程故意破坏 geom_expect，
+    python 与 python -O 双口径都必须非零退出（红）——证明 T1 的手算
+    锚定是显式检查（if/report）而非可被 -O 删除的裸 assert。
+
+    子进程只跑 T1（破坏态下 T2/T3/T5 的期望全部派生自被破坏的
+    oracle，跑全量无信息量；T1 锚定 FAIL → 非零退出即为红态证据）。
+    本函数自身在子进程口径（E121_BREAK_GEOM=1）下不执行，无递归。"""
+    if os.environ.get("E121_BREAK_GEOM") == "1":
+        return
+    env = dict(os.environ, E121_BREAK_GEOM="1")
+    rcs = []
+    for oflag in ([], ["-O"]):
+        r = subprocess.run(
+            [sys.executable] + oflag + [os.path.abspath(__file__)],
+            env=env, capture_output=True, text=True, timeout=3600)
+        rcs.append(("python " + " ".join(oflag), r.returncode))
+    ok = all(rc != 0 for _, rc in rcs)
+    report("T6 oracle 元测试（破坏 geom_expect → python/-O 双红）",
+           "PASS" if ok else "FAIL", f"子进程 rc={rcs}")
+
+
+def _cleanup_basis():
+    if os.path.exists(BASIS_PATH):
+        os.unlink(BASIS_PATH)
+
+
+def _summarize():
+    """080 三态汇总：显式打印 PASS/SKIP/FAIL 三类；任一 SKIP/FAIL 都
+    不打全绿且非零退出（对齐 065/067 纪律——SKIP 是覆盖缺口不是荣誉）。"""
+    n_pass = sum(1 for _, s, _ in RESULTS if s == "PASS")
+    n_skip = sum(1 for _, s, _ in RESULTS if s == "SKIP")
+    n_fail = sum(1 for _, s, _ in RESULTS if s == "FAIL")
+    print(f"\n==== 075 suite: {n_pass} PASS / {n_skip} SKIP / "
+          f"{n_fail} FAIL ====")
+    all_green = (n_skip == 0 and n_fail == 0)
+    if not all_green:
+        print("非全绿（SKIP/FAIL>0）——覆盖不完整，本跑 rc 非零；"
+              "SKIP 项须补齐资源（E121_BASE_ROOT / cuda）后另行实跑，"
+              "不得当全绿引用（080 纪律）")
+    return all_green
+
+
 def main():
+    # 080 oracle 元测试子进程口径：geom_expect 已被钩子破坏，只跑 T1
+    # （手算锚定必须 FAIL）→ 三态汇总 → 非零退出。
+    if os.environ.get("E121_BREAK_GEOM") == "1":
+        t1_gpt_exact()
+        _cleanup_basis()
+        sys.exit(0 if _summarize() else 1)
     t1_gpt_exact()
     t2_matrix()
     t3_bitidentity()
     t4_fallback()
     t5_gpu()
-    n_fail = sum(1 for _, s, _ in RESULTS if s == "FAIL")
-    n_pass = sum(1 for _, s, _ in RESULTS if s == "PASS")
-    print(f"\n==== 075 suite: {n_pass} PASS / {n_fail} FAIL ====")
-    if os.path.exists(BASIS_PATH):
-        os.unlink(BASIS_PATH)
-    sys.exit(1 if n_fail else 0)
+    t6_oracle_meta()
+    _cleanup_basis()
+    sys.exit(0 if _summarize() else 1)
 
 
 if __name__ == "__main__":

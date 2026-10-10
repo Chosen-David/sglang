@@ -393,7 +393,9 @@ def t5_cli_and_info():
         # 前 10 hex；单射性/稳定性单测见 test_e119_fixes_076_077_078.py）。
         # hash 依赖 _TREATMENT_FIELD_DEFAULTS 参数集固定后逐位稳定；改
         # 字段集时本锚点必须重算同步更新。
-        if name_f != "tli_64_128_1024_c4_BDa0_b0_g1_h493d859879":
+        # 079 口径：manifest 新增 tia_enable_async_topk（缺省 False）→
+        # 全部 tli hash 重算，本锚点已同步更新。
+        if name_f != "tli_64_128_1024_c4_BDa0_b0_g1_h1483e0db94":
             raise AssertionError(f"数值 γ 文件名应含生效 α/β/γ（E121 B09 口径）"
                                  f"+ 076 treatment hash：{name_f!r}")
         del ns.tli_gamma                      # 缺省属性按 1.0 兜底（不加 goff）

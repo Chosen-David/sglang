@@ -79,7 +79,8 @@ from benchmark.RULER.yarn_receipt import (  # noqa: E402
 from sparse_attn.arguments import add_sparse_attn_args  # noqa: E402
 from sparse_attn.patches import register_patch  # noqa: E402
 from sparse_attn.metrics import get_metrics  # noqa: E402
-from sparse_attn.info import get_method_name_with_info  # noqa: E402
+from sparse_attn.info import (  # noqa: E402
+    get_method_name_with_info, get_treatment_manifest_json)
 
 RULER_TASKS = [
     "niah_single_1", "niah_single_2", "niah_single_3",
@@ -287,6 +288,15 @@ def main():
         pred_sha = _file_sha256(tmp_pred)
         pred_lines = sum(1 for _ in open(tmp_pred, "rb"))
         model_cfg_path = os.path.join(args.model_path, "config.json")
+        # 079（TL-E121-OUTPUT-ID-079）：tli 臂把 resolved treatment
+        # manifest 写入回执——与 method hash（method_name 尾段）、
+        # LongBench sidecar 共用 sparse_attn/info.py 同一份 resolved
+        # manifest（单一事实源），本入口不再各自维护治疗身份字段子集；
+        # 非 tli 臂（none/quest/twia/tia）treatment 身份由可读名整体
+        # 编码，不写。schema 校验 sha256(json) 自洽（yarn_receipt 079）。
+        treatment_manifest_json = (
+            get_treatment_manifest_json(args)
+            if args.method == "tli" else None)
         yarn_receipt = build_yarn_receipt(
             yarn_enabled=use_yarn,
             effective_factor=factor,
@@ -309,7 +319,8 @@ def main():
             run_id=attempt_id,
             prediction_basename=os.path.basename(out_path),
             prediction_sha256=pred_sha,
-            prediction_lines=pred_lines)
+            prediction_lines=pred_lines,
+            treatment_manifest_json=treatment_manifest_json)
         tmp_rcp = stage_yarn_receipt(out_path, yarn_receipt, attempt_id)
         commit_yarn_generation(tmp_pred, tmp_rcp, out_path)
         print(f"[yarn-receipt] effective config + 同代绑定 -> {tmp_rcp}"

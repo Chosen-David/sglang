@@ -492,6 +492,11 @@ if __name__ == "__main__":
         # 不存在 → 门自然放行。非 tli 方法可读段已编码其全部旋钮
         # （quest/twia/tia/none），维持旧覆盖语义（076 审计范围 = tli
         # treatment 矩阵）。
+        # 079（TL-E121-OUTPUT-ID-079）：本门消费的 manifest 已升级为
+        # resolved manifest（tia_enable_async_topk 生效值 + tli_proj_basis/
+        # tli_layer_skip_path 的 realpath+内容 sha256+shape/n_skip，文件
+        # 缺失/损坏 fail closed）——「同路径、内容已变」不再同 manifest，
+        # 写门必拒；与 method hash/RULER receipt 共用 info.py 单一事实源。
         if args.method == "tli":
             manifest_json = get_treatment_manifest_json(args)
             sidecar = gate_output_treatment_identity(out_path, manifest_json)

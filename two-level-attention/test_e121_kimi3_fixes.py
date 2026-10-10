@@ -350,31 +350,33 @@ def a4_method_name_abg():
         # ——单射性/稳定性单测见 test_e119_fixes_076_077_078.py）。hash
         # 依赖 _TREATMENT_FIELD_DEFAULTS 参数集固定后逐位稳定；改字段集
         # 时本锚点必须重算同步更新（同名互覆防线 = 076 的存在理由）。
+        # 079 口径：manifest 新增 tia_enable_async_topk（缺省 False）→
+        # 全部 tli hash 重算，下列五个锚点已同步更新。
         # B09：冠军配置 α/β/γ 进名；F11：full 口径不写 A（生效值）
         got = f(mk())
-        _require(got == "tli_64_128_1024_c4_a0.25_b0.125_g0.625_h270aa1bfd9",
+        _require(got == "tli_64_128_1024_c4_a0.25_b0.125_g0.625_h35804f58c2",
                  f"冠军配置名应含 α/β/γ 且 full 不写 A，实际 {got!r}")
         # F11 正向：rope 子空间（生效开）→ 写 A，即使 flag 原值 False
         # （名格式：ab 直拼 a 段——c4_Aa0.25，无分隔下划线）
         got = f(mk(tli_subspace="rope", tli_enable_subspace=False))
         _require(got == "tli_64_128_1024_c4_Aa0.25_b0.125_g0.625"
-                         "_heaf84770c2",
+                         "_h5e21299268",
                  f"rope 生效子空间应写 A（不受 flag 原值 False 影响），实际 {got!r}")
         # B/D 与 γ None（"off"）
         got = f(mk(tli_subspace="rope", tli_enable_kmeans=True,
                    tli_enable_layer_skip=True, tli_alpha=0.0, tli_beta=0.0,
                    tli_gamma=None))
-        _require(got == "tli_64_128_1024_c4_ABDa0_b0_goff_hb24efbeb2f",
+        _require(got == "tli_64_128_1024_c4_ABDa0_b0_goff_h6b7948df60",
                  f"kmeans+layer_skip 应写 BD；γ=None 应写 off，实际 {got!r}")
         # 稀疏 prefill 后缀 _P
         got = f(mk(tli_sparse_prefill=True))
         _require(got == "tli_64_128_1024_c4_a0.25_b0.125_g0.625_P"
-                         "_hdc2396e912",
+                         "_h3fffeef311",
                  f"稀疏 prefill 应加 _P 后缀，实际 {got!r}")
         # 小数格式化（0.0625 不丢位）
         got = f(mk(tli_alpha=0.0625, tli_beta=0.03125, tli_gamma=0.5))
         _require(got == "tli_64_128_1024_c4_a0.0625_b0.03125_g0.5"
-                         "_h6132d04d64",
+                         "_hdb8db1cd70",
                  f"α/β/γ 小数应完整保位，实际 {got!r}")
         # 非 tli 方法不回归（quest/twia/tia/none）
         _require(f(types.SimpleNamespace(
