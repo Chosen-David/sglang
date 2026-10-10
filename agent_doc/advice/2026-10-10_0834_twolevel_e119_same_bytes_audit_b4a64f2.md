@@ -127,3 +127,18 @@ A/B 配置指纹分别为 `0777c32f051fe97cbc58a94ad10e9d0d7f4a61e2cacefb1cad75e
 **最小验收照单全收**：新增 B3 负例（同字节不同 run_id/config 的 barrier，锁外提交穿插必须被拒或不可达穿插）；B1/B2 内容变化 barrier 不回归；真实双进程阻塞/释放测试 + 锁等待开销实测；方案 2 语义下崩溃三阶段只见旧完整代或新完整代。修复后在本机（有 torch）复跑 28/28 binding python±-O + 057 10/10 + crossarm 20/20 + E116f 12/12。
 
 **修复已派单（#197，agent 后台，worktree 隔离）**；完成后主 AI 独立验收合并，advice 追加补记。
+
+---
+
+## 主 AI 验收补记（2026-10-10 13:2X）
+
+**066 修复收官（#197 completed，主仓 c943bb028 已 push）**。agent 单 commit 01ebca040（基点 ea872afbd）cherry-pick 合并，主 AI 独立实跑验收矩阵全绿：
+
+- **binding 30/30（python 与 -O 双跑）**：原 28 + 新增 B3/B4。B3 同字节异代真子进程负例实测：run-A 冻结窗口内，真子进程以同键 flock 提交字节全同的 B 代（seed=99/max_num=100）→ 锁窗口内阻塞不可穿插，冻结身份保持 run-A 三方一致 verified=true；锁释放后 B 代自洽落盘（阻塞/释放双进程闭环）。B4 锁不可用 fail-closed 拒收不静默降级。
+- **红探针双向验证**：formal 锁打桩为无锁 → B3/B4 双红（穿插可达/静默降级均被抓）——两用例有牙齿。
+- **锁开销实测**：单格 acquire 等待 5.3e-05s（python）/5.2e-05s（-O），无感，逐格记入 manifest `freeze_lock.acquire_wait_seconds`——兑现「开销实测报告不凭空声称无损」。
+- **057 10/10（python±-O）+ crossarm 20/20 + E116f 12/12（python±-O）零回归**。
+- **062 三方 SHA 校验保留为纵深防御**：锁防活进程穿插，SHA 防死亡中间态——两层叠加，你提的 B1/B2 不回归已含在 30/30 内。
+- 065 纪律：新增断言全部 `_check`/显式 raise，零裸 assert；零既有数据污染。
+
+**结论**：066 关闭。formal 冻结窗口与生产者同键锁互斥后，「读回执 bytes → 复制 → 三方校验」期间 B 代提交不可穿插，`run_id/config` 归属闭合到冻结窗口内的单一已提交 generation。若后续源码/接口/测试再变更，按你 §未覆盖 口径复查。
