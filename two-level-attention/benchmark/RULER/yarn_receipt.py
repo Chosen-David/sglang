@@ -144,6 +144,20 @@
 #       followlinks；聚合 realpath+commonpath 边界留 residual），
 #       覆盖错误与 invalid 口径分开但 fail-closed（rc=2）。
 #
+# ===== #203（GPT 2026-10-10 2131 审计 077 两项修复）=====
+#   TL-E119-POINTER-NUL-077（P3，resolve_generation_pointer）：073 修
+#       了非法 UTF-8，但合法 UTF-8 中的 NUL/控制字符可穿过 basename/
+#       "."..""/"/" 三查（"gen\x00name" 无路径分隔符、basename 原样通过），
+#       随后 os.path.realpath 底层 lstat 抛 ValueError: embedded null
+#       character——非 (OSError, UnicodeError) 族，穿透 072/073 兜底
+#       → probe 单格裸 traceback rc=1 无四态、audit 首坏格中止。修复：
+#       ①名称校验增加 NUL/控制字符/平台路径分隔符拒绝（任何文件系统
+#       调用之前），带 pointer 路径 [GATE-FAIL] SystemExit；②resolver
+#       内 lstat/realpath 段整体 try——路径构造/规范化产生的 ValueError
+#       统一转带 pointer 路径的 [GATE-FAIL] SystemExit（纵深防御：①已
+#       前置拦截，②兜其余非法分量）；probe/audit 两入口最后防线同步
+#       补 ValueError（gen_completion_probe.py 侧落地）。
+#
 # 本模块刻意零重依赖（不 import torch/transformers/sparse_attn）——
 # 生成侧、消费侧与 CPU 红绿测试三方共享同一解析/校验口径，干净检出
 # 恒可单测。
@@ -549,46 +563,72 @@ def resolve_generation_pointer(pred_out_path):
         raise SystemExit(
             f"[GATE-FAIL] {pointer_path}: 指针内容 {gen_name!r} 非合法"
             f" generation 目录名——fail closed（066/crash-recovery）")
-    gen_dir = os.path.join(os.path.dirname(os.path.abspath(pred_out_path)),
-                           gen_name)
-    pred_path = os.path.join(gen_dir, os.path.basename(pred_out_path))
-    rcp_path = os.path.join(gen_dir, os.path.basename(
-        producer_receipt_path_for(pred_out_path)))
-    # ---- 071②：终分量 symlink 门禁（islink = lstat 语义，不跟随）----
-    for role, p in (("generation 目录", gen_dir),
-                    ("generation 内预测", pred_path),
-                    ("generation 内回执", rcp_path)):
-        if os.path.islink(p):
+    # ---- 077①：NUL/控制字符/平台路径分隔符在任何文件系统调用之前拒绝 ----
+    # 073 归一了非法 UTF-8，但 "gen\x00name" 是合法 UTF-8：无路径分隔符、
+    # basename 原样通过上面的三查，随后 lstat/realpath 抛 ValueError
+    # （embedded null character）——非 (OSError, UnicodeError) 族，穿透
+    # 072/073 归一 → probe 单格裸 traceback rc=1 无四态、audit 首坏格
+    # 中止。控制字符（<0x20 与 0x7f）与 "\"（跨平台路径分隔符防御）不可
+    # 能出现在合法 commit 写出的 "{out}.gen-{时间戳-pid-rand}" 目录名中。
+    if any(ord(c) < 0x20 or ord(c) == 0x7f for c in gen_name) or \
+            "\\" in gen_name:
+        raise SystemExit(
+            f"[GATE-FAIL] {pointer_path}: 指针内容 {gen_name!r} 含 NUL/"
+            f"控制字符/平台路径分隔符——不可能来自合法 commit_yarn_"
+            f"generation，fail closed（077）")
+    # ---- 077②：lstat/realpath 段整体归一——路径构造/规范化产生的 ----
+    # ValueError 统一转带 pointer 路径的 [GATE-FAIL] SystemExit（纵深
+    # 防御：①已前置拦截 NUL/控制字符，本层兜其余非法路径分量；不吞
+    # SystemExit——071/066 的门禁消息原样穿透）。
+    try:
+        gen_dir = os.path.join(os.path.dirname(
+            os.path.abspath(pred_out_path)), gen_name)
+        pred_path = os.path.join(gen_dir, os.path.basename(pred_out_path))
+        rcp_path = os.path.join(gen_dir, os.path.basename(
+            producer_receipt_path_for(pred_out_path)))
+        # ---- 071②：终分量 symlink 门禁（islink = lstat 语义，不跟随）----
+        for role, p in (("generation 目录", gen_dir),
+                        ("generation 内预测", pred_path),
+                        ("generation 内回执", rcp_path)):
+            if os.path.islink(p):
+                raise SystemExit(
+                    f"[GATE-FAIL] {pointer_path}: {role} {p} 是 symlink——"
+                    f"不可变 generation 内必须是普通实体文件，目录外链接"
+                    f"逃逸使物理同源 provenance 失真，fail closed（071）")
+        # ---- 071③：realpath+commonpath 闭包（防中间分量/目录链逃逸）----
+        anchor = os.path.realpath(os.path.dirname(
+            os.path.abspath(pred_out_path)))
+        gen_real = os.path.realpath(gen_dir)
+        if not _realpath_within(gen_dir, anchor):
             raise SystemExit(
-                f"[GATE-FAIL] {pointer_path}: {role} {p} 是 symlink——"
-                f"不可变 generation 内必须是普通实体文件，目录外链接"
-                f"逃逸使物理同源 provenance 失真，fail closed（071）")
-    # ---- 071③：realpath+commonpath 闭包（防中间分量/目录链逃逸）----
-    anchor = os.path.realpath(os.path.dirname(
-        os.path.abspath(pred_out_path)))
-    gen_real = os.path.realpath(gen_dir)
-    if not _realpath_within(gen_dir, anchor):
-        raise SystemExit(
-            f"[GATE-FAIL] {pointer_path}: generation 目录 {gen_dir} 解析后"
-            f"（realpath={gen_real}）逃逸出输出目录（realpath={anchor}）"
-            f"——fail closed（071）")
-    for role, p in (("预测", pred_path), ("回执", rcp_path)):
-        if not _realpath_within(p, gen_real):
+                f"[GATE-FAIL] {pointer_path}: generation 目录 {gen_dir} "
+                f"解析后（realpath={gen_real}）逃逸出输出目录"
+                f"（realpath={anchor}）——fail closed（071）")
+        for role, p in (("预测", pred_path), ("回执", rcp_path)):
+            if not _realpath_within(p, gen_real):
+                raise SystemExit(
+                    f"[GATE-FAIL] {pointer_path}: generation 内{role} {p} "
+                    f"解析后（realpath={os.path.realpath(p)}）逃逸出 "
+                    f"generation 目录（realpath={gen_real}）——"
+                    f"fail closed（071）")
+        if not os.path.isdir(gen_dir) or not os.path.isfile(pred_path):
             raise SystemExit(
-                f"[GATE-FAIL] {pointer_path}: generation 内{role} {p} "
-                f"解析后（realpath={os.path.realpath(p)}）逃逸出 "
-                f"generation 目录（realpath={gen_real}）——"
-                f"fail closed（071）")
-    if not os.path.isdir(gen_dir) or not os.path.isfile(pred_path):
+                f"[GATE-FAIL] {pointer_path}: 指向的 generation {gen_name} "
+                f"目录或其中预测缺失（{pred_path}）——指针存在即证据，"
+                f"不得静默回退直接读路径，fail closed（066/crash-"
+                f"recovery）")
+        if not os.path.isfile(rcp_path):
+            raise SystemExit(
+                f"[GATE-FAIL] {pointer_path}: 指向的 generation {gen_name} "
+                f"缺完成回执（{rcp_path}）——gen 未就绪的死亡中间态，"
+                f"指针未切换才对（存在即证据），fail closed"
+                f"（066/crash-recovery）")
+    except ValueError as e:
         raise SystemExit(
-            f"[GATE-FAIL] {pointer_path}: 指向的 generation {gen_name} 目录"
-            f"或其中预测缺失（{pred_path}）——指针存在即证据，不得静默"
-            f"回退直接读路径，fail closed（066/crash-recovery）")
-    if not os.path.isfile(rcp_path):
-        raise SystemExit(
-            f"[GATE-FAIL] {pointer_path}: 指向的 generation {gen_name} 缺"
-            f"完成回执（{rcp_path}）——gen 未就绪的死亡中间态，指针未切换"
-            f"才对（存在即证据），fail closed（066/crash-recovery）")
+            f"[GATE-FAIL] {pointer_path}: generation 路径构造/规范化抛 "
+            f"ValueError（{type(e).__name__}: {e}）——统一归一为协议错误"
+            f"而非裸 traceback，probe 单格 STATE=invalid/audit 逐格继续，"
+            f"fail closed（077）") from None
     return {
         "binding": GENERATION_BINDING_POINTER,
         "pointer_path": os.path.abspath(pointer_path),

@@ -388,8 +388,14 @@ def t5_cli_and_info():
         if name_off == name_f:
             raise AssertionError("γ=off 与 γ=1.0 文件名应不同（同名互覆 = "
                                  "TL-PREFILL-PROVENANCE-001 同型缺陷）")
-        if name_f != "tli_64_128_1024_c4_BDa0_b0_g1":
-            raise AssertionError(f"数值 γ 文件名应含生效 α/β/γ（E121 B09 口径）：{name_f!r}")
+        # 076（TL-E121-OUTPUT-ID）锚点口径：tli 名尾段追加 canonical
+        # treatment hash _h<hash10>（全部输出相关参数排序键 JSON→sha256
+        # 前 10 hex；单射性/稳定性单测见 test_e119_fixes_076_077_078.py）。
+        # hash 依赖 _TREATMENT_FIELD_DEFAULTS 参数集固定后逐位稳定；改
+        # 字段集时本锚点必须重算同步更新。
+        if name_f != "tli_64_128_1024_c4_BDa0_b0_g1_h493d859879":
+            raise AssertionError(f"数值 γ 文件名应含生效 α/β/γ（E121 B09 口径）"
+                                 f"+ 076 treatment hash：{name_f!r}")
         del ns.tli_gamma                      # 缺省属性按 1.0 兜底（不加 goff）
         if _info_mod.get_method_name_with_info(ns) != name_f:
             raise AssertionError("缺省 tli_gamma 不应渲染 goff（须与显式 1.0 同名）")

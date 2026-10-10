@@ -76,6 +76,23 @@ schema → v2 同代字节绑定（实际 SHA/行数 vs 回执声明逐位比对
       fail-closed rc=2，不得在清单不完整时返回干净摘要；coverage
       error 与 invalid 口径分开（TRAVERSAL-COVERAGE-ERROR 行 +
       AUDIT RESULT: total=N invalid=M coverage_errors=K）。
+#203（GPT 2026-10-10 2131 审计 077/078）：
+  077（TL-E119-POINTER-NUL）：合法 UTF-8 的 NUL/控制字符穿过 073
+      后的名称三查（"gen\x00name" 无路径分隔符），随后 lstat/realpath
+      抛 ValueError——非 (SystemExit, OSError, UnicodeError) 族，
+      单格裸 traceback rc=1 无四态、audit 首坏格中止。修复在共享
+      resolver（yarn_receipt.resolve_generation_pointer）：①任何
+      文件系统调用前拒绝 NUL/控制字符/平台路径分隔符；②lstat/
+      realpath 段 ValueError 单口径归一为 [GATE-FAIL] SystemExit。
+      本文件两入口（单格 :main、audit 逐格兜底）except 集同步补
+      ValueError，仅作最后防线（不替代共享校验）。
+  078（TL-E119-AUDIT-DANGLING-LINK）：074 只查 dirnames 的 symlink；
+      指向不存在目标的目录链接 entry.is_dir()（跟随链接）失败 → 被
+      os.walk 归入 filenames → audit 可返回 total=0 invalid=0
+      coverage_errors=0 rc=0「假干净」。修复：dirnames 与 filenames
+      双查——非指针形 dangling symlink 计 coverage error（保留「从
+      有效别名根单独审计」出口）；指针形（*.tli_gen）对象维持「存在
+      即证据」逐格 invalid 口径（resolve 的 071① symlink 门禁拒）。
 
 用法：
   python benchmark/RULER/gen_completion_probe.py \
@@ -245,6 +262,13 @@ def audit_directory(root):
       - 覆盖错误不计入 invalid（口径分开），但 fail-closed：任一存在
         → 每条打印 TRAVERSAL-COVERAGE-ERROR，rc=2（total=0 亦然）。
 
+    078（TL-E119-AUDIT-DANGLING-LINK，#203）：074 只查 dirnames 的
+    symlink；指向不存在目标的目录链接 entry.is_dir()（跟随链接）失败
+    → 被 os.walk 归入 filenames，检查完全看不到 → total=0 rc=0 假干净
+    摘要。修复：filenames 同查——非指针形 dangling symlink 计 coverage
+    error（保留「从有效别名根直接审计」出口）；指针形（*.tli_gen）
+    对象维持「存在即证据」逐格 invalid 口径（071① symlink 门禁）。
+
     全程零写（不修改任何数据——E109 已收口数据零改动纪律）。
     返回 (total, invalid_count, coverage_errors)；invalid 项打印
     [GATE-FAIL] 拒绝原因，coverage 项为 (路径, 异常/原因) 列表，
@@ -276,8 +300,27 @@ def audit_directory(root):
                     full, "symlink 子目录不入聚合审计，"
                           "须从别名根直接审计（074）"))
         for fn in sorted(filenames):
+            full = os.path.join(dirpath, fn)
+            # 078（TL-E119-AUDIT-DANGLING-LINK）：dangling symlink 被
+            # os.walk 分入 filenames——指向不存在目标的目录链接
+            # entry.is_dir()（跟随链接）stat 失败 → 归 filenames，074
+            # 的 dirnames 检查完全看不到 → 聚合摘要假干净。口径：
+            #   - 指针形（*.tli_gen）对象走下方 pointer 枚举——「存在
+            #     即证据」，resolve 的 071① symlink 门禁逐格计 invalid
+            #     （不因 dangling 降级为 coverage）；
+            #   - 非指针形 dangling 链接对审计不可见（可能是失效的
+            #     目录别名/子树入口，「没看到」不得表述成「零产物」）
+            #     → 计 coverage error，明示合法出口（从有效别名根
+            #     直接审计）。竞态声明：扫描瞬间目标消失的链接按
+            #     best-effort 判 dangling——宁可多报不可漏报
+            #     （fail-closed 方向）；链接扫后重建的窗口属 residual。
+            if os.path.islink(full) and not os.path.exists(full) \
+                    and not fn.endswith(GENERATION_POINTER_SUFFIX):
+                coverage_errors.append((
+                    full, "dangling symlink（目标不存在）不入聚合枚举——"
+                          "若为目录别名须从有效别名根直接审计（078）"))
             if fn.endswith(GENERATION_POINTER_SUFFIX):
-                pointers.append(os.path.join(dirpath, fn))
+                pointers.append(full)
     invalid = 0
     for ptr in sorted(pointers):
         logical = ptr[: -len(GENERATION_POINTER_SUFFIX)]
@@ -287,6 +330,9 @@ def audit_directory(root):
         # 读取 OSError 归一为 SystemExit，此处 OSError 为最后防线）。
         # 073：UnicodeError 加入最后防线（共享解析器已把指针解码失败
         # 归一为 SystemExit，此处只兜残余解码异常，不实现重试逻辑）。
+        # 077：ValueError 加入最后防线（共享 resolver 已把 NUL/控制
+        # 字符前置拒绝 + 路径构造/规范化 ValueError 归一为 [GATE-FAIL]
+        # SystemExit，此处只兜残余，不替代共享校验）。
         try:
             gen = resolve_generation_pointer(logical)
             if gen is None:
@@ -294,7 +340,7 @@ def audit_directory(root):
                     f"[GATE-FAIL] {ptr}: 指针文件存在但 resolve 返回 None"
                     f"——指针协议解析内部矛盾（070 预检）")
             validate_committed_generation(gen["pred_path"], gen["rcp_path"])
-        except (SystemExit, OSError, UnicodeError) as e:
+        except (SystemExit, OSError, UnicodeError, ValueError) as e:
             invalid += 1
             print(f"POINTER {ptr} INVALID: {e}", flush=True)
             continue
@@ -339,7 +385,7 @@ def main(argv=None):
                  "（或改用 --audit-dir 只读预检）")
     try:
         info = probe_task(args.out_dir, args.task, args.max_num)
-    except (SystemExit, OSError, UnicodeError) as e:
+    except (SystemExit, OSError, UnicodeError, ValueError) as e:
         # invalid：非零退出（shell 分支 PROBE-FAIL，不当需要重跑处理）。
         # str(SystemExit(msg)) == msg，GATE-FAIL 原因原样透传。
         # 072：OSError（validate_committed_generation 已归一为 SystemExit，
@@ -348,6 +394,9 @@ def main(argv=None):
         # 073：UnicodeError 加入最后防线（共享解析器已把指针解码失败
         # 归一为带路径 SystemExit，此处只兜残余解码异常，不重复实现
         # 解码重试——单口径归一在 yarn_receipt 完成）。
+        # 077：ValueError 加入最后防线（共享 resolver 已在名称校验
+        # 前置拒绝 NUL/控制字符并把路径构造/规范化 ValueError 归一为
+        # SystemExit，此处只兜残余——不留裸 traceback，保四态契约）。
         print(f"STATE={STATE_INVALID} REASON={e}", flush=True)
         return 2
     print(f"STATE={info['state']} N={info['n']} "

@@ -189,6 +189,13 @@ def main():
     method_name = get_method_name_with_info(args)
     out_path = os.path.join(
         out_dir, f"{args.task}-{method_name}-{args.t}.jsonl")
+    # 076（TL-E121-OUTPUT-ID）：method_name 尾段含 canonical treatment
+    # hash _h<hash10>（sparse_attn/info.py——全部输出相关参数排序键
+    # JSON→sha256）→ 逻辑路径与 {out}.tli_gen 指针均为 treatment 单射：
+    # 异配置不可能命中同一路径（「不切指针」结构性成立），同路径重跑
+    # = 同 treatment 的 066/crash-recovery 设计语义（新 gen + 单次原子
+    # 切指针）。残余 10-hex 碰撞由回执 v2 同代绑定（062 三方 SHA 一致）
+    # 与消费侧 effective_config_sha256 门禁纵深兜底，不在生成侧重复比对。
 
     # ---- 059 + 066/crash-recovery：不可变 generation + 单指针原子提交 ----
     # 修复前缺陷链：①（059 前）直接以 open(..., "w") 截断最终预测路径

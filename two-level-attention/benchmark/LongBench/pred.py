@@ -21,7 +21,9 @@ from benchmark.LongBench.lbv2_choice import extract_choice_official
 from sparse_attn.arguments import add_sparse_attn_args
 from sparse_attn.patches import register_patch
 from sparse_attn.metrics import get_metrics
-from sparse_attn.info import get_method_name_with_info
+from sparse_attn.info import get_method_name_with_info, \
+    truncate_output_name_keep_hash, get_treatment_manifest_json, \
+    gate_output_treatment_identity
 
 
 def parse_args(args=None):
@@ -473,8 +475,28 @@ if __name__ == "__main__":
         out_fn = out_fn.replace(" ", "")
         out_fn = out_fn.replace("'", "")
         if len(out_fn) > 245:
-            out_fn = out_fn[:245] + "..."
+            # 076（TL-E121-OUTPUT-ID）：截断不得从尾部吃掉 method_name 的
+            # 身份 hash 尾段（_h<hash10> 被截后不同 treatment 可再次同名
+            # 互覆）——先截可读中段再保 hash；非 tli 名（无 hash 段）回退
+            # 旧口径。截断重建后统一补一次空格/撇号清洗（dataset_prefix
+            # 走重建路径时不经过上面的 replace，与未截断路径口径一致）。
+            out_fn = truncate_output_name_keep_hash(
+                dataset_prefix, method_name, args.t)
+            out_fn = out_fn.replace(" ", "").replace("'", "")
         out_path = f"{dir}/{out_fn}.jsonl"
+
+        # 076（TL-E121-OUTPUT-ID）fail-closed 写入门：tli 输出目标已存在
+        # 时，须以 sidecar manifest 字节级证明同 treatment 才允许重写
+        # （同配置重跑幂等 = SKIP 语义；异配置/无记录 → 拒绝运行，不覆
+        # 盖）。先写 sidecar 再写数据：中断只留孤儿 sidecar，下次目标
+        # 不存在 → 门自然放行。非 tli 方法可读段已编码其全部旋钮
+        # （quest/twia/tia/none），维持旧覆盖语义（076 审计范围 = tli
+        # treatment 矩阵）。
+        if args.method == "tli":
+            manifest_json = get_treatment_manifest_json(args)
+            sidecar = gate_output_treatment_identity(out_path, manifest_json)
+            with open(sidecar, "w", encoding="utf-8") as f:
+                f.write(manifest_json)
 
         with open(out_path, "w", encoding="utf-8") as f:
             for pred in preds:
