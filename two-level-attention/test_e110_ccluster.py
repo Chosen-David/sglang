@@ -282,13 +282,15 @@ def t5_budget_semantics():
             tli_alpha=0.25, tli_beta=0.25, tli_gamma=0.5,
         )
         _, mask = run_mask(None, args, k, q)
-        # 手算预算（与 compute_mask 同式，TASK.md L172 严格口径无保底）：
-        #   mid_len=3840, near_len_dyn=960 → far_blks=49 → far_tok_hi=3136, swa_lo_tok=3968
+        # 手算预算（与 compute_mask 同式，TASK.md L172 严格口径无保底；
+        # 【B10 修复 2026-10-10】near 左界从 swa 起点推 → far_tok_hi 平移 −swa_tok）：
+        #   mid_len=7936, near_len_dyn=1984 → near_blks=(8192−128−1984)//64=95
+        #   → far_tok_hi=6080, swa_lo_tok=8064
         #   K2_mid=768；nb_near=round(128*0.25)=32；nt_near=min(32*64*0.5,768)=768
         #   far_budget=max(0,768-768)=0；near=768-0=768（γ 高值让渡满额 → far=0）
         mid_len = S - sink_tok - swa_tok
         near_len_dyn = max(bs, int(0.25 * mid_len))
-        near_blks = max(2, (S - near_len_dyn) // bs)
+        near_blks = max(2, (S - swa_tok - near_len_dyn) // bs)   # B10：swa 起点推
         far_tok_hi, swa_lo_tok = near_blks * bs, S - swa_tok
         K2_mid = K2 - sink_tok - swa_tok
         nb_near = max(1, int(round(128 * 0.25)))
@@ -356,11 +358,13 @@ def t6_near_fallback():
         m = mask[0, 0]
         assert bool(m[:, 3980].all()), "回退尾巴区最高分 token 未被召回（细筛回退路径失效）"
         assert bool(m[:, 3500].any()), "簇覆盖区高亮 token 未被任何 kv-head 召回"
-        # 预算仍守恒（mid 总数 = K2_mid，S 不整除时 p 宽 = S）
+        # 预算仍守恒（mid 总数 = K2_mid，S 不整除时 p 宽 = S；
+        # 【B10】公式重放同步 swa 起点推 + 实现侧 pad 口径 kt*bs）
         K2_mid = 1024 - sink_tok - swa_tok
-        mid_len = S - sink_tok - swa_tok
+        kt_pad = (S + bs - 1) // bs * bs          # 4160（实现 pad 口径）
+        mid_len = kt_pad - sink_tok - swa_tok
         near_len_dyn = max(bs, int(0.25 * mid_len))
-        near_blks = max(2, (S - near_len_dyn) // bs)
+        near_blks = max(2, (kt_pad - swa_tok - near_len_dyn) // bs)   # B10
         far_tok_hi = near_blks * bs
         n_mid = int(m[:, sink_tok:swa_lo_tok].sum(dim=-1)[0])
         assert n_mid == K2_mid, f"非整除 S 下 mid 总选中 {n_mid} != {K2_mid}"
@@ -374,9 +378,15 @@ def t6_near_fallback():
 
 # ================================================================ T7 回归保护（旧 vs 新逐位对拍）
 def t7_regression_vs_main_tree():
-    name = "T7 回归保护（新代码 vs 主树旧代码 mask 逐位相同，含 decode 多步）"
+    name = "T7 回归保护（vs 主树：非 e64 臂逐位相同；e64 臂 B10 结构不变量）"
+    # 【10-10 B10 合入（e121）】e64 分区臂（α>0 且 β>0）near 左界改从 swa 起点
+    # 推 → mask 与主树旧代码**有意不同**，逐位对拍只保留非 e64 臂（默认 flag /
+    # 老逻辑 α=0，B10 明确不触碰）；e64 臂改断言 B10 结构不变量（预算守恒 +
+    # 强制区 + 两侧各自预算语义自洽），防主树侧意外漂移以外的真实回归。
     try:
         S0 = 6144
+        bs, sink_tok, swa_tok, K2 = 64, 128, 128, 1024
+        K2_mid = K2 - sink_tok - swa_tok
         k_full, q = gen_kq(S0 + 8, seed=23)
         cfgs = {
             "默认flag(4bit/4bit)": dict(tli_enable_layer_skip=False),
@@ -388,6 +398,7 @@ def t7_regression_vs_main_tree():
             "tli老逻辑(α=0)": dict(tli_enable_kmeans=True, tli_enable_layer_skip=False),
         }
         for tag, extra in cfgs.items():
+            e64 = extra.get("tli_alpha", 0.0) > 0 and extra.get("tli_beta", 0.0) > 0
             args = make_args(**extra)
             idx_new = IDX_NEW.TLIIndexer(args)
             idx_new.layer_idx = 3
@@ -403,8 +414,31 @@ def t7_regression_vs_main_tree():
                 mo, _ = idx_old.prepare_mask(q, q_ids, k, cu, q.shape[-1] ** -0.5)
                 assert mn.shape == mo.shape and mn.dtype == mo.dtype, \
                     f"{tag} step{step}: mask 形状漂移 {tuple(mn.shape)} vs {tuple(mo.shape)}"
-                assert torch.equal(mn, mo), \
-                    f"{tag} step{step}: mask 与主树旧代码不一致（回归破坏！）"
+                if not e64:
+                    assert torch.equal(mn, mo), \
+                        f"{tag} step{step}: mask 与主树旧代码不一致（回归破坏！）"
+                else:
+                    # B10 结构不变量：两侧 sink/swa 强制 + mid 预算不超上限；
+                    # 旧侧 mid 允许 < K2_mid（N5 已记录的合法饥饿：旧口径 near
+                    # 池窄 swa_tok；非对齐 S 还有 ≤63 token 的 pad 边角 = F5
+                    # 已知偏差，B10 后对齐步满额、非对齐步仍可截断）。
+                    # B10 单调性：near 池左界只左移（⊇ 旧池）、本组两臂
+                    # far_budget=0 → mid_new ≥ mid_old（只增不减）。
+                    for tag2, m in (("new", mn), ("old", mo)):
+                        assert m.dtype == torch.bool
+                        assert bool(m[..., :sink_tok].all()), \
+                            f"{tag}/{tag2} step{step}: sink 强制区缺失"
+                        assert bool(m[..., S - swa_tok:].all()), \
+                            f"{tag}/{tag2} step{step}: swa 强制区缺失"
+                        per_head_mid = m[0, 0, :, sink_tok:S - swa_tok].sum(-1)
+                        assert bool((per_head_mid > 0).all()) and \
+                            bool((per_head_mid <= K2_mid).all()), \
+                            f"{tag}/{tag2} step{step}: mid 预算越界 {per_head_mid.tolist()}"
+                    mid_new = mn[0, 0, :, sink_tok:S - swa_tok].sum(-1)
+                    mid_old = mo[0, 0, :, sink_tok:S - swa_tok].sum(-1)
+                    assert bool((mid_new >= mid_old).all()), \
+                        f"{tag} step{step}: B10 应使 near 池只增不减，" \
+                        f"mid new {mid_new.tolist()} < old {mid_old.tolist()}"
             # 二次请求（clear 后重跑，验证 clear 重置等价性）
             idx_new.clear()
             idx_old.clear()
@@ -412,8 +446,10 @@ def t7_regression_vs_main_tree():
                                          torch.tensor([0, S0]), q.shape[-1] ** -0.5)
             mo, _ = idx_old.prepare_mask(q, torch.tensor([S0 - 1]), k_full[:, :S0],
                                          torch.tensor([0, S0]), q.shape[-1] ** -0.5)
-            assert torch.equal(mn, mo), f"{tag}: clear 后重跑 mask 不一致"
-        report(name, True, "4 配置 × (prefill + 8 decode 步 + clear 重跑) 逐位一致")
+            if not e64:
+                assert torch.equal(mn, mo), f"{tag}: clear 后重跑 mask 不一致"
+        report(name, True, "非 e64 2 配置逐位一致；e64 2 配置 B10 结构不变量"
+                           "（预算/强制区）9 步 × 2 侧全过")
     except AssertionError as e:
         report(name, False, str(e))
     except Exception as e:

@@ -17,6 +17,11 @@
   N4 老逻辑（无 αβ 的默认 flag）mask 新旧逐位相同
   N5 e64 分区臂预算守恒（分段：饱食 mid=K2_mid；饥饿 mid=池内截断）
 
+【10-10 B10 已合入（e121）】N1 块对齐断言已按预案并入
+test_near_swa_boundary.py 门禁（N1/N2/N6 三项）；本脚本探测到合入后
+N1 翻转为「合入实现 vs 原型副本」一致性核对，N3/N4/N5 转为
+「合入实现 vs 原型」逐位一致（历史红绿使命完成，保留作原型对照）。
+
 用法：python3 test_near_swa_redgreen.py   （two-level-attention/ 下）
 """
 import importlib
@@ -62,6 +67,18 @@ IDX_OLD = load_sparse_attn("sparse_attn_rg_old", REPO)      # 主树（红侧）
 IDX_NEW = load_sparse_attn("sparse_attn_rg_new", FIX_ROOT) if HAVE_FIX else None  # 修复副本（绿侧）
 
 
+def _repo_has_b10():
+    """【10-10 B10 合入（e121）】探测 REPO 实现是否已含 near-SWA 边界修复
+    （N1 场景 far_hi：缺陷态 2304 / 修复态 2176）。合入后本红绿对照使命
+    结束——N1 断言已按预案并入 test_near_swa_boundary.py 门禁；此处翻转为
+    「合入实现 vs 原型副本」一致性核对（e64 臂两侧同绿）。"""
+    S = 128 + 4096 + 128
+    k, q = gen_kq(S)
+    args = make_args(**CCLUSTER_CFG, tli_alpha=0.5, tli_beta=0.25, tli_gamma=0.5)
+    idx, _ = run_mask(IDX_OLD, args, k, q)
+    return int(idx._km_far_hi_cached) == 2176
+
+
 def make_args(**kw):
     a = types.SimpleNamespace(
         tia_block_size=64,
@@ -97,10 +114,36 @@ CCLUSTER_CFG = dict(
     tli_far_method="minmax", tli_near_method="avg",
 )
 
+MERGED = _repo_has_b10()
+
 
 # ================================================================ N1 红绿对拍：块对齐反例
 def n1_aligned_counterexample():
     name = "N1 红绿对拍（块对齐反例：目标 near=2048，旧实得 1920/新 2048）"
+    if MERGED:
+        # 【10-10 B10 合入后】红绿对照使命结束（断言已并入门禁 N1）。
+        # 翻转语义：合入实现（REPO）vs 原型副本（/tmp/near_fix_v2）一致性。
+        if not HAVE_FIX:
+            report_skip(name, f"B10 已合入 REPO；原型副本 {FIX_ROOT} 缺失，"
+                              f"一致性核对不可执行（门禁 N1 已直接断言）")
+            return
+        try:
+            S = 128 + 4096 + 128
+            k, q = gen_kq(S)
+            args = make_args(**CCLUSTER_CFG, tli_alpha=0.5, tli_beta=0.25, tli_gamma=0.5)
+            idx_repo, _ = run_mask(IDX_OLD, args, k, q)
+            idx_proto, _ = run_mask(IDX_NEW, args, k, q)
+            fh_repo = int(idx_repo._km_far_hi_cached)
+            fh_proto = int(idx_proto._km_far_hi_cached)
+            assert fh_repo == 2176 and fh_proto == 2176, \
+                f"B10 合入态 far_hi 应 2176，repo={fh_repo} proto={fh_proto}"
+            report(name, True, f"[已合入] 一致性核对：repo=proto=2176（near 宽 2048）"
+                               f"——红绿历史断言已并入 test_near_swa_boundary.py N1")
+        except AssertionError as e:
+            report(name, False, str(e))
+        except Exception as e:
+            report(name, False, f"异常: {type(e).__name__}: {e}")
+        return
     if not HAVE_FIX:
         report_skip(name, f"near_fix 副本 {FIX_ROOT} 不存在（非门禁红绿对照；"
                           f"合入主树后本断言应并入 test_near_swa_boundary.py）")

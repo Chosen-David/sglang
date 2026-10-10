@@ -322,17 +322,24 @@ class TLIIndexer(TIAIndexer):
         # 覆盖范围与消费端 far_tok_hi = near_blks·bs 一致。
         bs = self.args.tia_block_size
         swa_tok = self.sliding_window_size
+        # 【B10 修复 2026-10-10】与 compute_mask 同源分支化：e64 分区臂
+        # far_hi 从 swa 起点（S − swa_tok）推（near 区实际宽 = α·mid_len），
+        # 保持簇覆盖范围与消费端 far_tok_hi = near_blks·bs 一致；(0,0)/老逻辑
+        # 分支保持旧式（S − near_len_dyn）逐位不变。
         if self.alpha > 0 and self.beta > 0:
             sink_tok = self.sink_blocks * bs
             mid_len = max(0, S - sink_tok - swa_tok)
             near_len_dyn = max(bs, int(self.alpha * mid_len))
+            near_base = S - swa_tok
         elif self.far_select != "4bit" and self.alpha == 0 and self.beta == 0:
             # TASK.md L231 严格口径：cluster 组合 (0,0) 单池点 = 纯 cluster 全 mid
             # （near 区空；swa 仍正交强制不占预算）
             near_len_dyn = swa_tok
+            near_base = S
         else:
             near_len_dyn = self.near_len
-        far_hi_blk = max(self.sink_blocks + 1, (S - near_len_dyn) // bs)
+            near_base = S
+        far_hi_blk = max(self.sink_blocks + 1, (near_base - near_len_dyn) // bs)
         far_hi = far_hi_blk * bs
         # ---- E110：far/near 两侧各自独立构建 ----
         #   far=cluster（cavg 原路径，原样保留）/ far=sim_greedy（增量贪心，见下）
@@ -791,16 +798,28 @@ class TLIIndexer(TIAIndexer):
         e64_partition = self.alpha > 0 and self.beta > 0
         nb_near = 0
         swa_tok = self.sliding_window_size   # e9acd1e 回归修复：α=0 路径 swa_tok 未定义
+        # 【B10 修复 2026-10-10（kimi3 清单 §8 / 2026-10-10_0112 复审 Bug1）】
+        # near 左界基准分支化：e64 分区臂从 swa 起点（kt*bs − swa_tok）往前推
+        # near_len_dyn（=α·mid_len），使 near 区实际宽 = α·mid_len——TASK.md L137
+        # 权威定义 near_L = α·mid_L、区间 [S−swa−near_L, S−swa)。旧口径从序列
+        # 末尾（kt*bs）推 → near 实际宽 = α·mid_len − swa_tok（swa 被扣两次，
+        # 短序列低 α 偏差 15-32%；S=4416/swa=192/α=0.5 实测 near POOL 1856
+        # 应 2048）。(0,0) 单池（near_len_dyn=swa_tok）与老逻辑分支保持旧式
+        # （kt*bs − near_len_dyn）逐位不变——(0,0) 的 far_hi = S − swa_tok
+        # 恰为正确单池语义，不受本修复影响。
         if e64_partition:
             sink_tok = self.sink_blocks * bs
             mid_len = max(0, kt * bs - sink_tok - swa_tok)
             near_len_dyn = max(bs, int(self.alpha * mid_len))  # near 只算 mid 部分（不含 swa）
+            near_base = kt * bs - swa_tok   # near 右界 = swa 起点（B10）
         elif self.far_select != "4bit" and self.alpha == 0 and self.beta == 0:
             # TASK.md L231 严格口径：cluster 组合 (0,0) 单池点 = 纯 cluster 全 mid
             near_len_dyn = swa_tok
+            near_base = kt * bs
         else:
             near_len_dyn = self.near_len
-        near_blks = max(self.sink_blocks, (kt * bs - near_len_dyn) // bs)
+            near_base = kt * bs
+        near_blks = max(self.sink_blocks, (near_base - near_len_dyn) // bs)
         far_lo_blk, far_hi_blk = self.sink_blocks, near_blks  # 远端块区间（含 far_hi 前一块）
         # near 池上界 = swa 起点（swa 块完全排除出双池，纯靠 mask 强制）
         swa_lo_blk = max(near_blks, kt - max(1, swa_tok // bs))

@@ -231,12 +231,17 @@ class TLIIndexer:
         sink_tok = p.sink_blocks * bs
         swa_tok = p.sliding_window
         e64 = p.alpha > 0 and p.beta > 0
+        # 【B10 修复 2026-10-10】e64 分区臂 near 左界从 swa 起点推
+        # （near 区实际宽 = α·mid_len，TASK.md L137 口径；旧口径从序列末尾
+        # 推 → swa 被扣两次）；单池 (α=0 或 β=0) 分支保持旧式逐位不变。
         if e64:
             mid_len = max(0, S - sink_tok - swa_tok)
             near_len_dyn = max(bs, int(p.alpha * mid_len))
+            near_base = S - swa_tok
         else:
             near_len_dyn = swa_tok
-        near_blks = max(p.sink_blocks, (S - near_len_dyn) // bs)
+            near_base = S
+        near_blks = max(p.sink_blocks, (near_base - near_len_dyn) // bs)
         far_lo_blk, far_hi_blk = p.sink_blocks, near_blks
         # near 池上界 = swa 起点（块级）：swa 块完全排除出双池，纯靠输出强制
         swa_lo_blk = max(near_blks, nblk - max(1, swa_tok // bs))
@@ -1365,7 +1370,8 @@ class TLIIndexer:
         per-row 区域边界（two-level compute_mask 公式的 t_r 化）：
         - near_len_dyn_r = max(bs, α·mid_len_r)，mid_len_r 按因果长度
           S_r = t_r+1 计算（two-level 是 t=末端的单 query 版）
-        - near_blks_r = max(sink_blks, (S_r − near_len_dyn_r)//bs)
+        - near_blks_r = max(sink_blks, (S_r − swa_tok − near_len_dyn_r)//bs)
+          （B10 修复 2026-10-10：near 左界从 swa 起点推，near 区实际宽 = α·mid_len）
         - far 池（L1 块级）：[sink_blks, near_blks_r)；near 池：
           [near_blks_r, swa_lo_blk_r)（swa_lo_blk_r = 当前块 − 1，
           swa 块排除出双池）
@@ -1432,6 +1438,9 @@ class TLIIndexer:
 
             if e64:
                 # ---- per-row 区域边界（device）----
+                # 【B10 修复 2026-10-10】near 左界从 swa 起点推
+                # （near_base = S_r − swa_tok），与 _taskmd_regions /
+                # _select_decode_taskmd / two-level compute_mask 同源。
                 mid_len_r = (S_r - sink_tok - swa_tok).clamp(min=0)
                 near_len_dyn_r = torch.maximum(
                     torch.full_like(S_r, bs),
@@ -1439,7 +1448,7 @@ class TLIIndexer:
                 )
                 near_blks_r = torch.maximum(
                     torch.full_like(S_r, p.sink_blocks),
-                    (S_r - near_len_dyn_r) // bs,
+                    (S_r - swa_tok - near_len_dyn_r) // bs,
                 )
                 swa_lo_blk_r = torch.maximum(
                     near_blks_r, t_c // bs - swa_blks + 1
@@ -2222,6 +2231,9 @@ class TLIIndexer:
 
         if e64:
             # ---- per-row 区域边界（device）----
+            # 【B10 修复 2026-10-10】near 左界从 swa 起点推
+            # （near_base = S_t − swa_tok），与 _taskmd_regions /
+            # _select_batched_taskmd / two-level compute_mask 同源。
             mid_len_t = (S_t - sink_tok - swa_tok).clamp(min=0)
             near_len_dyn_t = torch.maximum(
                 torch.full_like(S_t, bs),
@@ -2229,7 +2241,7 @@ class TLIIndexer:
             )
             near_blks_t = torch.maximum(
                 torch.full_like(S_t, p.sink_blocks),
-                (S_t - near_len_dyn_t) // bs,
+                (S_t - swa_tok - near_len_dyn_t) // bs,
             )
             swa_lo_blk_t = torch.maximum(
                 near_blks_t, t_t // bs - swa_blks + 1

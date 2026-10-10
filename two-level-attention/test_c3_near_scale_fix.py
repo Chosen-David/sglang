@@ -10,11 +10,18 @@
 修复：缓存处统一乘 scale（far 侧纯簇分 topk 乘正数排序不变 → far 逐位不变）
       + clear() 重置 _last_q。
 
-红-绿对照：旧代码（git HEAD，/tmp/c3_old/）vs 新代码（工作树）。
+红-绿对照：旧代码 vs 新代码（工作树）。
+  【10-10 B10 合入（e121）重定基】红侧快照原为 /tmp/c3_old（预 C3 修复，
+  兼预 B10）。B10（near 左界从 swa 起点推，kimi3 §8）合入后 far 池边界
+  平移，与 C3 属性混淆 → 红侧快照重定基为 /tmp/c3_old_b10（预 C3 +
+  带 B10，由 /tmp/c3_old 复制后打同款 near_base 补丁），使 far 不变性
+  对拍隔离出 C3 本身。两侧 far 边界公式重放同步为 B10 口径。
+
   红：回退段正确高分 token j（缩放口径最高）在旧代码下落选；
   绿：新代码下入选；且 far 区选中集合新旧逐位相同（far 不变性）。
 
-用法：python3 test_c3_near_scale_fix.py   （two-level-attention/ 下）
+用法：python3 test_c3_near_scale_fix.py   （two-level-attention/ 下；
+      红侧需 /tmp/c3_old_b10 快照——由 c3_old 复制 + B10 补丁构建）
 """
 import importlib
 import os
@@ -28,7 +35,7 @@ import torch
 torch.set_num_threads(1)
 
 REPO = os.path.dirname(os.path.abspath(__file__))
-OLD_ROOT = "/tmp/c3_old"
+OLD_ROOT = "/tmp/c3_old_b10"
 
 RESULTS = []
 
@@ -133,9 +140,12 @@ def c3_2_red_green():
     try:
         S, k, q = build_scene()
         bs, sink_tok, swa_tok = 64, 128, 128
-        mid_len = S - sink_tok - swa_tok
+        # 【B10 口径】near 左界从 swa 起点推；实现侧按块对齐 pad
+        # （kt*bs=4160）计算 mid_len，公式重放同步
+        kt_pad = (S + bs - 1) // bs * bs                # 4160（实现侧 pad 口径）
+        mid_len = kt_pad - sink_tok - swa_tok
         near_len_dyn = max(bs, int(0.25 * mid_len))
-        near_blks = max(2, (S - near_len_dyn) // bs)
+        near_blks = max(2, (kt_pad - swa_tok - near_len_dyn) // bs)   # B10
         far_tok_hi = near_blks * bs                     # 簇覆盖段左界（far 池右界）
         near_hi = (S - swa_tok) // bs * bs              # 3968：near 簇覆盖右界（块对齐）
         swa_lo_tok = S - swa_tok                        # 3998
@@ -175,9 +185,11 @@ def c3_3_far_invariant():
     try:
         S, k, q = build_scene()
         bs, sink_tok = 64, 128
-        mid_len = S - sink_tok - 128
+        # 【B10 口径】同 C3-2：pad 后 kt*bs 起点 + near 左界从 swa 起点推
+        kt_pad = (S + bs - 1) // bs * bs
+        mid_len = kt_pad - sink_tok - 128
         near_len_dyn = max(bs, int(0.25 * mid_len))
-        far_tok_hi = max(2, (S - near_len_dyn) // bs) * bs
+        far_tok_hi = max(2, (kt_pad - 128 - near_len_dyn) // bs) * bs
         _, mask_new, _ = run_mask_idx(IDX_NEW, make_args(**C3_CFG), k, q)
         _, mask_old, _ = run_mask_idx(IDX_OLD, make_args(**C3_CFG), k, q)
         far_new = mask_new[0, 0][..., sink_tok:far_tok_hi]
