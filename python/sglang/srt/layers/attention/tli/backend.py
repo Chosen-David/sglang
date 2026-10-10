@@ -147,6 +147,20 @@ class TLISparseAttnBackend(AttentionBackend):
             assert self.proj_basis.shape[:1] == (n_layers,), (
                 f"PCA basis 层数 {self.proj_basis.shape[0]} != 模型 {n_layers}"
             )
+            # 【C1 修复（kimi3 清单 S6，2026-10-08）】PCA basis 实际秩与
+            # profile.proj_rank 校验：共享 pool 的 kq 槽宽按 refine_nd()
+            # = proj_rank 预分配，而 TLIIndexer 的命中宽 nd2 按
+            # basis.shape[-1] 取值——.pt 文件的 r 与 SGLANG_TLI_PROJ_R
+            # 不符时两者静默错位（槽宽与读宽不匹配），显式拒绝。
+            _r = int(self.proj_basis.shape[-1])
+            if _r != self.profile.proj_rank:
+                raise ValueError(
+                    f"PCA basis 实际秩 r={_r}（.pt shape[-1]）与 "
+                    f"profile.proj_rank={self.profile.proj_rank}"
+                    f"（SGLANG_TLI_PROJ_R，决定 pool 槽宽 refine_nd()）"
+                    f"不一致——pool 槽宽与 indexer nd2 将静默错位。请重新"
+                    f"校准 .pt 文件或对齐 SGLANG_TLI_PROJ_R。"
+                )
             # bug3 修复（GPT 复查 2026-10-08）：PCA basis 按全局 Hkv 离线
             # 校准（[n_layers, Hkv_global, D, r]），TP>1 时每卡只持有
             # Hkv_global/attn_tp_size 个 kv-head——原样传给 TLIIndexer

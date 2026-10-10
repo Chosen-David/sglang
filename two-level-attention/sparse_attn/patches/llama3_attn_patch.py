@@ -47,7 +47,11 @@ def llama3_attn_forward(
     if self.config._attn_implementation != "eager":
         attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
-    if past_key_values.get_seq_length(self.layer_idx) == input_shape[1]:
+    # 【B2 修复（kimi3 清单 F2，2026-10-08）】与 qwen3_attn_patch 同构的
+    # 分支判定守卫（use_cache=False / chunked prefill / batch>1 / 4D float
+    # mask 一律显式拒绝，详见 qwen3_attn_patch.py 注释）。
+    if (past_key_values is not None
+            and past_key_values.get_seq_length(self.layer_idx) == input_shape[1]):
         indexer: Indexer = self.indexer
         indexer.clear()
         attn_output, attn_weights = attention_interface(
@@ -61,6 +65,30 @@ def llama3_attn_forward(
             **kwargs,
         )
     else:
+        # 【B2 修复（kimi3 清单 F2，2026-10-08）】decode 分支入口硬守卫
+        # （与 qwen3_attn_patch 同款）。
+        if past_key_values is None:
+            raise RuntimeError(
+                "TLI 稀疏 patch 需要 KV cache（use_cache=True）；当前 "
+                "past_key_values=None（use_cache=False 形态，训练/PPL/"
+                "logprob 打分不支持稀疏索引路径），拒绝执行。"
+            )
+        if input_shape[0] != 1 or input_shape[1] != 1:
+            raise RuntimeError(
+                f"TLI 稀疏 decode 路径仅支持 batch=1 且 q_len=1 的逐 token "
+                f"解码；当前 batch={input_shape[0]}、q_len={input_shape[1]}"
+                f"（chunked prefill / batch>1 会静默只算首 token 或形状"
+                f"崩溃），拒绝执行。"
+            )
+        if attention_mask is not None and (
+            attention_mask.dim() != 2 or attention_mask.dtype != torch.bool
+        ):
+            raise RuntimeError(
+                f"TLI 稀疏 decode 路径的 attention_mask 分支仅支持 2D bool "
+                f"padding mask；当前 dim={attention_mask.dim()}、"
+                f"dtype={attention_mask.dtype}（HF 实际传 4D float causal "
+                f"mask，按 2D 假设处理不正确），拒绝执行。"
+            )
         indexer: Indexer = self.indexer
         query_states, key_states, value_states = (x.transpose(1, 2) for x in (query_states, key_states, value_states))
         if attention_mask is not None:

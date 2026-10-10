@@ -1211,8 +1211,16 @@ class TLIIndexer:
                             if i_g.shape[-1] > w:
                                 i_g = i_g[..., :w]
                             else:
+                                # 【C2 修复（kimi3 清单 S7，2026-10-08）】宽度
+                                # 补齐改哨兵 SENT（原 0 填充是 B01 前旧语义：
+                                # token 0 会被下游当有效位重复计权；B01 后
+                                # 下游 _sparse_extend_one 以 valid = sel < S
+                                # 屏蔽哨兵）。当前配置下不可达（empty 行须
+                                # t_c ≥ w，而 w ≤ token_budget ≤
+                                # min(budget,S) = i_g 宽 → 只可能走截断
+                                # 分支），纯防御性修正。
                                 i_g = torch.nn.functional.pad(
-                                    i_g, (0, w - i_g.shape[-1]))
+                                    i_g, (0, w - i_g.shape[-1]), value=SENT)
                         res_k[empty] = i_g
                 out.append(res_k)
                 continue

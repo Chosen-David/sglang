@@ -45,6 +45,17 @@ def eager_decoding_attn(
         b_s = torch.where(b_mask, b_s, float('-inf'))
     else:
         b_s = torch.where(b_mask[:, None, :], b_s, float('-inf'))
+    # 【B7 修复（kimi3 清单 F12，2026-10-08）】全 False 行防线（消费端）：
+    # 任一 head 行全 False 时 softmax 对全 -inf 行产生 NaN 输出。indexer
+    # 契约上由 sink/swa 正交强制保证不可达，此为防御性 fail-closed（契约
+    # 破损时显式报错优于 NaN 静默扩散）。代价 = 每次调用一次 host 同步
+    # （any().all() → bool）；本函数是 HF 参考路径，非 sglang 生产热路径。
+    if not bool(b_mask.any(dim=-1).all()):
+        raise RuntimeError(
+            "eager_decoding_attn: 选择 mask 存在全 False 行——softmax 将"
+            "产生 NaN。indexer 契约应保证 sink/swa 强制区使每行至少一个"
+            "有效 token；请检查 indexer 的 mask 输出。"
+        )
     b_p = F.softmax(b_s, dim=-1).to(q.dtype)
     b_o = rearrange(einsum(b_p, b_v, 'h g t, t h d -> h g d'), 'h g d -> (h g) d')
     o[0] = b_o

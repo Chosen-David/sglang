@@ -40,7 +40,12 @@ class Metrics:
         k = rearrange(k, 'b (t bs) h d -> b t bs h d', bs=block_size)
         k_max = k.amax(dim=2)
         k_min = k.amin(dim=2)
-        k_delta = (k_max + k_min).abs()
+        # 【B6 修复（kimi3 清单 F10，2026-10-08）】块内极差应为减法：
+        # 原 (k_max + k_min).abs() 是 min 与 max 绝对值之和（有符号下无
+        # 几何意义），按块跨度语义应为 k_max - k_min（极差，与 L1 minmax
+        # 上界分数所刻画的「块内散布」一致）。死代码防御修复：当前无
+        # 生产者调用本方法，无历史数据口径需要迁移。
+        k_delta = k_max - k_min
         k_delta_max  = k_delta.amax(dim=0).amax(dim=1)
         k_delta_mean = k_delta.mean(dim=0).mean(dim=1)
         self.k_delta_max.append(k_delta_max.cpu())

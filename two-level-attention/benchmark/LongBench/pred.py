@@ -343,7 +343,17 @@ def load_model_and_tokenizer(path, model_name, device, args):
     )
     model = model.eval()
 
-    register_patch(model, args)
+    # 【B3 修复（kimi3 清单 F3，2026-10-08）】patch 计数显式校验：
+    # register_patch 返回成功 patch 的模块数；method≠none 而 0 匹配
+    # （如 GLM-4 等未支持架构）时 fail-closed——防止静默跑 dense 却把
+    # 输出文件打上稀疏方法标签（register_patch 内部同款 raise 为第一道）。
+    n_patched = register_patch(model, args)
+    if args.method != "none" and n_patched == 0:
+        raise RuntimeError(
+            f"method={args.method!r} 但 register_patch 成功挂载 0 个 "
+            f"attention 模块，模型实际将以 dense 运行——拒绝产出被误标为"
+            f"稀疏方法的结果。"
+        )
 
     return model, tokenizer
 

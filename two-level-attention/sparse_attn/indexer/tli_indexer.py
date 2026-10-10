@@ -964,6 +964,23 @@ class TLIIndexer(TIAIndexer):
             # E103：共享口径组内 mean；per_q_head 保留 [1,1,H,T] 直接 topk
             p = rearrange(p, "b qt (h g) kt -> b qt h g kt", g=self.group_size).mean(dim=-2)
         p[..., -self.sliding_window_size:] = 1.0
+        # 【B4 修复（kimi3 清单 F4，2026-10-08）】σ 死参数 fail-closed：
+        # sigma_select≠none 但分区选择路径不可用（use_partition=False：
+        # enable_kmeans 与 α/β 分区均未开，或 skip_far 跳层）或与
+        # moba_gate 组合（moba 分支提前 return）时，σ 分支静默不可达 →
+        # 实验跑的不是声明的方法（静默退化为默认两级 topk）。置于 moba
+        # 分支之前以覆盖全部三种组合。生产默认 sigma_select="none" 不触发，
+        # E87 σ 臂（use_partition=True 且非 moba）行为不变。
+        if self.sigma_select != "none" and (not use_partition or self.moba_gate):
+            raise ValueError(
+                f"tli_sigma_select={self.sigma_select!r} 需要分区选择路径"
+                f"（enable_kmeans 开启或 α>0 且 β>0）且不与 moba 组合；"
+                f"当前 use_partition={use_partition}（enable_kmeans="
+                f"{self.enable_kmeans}, alpha={self.alpha}, beta={self.beta},"
+                f" skip_far={self.skip_far}）、moba_gate={self.moba_gate}"
+                f" —— σ 会静默退化为默认两级 topk，拒绝执行。请开启分区"
+                f"或改 tli_sigma_select=none。"
+            )
         # ---- E89：MoBA 复现臂（统一 harness 公平口径）----
         # training-free chunk gate：全维 chunk-mean 分数 top-(K2/BS) 块全展开。
         # 无两级、无量化、无分区；sink/swa 保送与 PSI 同口径（预算 K2=1024
@@ -1129,6 +1146,22 @@ class TLIIndexer(TIAIndexer):
             torch.zeros_like(p, dtype=torch.bool)
             .scatter_(-1, indices, torch.ones_like(values, dtype=torch.bool))
         )
+        # 【B1 修复（kimi3 清单 F1，2026-10-08）】skip 层（skip_far=True）经
+        # use_partition=False 落本 legacy 全序列 topk：e64/ccluster 分区臂的
+        # L1 双池按设计排除 sink 块（sink 不进粗筛管线、不占 K1 配额），
+        # sink token 的细筛分被 L1 门控成 -inf → p=0 → 本 topk 永不选中
+        # sink（attention sink 永久丢失；S=4352/mavg 冠军配置实测 sink
+        # 选中 0/128 token，对照非 skip 层 128/128）。swa 已由上方
+        # p[..., -swa:]=1.0 兜住。此处对 skip 层补 sink 头部正交强制
+        # （与分区路径 topk_mask[..., :sink_tok]=True 同款，不占 K2 预算）。
+        # 仅 skip_far 触发——普通 (0,0) 单池尾部路径 sink 走 L1 池竞争
+        # （历史走廊语义），保持逐位不变。已知残余口径差（记录不修）：
+        # skip 层 swa 仍以 p=1.0 占 K2 预算，与分区路径「强制区不占
+        # 预算」不同——D' 跳层属 E111 实验域（默认关），完全对齐须走
+        # 「分区路径仅 far 池置空」方案（行为改动更大，留 E111 设计时定）。
+        if self.skip_far:
+            sink_tok = min(self.sink_blocks * bs, topk_mask.shape[-1])
+            topk_mask[..., :sink_tok] = True
         return topk_mask
 
     def clear(self):
@@ -1157,6 +1190,12 @@ class TLIIndexer(TIAIndexer):
         # 「prefill 期调用 compute_mask 且簇已构建」的路径（TLI_DEBUG 重放类）
         # 会用上一请求 decode 的 stale q 打 near 簇分
         self._last_q = None
+        # 【B5 修复（kimi3 清单 F7，2026-10-08）】_basis 跨请求重置：
+        # 惰性提取于 prepare_index（投影基层切片 [Hkv, 32, r]），clear()
+        # 不重置则 proj_basis × static_pair 同开时上一请求提取的切片跨
+        # 请求残留。_basis_all（离线校准常量）不重置——_basis 由其在下次
+        # prepare_index 重新派生，语义自愈（两开关当前均默认关，纯防御）。
+        self._basis = None
 
     def get_block_size(self):
         return 1

@@ -98,8 +98,10 @@ class TLIProfile:
         # ---- M10：prefill select_batched 慢路径 kernel 化（M8 decode 侧全套
         # 移植：tli_compact 候选压实 + 双池直写 + 静态宽度配额 topk）。30K e2e
         # 归因：慢路径（S>nblk 阈值后快路径失效）占 prefill ~100%，1042ms/
-        # 调用@末chunk。输出哨兵转 0（下游 _sparse_extend_one 无 valid 掩码
-        # 约定，原版 -inf 垃圾位行为近似；对拍口径=有效集一致）----
+        # 调用@末chunk。【C3 修复（kimi3 清单 S8，2026-10-08）】输出哨兵=S
+        # （B01 后语义：下游 _sparse_extend_one 以 valid = sel < S 逐槽
+        # -inf 屏蔽；原注释「哨兵转 0」是 B01 前过期口径——转 0 会使
+        # token 0 被重复计权。对拍口径=有效集一致）----
         self.use_prefill_kernel: bool = _env_bool("SGLANG_TLI_PREFILL_KERNEL", True)
         # M11-decode：_sparse_attn_batched 走 fused kernel（哨兵=per-lane
         # valid 掩码，与 eager 语义一致）。2026-09-27 默认开：graph replay
