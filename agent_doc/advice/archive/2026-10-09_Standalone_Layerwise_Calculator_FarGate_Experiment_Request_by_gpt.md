@@ -230,3 +230,51 @@ E中的 gate off 表示“不使用跳far gate、始终far-on”，避免与g=0�
 - **附报（绝对误差/尾部/每任务）**：G* 的文档尾部误差系统性大于中段（如 L4 尾 0.048 vs 中段 0.013，约 3.6×）；绝对 ‖Δo‖² 随层深增长（L1 0.35 → L35 384，与 a_l 同步）；每任务 E 已逐层落 JSON。**结构信号（非 e2e 结论）**：海选冠军臂 mavg(.25,.125,.625) 在该投影目标下 7/8 代表层劣于 G*——按「代理≠e2e 精度」纪律仅记录，不据此改冠军口径。
 - **红绿自测 9/9 全过**：投影恒等式（手排 concat 逐位+元素级手算容差）、GQA 排列翻转目标必变、a_l 冻结（确定性逐位+敏感性）、非有限 guard、恒等式随机/回放、TLI_DEBUG 闭式对拍、avg 分支生效、W_O 布局校验。干跑曾抓到 Δy 漏乘 (1−mS) 因子的真 bug（恒等式回放偏差 0.65）并修复。
 - **落袋**：two-level-attention/exp/trace/results/e117a_wo_projection.json（+dryrun）；新脚本 exp/trace/analyze_e117a_wo_projection.py（原 analyze_p0p_perlayer_potential.py 零改动，import 复用）；纯 CPU 9103s，零 GPU 占用。任务链 #168 completed。
+
+---
+
+## 2026-10-10 更正：运行时逐序列逐层预算才是计算器目标
+
+本补记澄清本文件 §1/§4/§7/§8 的目标范围；此前“先交冻结层表、失败则维持统一配置”的建议仅适用于静态对照，不能代替或关闭运行时自适应目标。旧方案、回应与负结果保留作历史证据。本次仅提出已有任务内的目标和验收修正，未执行新模型/GPU实验，不另设实验编号，也不改变现有资源授权。
+
+源码与任务核查固定为 `9a617e09aa6ea55a6c2dbd4de4e813d46cde68e2`（`two-level-indexer`）。[S-T011](https://github.com/Chosen-David/sglang/blob/9a617e09aa6ea55a6c2dbd4de4e813d46cde68e2/agent_doc/task/task_details/S-T011.md) 已保存八层固定覆写的 E117 负结果；[S-T018](https://github.com/Chosen-David/sglang/blob/9a617e09aa6ea55a6c2dbd4de4e813d46cde68e2/agent_doc/task/task_details/S-T018.md) 已登记 E122 γ-off 与 E123 cavg 小试。本补记复用这些任务边界，只补未覆盖的动态计算器和受控 L2 对照。
+
+### A. 目标、因果输入与运行位置
+
+目标是一个轻量运行时函数：对当前序列 r 的每个目标注意力层 l，根据该序列在决策时刻已可用的特征，输出 `c[r,l,u]=(alpha,beta,gamma)`，再由同一合法预算编译器形成实际边界、页预算和 token 预算。每层都要显式返回结果或带原因的合法回退；不得只修改八层后把其余层静默固定，便称“每层自适应”。首版可让同层 KV 组共享三参数，但实际 mask、容量和诊断仍逐组校验。
+
+- 函数参数、候选域和阈值可以在开发集离线确定；运行时输出必须依赖当前序列的合法可见状态。全局常量、仅由 layer ID 查表的冻结层表、benchmark/task 标签选配置，都只是对照，不能冒充该目标。不同序列可以合理得到相同配置，不要求强造变化。
+- 最小实现可用少量统计量、简单规则或小型预测器，在预先验证的有限候选中选取；不是每条请求重新跑大网格，也不预设固定 mavg 必须胜出。已有 mavg(.25,.125,.625)、相同开发预算选出的统一配置、冻结层表和动态函数各自命名；重合配置合并复用。
+- 特征可来自当前层已得到的 q、真实可见长度、位置和已维护的 K 摘要。若使用 L1 分数/间隔，决策必须位于该次 L1 之后，成本算入；它不能同时声称免去获得这些特征所需的 L1。仅离线 oracle 可使用完整 far 精筛或 dense 输出，运行时不能免费借用。
+- 对 decode，整个已完成 prompt 与历史生成 token 都可用；对 prefill 的位置 t，只能用因果可见前缀，不能用 prompt 后部统计选择前面位置的配置。答案、未来生成、未来真实输出长度和测试标签不得成为特征或在线回退依据。
+- 更新可按请求/阶段或按 chunk amortize；不强制每 token 求解。若一段内复用配置，必须在该段开始前用合法前缀决定，并写明生效区间；不能看完整 chunk 后反向作用于该 chunk。改变 alpha 后相关边界、索引/簇状态的更新或重建必须同步并计费。
+- 状态按 request/sequence ID 与 layer ID 隔离，不能以共享 module 的可变标量承载同一 batch 中不同序列的配置。覆盖变长/重排/插入/结束、请求复用、取消和清理；相同序列单独运行与置于其他序列的 batch 中，决策应在声明的确定性容差内一致。prefix cache 若复用状态，须同时验证内容、位置、模型/表示与策略版本。
+
+### B. 先作最小判别，再决定动态方案是否值得部署
+
+沿用现有 trace/编译器和 W_O 层输出误差目标，优先补缺字段而非重复采样。保持相同 method/表示、保护集合、启用层、阶段、可行整数域和开发预算；校准、调参和最终确认按文档/序列分离，不能把同文档的 query 拆成独立样本。曾反复用于设计的确认数据应改列开发集。
+
+1. 先用短序列 oracle 验证因果 mask、唯一有效 page/token 数、padding/空池/保护区、预算编译、配置切换和 batch 隔离；保存实际 IDs、每次决策时刻/特征来源/生效区间与回退原因。不要只保存三个浮点数。
+2. 同一冻结确认集比较统一配置、静态层表、逐序列逐层函数；以真正 mavg 作控制时，须沿用原“同方法固定参考”补充的公平性门，不能用 avg/avg 的参数值冒充 mavg 身份。先检查代理误差与决策成本，再按已有资源链做联合真实生成。
+3. 质量必须落到配对样本、完整任务/长度和负例；多步/多层/多 query 是同一序列的相关观测，不伪增样本量。若对输入实例泛化作推断，按任务内文档/序列配对重采样并保持预定任务权重。任务均值的 bootstrap 则明确只在任务层重采样。
+4. 完整计时包含特征提取、决策、整数编译、索引/簇更新、L1、L2、gather/attention 与回退，分别报 TTFT、TPOT、总请求与峰值状态/内存。chunk 更新开销要摊入实际运行；质量和延迟两条验收不能用 mass 改善或相同名义 token 预算替代。
+5. 保存代码/模型/tokenizer/表示版本、冻结策略参数、运行命令、实际样本身份与预测 hashes、每样本分数、所消费 scorer 后端/依赖及计时原始记录。未达到某个候选的预定门，只关闭该候选与该条件下的主张；保留动态目标的未完成/阻塞状态，不把静态表 NO-GO 外推为所有动态策略无效。
+
+### C. γ-off 只改 L2 配额：补入 S-T018 的受控对照
+
+S-T018 已将 off 定义为取消 L2 near/far 配额，让合法 mid 候选在同一 `K2_mid` 预算内自由竞争；沿用该实施任务，不另造一份 γ-off 工作。现存 E123 的不同 cavg 三元组与 mavg 比较同时改变 method、alpha、beta 与 gamma，能回答配置比较，不能单独归因 L2 配额。
+
+在同一已计划 method/alpha/beta 条件上补一组最小 quota-vs-free 对照：固定输入、L1 各池预算与选中 page/候选 token IDs、保护集合、有效总预算、表示、分数计算/聚合/归一化和 tie 规则，只切换 L2 独立配额与合池 top-k。现有臂若条件完全匹配则直接复用，不重复生成。先离线同输入对拍，再在已授权小试中纳入真正缺失的臂；若预算不足则明确这项归因未测。
+
+- 数值 `gamma=0` 不等于 off：当前分区代码仍计算 near/far 配额，near 标称份额为零，far 不足还可能留下 near 余量；它没有全 mid 自由竞争。`alpha=beta=0` 则改变 L1 分区/候选域，也不等于只关 L2 配额。[当前实现](https://github.com/Chosen-David/sglang/blob/9a617e09aa6ea55a6c2dbd4de4e813d46cde68e2/two-level-attention/sparse_attn/indexer/tli_indexer.py#L791) 仍有 L1 top-k，不能把它叫无 L1 单级。
+- “cavg 两侧都叫 avg”不能作为混池分数可比的证明。当前 cluster-far/4bit-near 路径的 [`_far_token_score`](https://github.com/Chosen-David/sglang/blob/9a617e09aa6ea55a6c2dbd4de4e813d46cde68e2/two-level-attention/sparse_attn/indexer/tli_indexer.py#L699) 使用 GQA 求和的簇点积分，而[默认 near L2](https://github.com/Chosen-David/sglang/blob/9a617e09aa6ea55a6c2dbd4de4e813d46cde68e2/two-level-attention/sparse_attn/indexer/tli_indexer.py#L934) 来自 softmax 后 GQA 均值。实际 cavg flags/分支须记录；直接 concat 这两类数值没有已证明的统一排序尺度。
+- 先为两个对照臂定义并共同使用相同的 L2 分数和 GQA/归一化规则。若为自由竞争更换分数标度或 scorer，配额臂也用同一规则；原 scorer 另作历史对照，不能把 scorer 变化的收益记在 γ-off 上。sink/SWA 保送、有效 mask 与不足候选规则保持相同，top-k 不得从无效项补足。
+- 在同输入局部控制中要求 L1 IDs 逐位相同，L2 差异只源于配额策略。真实自由生成两臂会因早期输出不同而出现不同后续 q/K/V，不能要求后续全程 L1 IDs 仍相同；应冻结选择规则并保存轨迹，将局部机制对拍与整模型效果分开解释。γ-off 也不是 D′ far-off：前者保留两侧竞争，后者阻止 far 入选。
+
+### D. E117 新结果的可用范围与当前缺件
+
+已保存的 [verdict](https://github.com/Chosen-David/sglang/blob/9a617e09aa6ea55a6c2dbd4de4e813d46cde68e2/two-level-attention/exp/trace/results/e117_trial_verdict.json) 为八层静态覆写对固定 uniform：13 任务均值 50.2731 对 50.4308，差 −0.1577，报告 95% CI [−0.4400,+0.1254]，5 胜/7 负/1 平。其 method 字段明确是对 13 个 task deltas 做 B=10000、seed=42 的 bootstrap；这不是已核验的 6400 条预测样本/文档级配对 CI，也不检验运行时逐序列逐层函数。
+
+当前 frozen 主线取得的是汇总 verdict 和任务记录；声明的每臂 3200 行 prediction、配对样本身份、完成后的实际运行 receipt、scorer 输出 `_meta.scorer_backend` 及消费绑定未随之取得。归档 harness `757199e16afe2254081ce889c728135cc5e7e0d2` 的源码可读，但它在 register_patch 后、生成前写配置 receipt；源码存在不是该批预测已完成及与分数绑定的证明。可保留该静态负结果为“上游汇总报告”，不能把默认 scorer 后端推断为这次实际后端。
+
+请在既有任务中分别记录：静态 E117 小试的有限结论；动态计算器的未完成目标、接口与最小验收；S-T018 已有 γ-off 工作与尚缺的受控配额对照。缺件时标明具体缺件，不以“已归档/已接受/已派单”替代实现与独立验收。
