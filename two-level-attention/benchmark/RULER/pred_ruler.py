@@ -34,10 +34,18 @@
 # ---- 059（GPT 2026-10-10 0428 审计 TL-E119-YARN-RECEIPT-BINDING）----
 # v1 回执在生成循环之前落最终旁挂路径、且不含预测内容 SHA/行数/run ID/
 # 完成标记——「A 进程的预测配 B 进程的回执」可达（同名重跑/中断重跑/
-# 并发/事后改写）。现升级 producer-yarn-config-v2：预测先写不可变临时
-# generation，循环结束关闭后算 SHA256+行数，构建 status=complete 完成
-# 回执，经单次原子提交点落最终路径（回执最后落盘=提交信号）；全生命
-# 周期持规范化输出路径 flock（见 main() 内设计注释）。
+# 并发/事后改写）。升级 producer-yarn-config-v2：预测写不可变 generation，
+# 循环结束关闭后算 SHA256+行数，构建 status=complete 完成回执，经
+# 原子提交点落位；全生命周期持规范化输出路径 flock。
+# ---- 066/crash-recovery（GPT 2026-10-10 1130 审计，#198）----
+# 059 的两步 os.replace（预测先替换最终路径 → 回执后替换旁挂）在
+# 「B 预测与 A 字节完全相同」的死亡中间态下不可检（三方 SHA 全等，
+# formal 接受 A config 标 verified_same_generation=true）。升级为
+# 不可变 generation + 单指针原子切换：预测与完成回执同置
+# {out}.gen-{attempt_id}/ 目录，提交 = 单次 os.replace 切指针
+# {out}.tli_gen（内容 = gen 目录名；指针切换 = 唯一提交信号，E116f
+# 同语义）。崩溃三阶段：指针未切 → 旧完整代可见；指针已切 → 新完整
+# 代可见；混合代不可达（预测与回执同目录，消费侧从指针同时读两文件）。
 import argparse
 import hashlib
 import json
@@ -63,7 +71,7 @@ from transformers import (  # noqa: E402
 
 from benchmark.RULER.yarn_receipt import (  # noqa: E402
     _file_sha256, acquire_output_lock, build_yarn_receipt,
-    commit_yarn_generation, producer_receipt_path_for, release_output_lock,
+    commit_yarn_generation, generation_pointer_path, release_output_lock,
     resolve_yarn_config, stage_yarn_generation, stage_yarn_receipt,
 )
 from sparse_attn.arguments import add_sparse_attn_args  # noqa: E402
@@ -180,30 +188,34 @@ def main():
     out_path = os.path.join(
         out_dir, f"{args.task}-{method_name}-{args.t}.jsonl")
 
-    # ---- 059：不可变 generation + 完成回执单次原子提交 ----
-    # 修复前两处缺陷：①直接以 open(..., "w") 截断最终预测路径——生成
-    # 中途崩溃毁掉上一代完整 best-file；②回执在生成循环之前落最终旁
-    # 挂路径且无完成标记/预测绑定——「A 进程的预测配 B 进程的回执」
-    # 可达（GPT 审计 059 最小复现：改预测+改回执 → formal 仍 exit 0
-    # 标 producer_receipt）。
-    # 设计（E116f generation/commit 同款语义 + 056 flock 口径）：
+    # ---- 059 + 066/crash-recovery：不可变 generation + 单指针原子提交 ----
+    # 修复前缺陷链：①（059 前）直接以 open(..., "w") 截断最终预测路径
+    #   ——生成中途崩溃毁掉上一代完整 best-file；②（059 前）回执在生成
+    #   循环之前落最终旁挂路径且无完成标记/预测绑定；③（066/crash-
+    #   recovery）059 的两步 os.replace 在「B 预测与 A 字节完全相同」
+    #   的死亡中间态下不可检——第一步后、第二步前死亡 → 盘上为「B
+    #   物理写入的预测 + A 旧回执」，三方 SHA 全等，formal 接受 A
+    #   config 标 verified_same_generation=true（混合代不可检）。
+    # 设计（E116f generation/单指针提交同款语义 + 056 flock 口径）：
     #   ① 全生命周期持规范化输出路径锁（realpath(父目录)+basename 键，
-    #      042 加固防锁键漂移；attempt_lock_path/commit 语义见
-    #      yarn_receipt.py）——覆盖「临时 generation 写入 → SHA/行数
-    #      计算 → 完成回执 → 单次提交」全程，后到者阻塞等待，崩溃由
-    #      内核自动释放；
-    #   ② 预测写不可变临时 {out}.gen-{attempt_id}（不以 .jsonl 结尾 →
-    #      不进 {task}-*.jsonl glob——中断残留不污染 best-file 仲裁 /
-    #      SKIP 幂等的行数口径，最终路径保持上一代完整产物）；
+    #      042 加固防锁键漂移）——覆盖「gen 目录写入 → SHA/行数计算 →
+    #      完成回执 → 指针切换」全程，后到者阻塞等待，崩溃由内核
+    #      自动释放；
+    #   ② 预测与完成回执同置不可变 generation 目录
+    #      {out}.gen-{attempt_id}/（目录名不以 .jsonl 结尾 → 不进
+    #      {task}-*.jsonl glob——中断残留不污染 best-file 仲裁 / SKIP
+    #      幂等的行数口径）；
     #   ③ 循环结束 fout.close() 后计算预测 SHA256 + 最终行数，构建
     #      status=complete 完成回执（producer-yarn-config-v2，含
-    #      prediction_basename/SHA/行数/run_id）写临时旁挂（同样不落
-    #      最终路径）；
-    #   ④ 单次提交点：先 os.replace 临时预测 → 最终路径，再
-    #      os.replace 完成回执 → 最终旁挂（回执最后落盘 = 提交信号）。
-    # 崩溃语义：提交前死亡 → 最终路径=上一代完整产物（旧预测配旧回执，
-    # 同代自洽）；两步之间死亡 → 新预测配旧回执（SHA 必失配）→ formal
-    # 同代绑定校验 fail-closed 拒收（坏态可检，不静默）。
+    #      prediction_basename/SHA/行数/run_id）写进同一 gen 目录；
+    #   ④ 单次提交点：commit_yarn_generation 单次 os.replace 原子切
+    #      指针 {out}.tli_gen（内容 = gen 目录名；指针切换 = 唯一
+    #      提交信号）。
+    # 崩溃语义（066/crash-recovery 验收口径）：gen 未就绪/指针未切 →
+    #   旧完整代可见（指针仍指旧 gen）；指针已切 → 新完整代可见；
+    #   混合代不可达（预测与回执同目录，消费侧从指针同时读两文件）。
+    #   注：059 时代 docstring 的「两步之间死亡 → SHA 必失配」前提在
+    #   同字节场景不成立（066），已废止。
     attempt_id = (datetime.now().strftime("%Y%m%d%H%M%S") +
                   f"-{os.getpid()}-{random.randint(1000, 9999)}")
     lock_fd = acquire_output_lock(out_path)
@@ -257,12 +269,12 @@ def main():
             fout.flush()
         fout.close()
 
-        # ---- 059：完成回执（v2 同代绑定）→ 临时旁挂 → 单次原子提交 ----
+        # ---- 059+066：完成回执（v2 同代绑定）→ 同 gen 目录 → 切指针 ----
         # 057 的配置指纹字段全部保留（effective factor/完整 rope_scaling/
         # 模型路径与 config hash/生成参数/生产脚本身份）；v2 新增同代绑定
         # 四件：status=complete + prediction_basename/SHA256/行数 + run_id
-        # ——formal 消费侧据此做「回执 ↔ best-file 字节」逐位比对，预测
-        # 被事后改写 / 回执与预测不同代 → fail-closed。
+        # ——formal 消费侧据指针解析 generation 后同时读预测与回执，
+        # 三方一致校验（062 纵深）+ 指针同源保证（066/crash-recovery）。
         pred_sha = _file_sha256(tmp_pred)
         pred_lines = sum(1 for _ in open(tmp_pred, "rb"))
         model_cfg_path = os.path.join(args.model_path, "config.json")
@@ -291,12 +303,16 @@ def main():
             prediction_lines=pred_lines)
         tmp_rcp = stage_yarn_receipt(out_path, yarn_receipt, attempt_id)
         commit_yarn_generation(tmp_pred, tmp_rcp, out_path)
-        print(f"[yarn-receipt] effective config + 同代绑定 -> "
-              f"{producer_receipt_path_for(out_path)}")
-        print(f"saved -> {out_path}")
+        print(f"[yarn-receipt] effective config + 同代绑定 -> {tmp_rcp}"
+              f"（generation 目录内）")
+        print(f"[pred] 提交：指针 {generation_pointer_path(out_path)} -> "
+              f"{os.path.basename(os.path.dirname(tmp_pred))}")
+        # 「saved -> {out_path}」行保留（调度端 provenance 对账依赖该
+        # 口径）；实体 = 指针所指 generation 内的预测文件
+        print(f"saved -> {out_path} (via generation pointer)")
     finally:
-        # 崩溃/异常路径：临时 generation / 临时回执残留（不污染
-        # {task}-*.jsonl glob），最终路径保持上一代完整产物；锁由本处
+        # 崩溃/异常路径：未指向的 gen 目录残留（目录名不以 .jsonl 结尾，
+        # 不污染 {task}-*.jsonl glob），指针保持上一完整代；锁由本处
         # 显式释放或进程退出时内核自动释放（flock 不持久，无死锁）。
         release_output_lock(lock_fd)
 

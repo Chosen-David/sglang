@@ -250,7 +250,7 @@ def test_U3_producer_wiring():
     except Exception as e:   # torch/transformers/sparse_attn 缺失
         print(f"U3 SKIP  pred_ruler 不可导入（{type(e).__name__}: {e}）"
               f"——生成侧接线断言需 torch 环境，formal 侧用例不受影响")
-        return
+        return "SKIP"
     from benchmark.RULER.yarn_receipt import (
         acquire_output_lock, commit_yarn_generation, release_output_lock,
         stage_yarn_receipt,
@@ -441,24 +441,60 @@ def test_F7_auto_tier_end_to_end(base):
 
 
 def main():
-    global PASS
+    """067（TL-E119-B4-SKIP-AS-PASS，#198）：PASS/SKIP/FAIL 三分显式
+    计数——U3 缺 torch 环境返回 SKIP 不再被计入 PASS；SKIP>0 或 FAIL>0
+    不得打印 ALL PASS 且以非零退出（与 test_e119_yarn_binding_059_060_061
+    .py 同款口径）。"""
     base = tempfile.mkdtemp(prefix="e119_yarn_057_")
+    plan = [
+        ("U1", test_U1_auto_tier_resolution),
+        ("U2", lambda: test_U2_receipt_roundtrip(base)),
+        ("U3", test_U3_producer_wiring),
+        ("F1", lambda: test_F1_producer_evidence_positive(base)),
+        ("F2", lambda: test_F2_factor_conflict_fail_closed(base)),
+        ("F3", lambda: test_F3_yarn_flag_conflict(base)),
+        ("F4", lambda: test_F4_legacy_operator_declared(base)),
+        ("F5", lambda: test_F5_partial_coverage_fail_closed(base)),
+        ("F6", lambda: test_F6_corrupt_receipt_fail_closed(base)),
+        ("F7", lambda: test_F7_auto_tier_end_to_end(base)),
+    ]
+    only = os.environ.get("E119_ONLY", "")
+    if only:
+        keep = {x.strip() for x in only.split(",") if x.strip()}
+        plan = [p for p in plan if p[0] in keep]
+    n_pass = n_skip = n_fail = 0
+    failed = []
     try:
-        test_U1_auto_tier_resolution()
-        test_U2_receipt_roundtrip(base)
-        test_U3_producer_wiring()
-        test_F1_producer_evidence_positive(base)
-        test_F2_factor_conflict_fail_closed(base)
-        test_F3_yarn_flag_conflict(base)
-        test_F4_legacy_operator_declared(base)
-        test_F5_partial_coverage_fail_closed(base)
-        test_F6_corrupt_receipt_fail_closed(base)
-        test_F7_auto_tier_end_to_end(base)
-        PASS = 10
+        for name, fn in plan:
+            try:
+                status = fn()
+            except SystemExit as e:
+                n_fail += 1
+                failed.append(name)
+                print(f"[{name}] FAIL  {e}", flush=True)
+                continue
+            except BaseException as e:
+                n_fail += 1
+                failed.append(name)
+                import traceback
+                print(f"[{name}] FAIL  {type(e).__name__}: {e}\n"
+                      f"{traceback.format_exc()[-1500:]}", flush=True)
+                continue
+            if status == "SKIP":
+                n_skip += 1
+            else:
+                n_pass += 1
     finally:
         shutil.rmtree(base, ignore_errors=True)
-    print(f"\nE119-YARN-IDENTITY-057 ALL PASS ({PASS}/10)")
+    print(f"\nE119-YARN-IDENTITY-057 RESULT: "
+          f"PASS={n_pass} SKIP={n_skip} FAIL={n_fail} (total {len(plan)})")
+    if n_skip == 0 and n_fail == 0:
+        print(f"E119-YARN-IDENTITY-057 ALL PASS ({n_pass}/{len(plan)})")
+        return 0
+    if failed:
+        print(f"FAILED: {failed}")
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

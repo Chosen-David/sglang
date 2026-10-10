@@ -14,20 +14,29 @@ stub 范围（生产路径全部真实执行）：
     为轻桩（与生成协议无关的旁路）。
 
 生产路径（全部真实）：resolve_yarn_config → acquire_output_lock（056 口径
-flock）→ stage_yarn_generation（不可变临时 {out}.gen-{attempt_id}）→ 生成
-循环逐行写 → fout.close → SHA256/行数计算 → build_yarn_receipt（v2
-status=complete 同代绑定）→ stage_yarn_receipt → commit_yarn_generation
-（单次原子提交：预测先 replace、回执后 replace）→ release_output_lock。
+flock）→ stage_yarn_generation（不可变 generation 目录 {out}.gen-{attempt_id}/
+内的预测文件）→ 生成循环逐行写 → fout.close → SHA256/行数计算 →
+build_yarn_receipt（v2 status=complete 同代绑定）→ stage_yarn_receipt
+（同一 gen 目录内）→ commit_yarn_generation（#198 066/crash-recovery：
+单次原子提交 = 切指针 {out}.tli_gen）→ release_output_lock。
 
 模式：
-  success        stub 生成 --rows 行预测 → 完整成功提交（v2 回执）；
+  success        stub 生成 --rows 行预测 → 完整成功提交（v2 回执 + 指针）；
   crash-mid      生成循环写到第 --crash-after 行后 os._exit(9) 硬杀
-                 （模拟生成中途进程死亡——最终路径必须保持上一代完整
-                 产物，partial 只留在临时 generation，不污染
+                 （相位 pre-commit：gen 未就绪、指针未切 → 指针仍指
+                 上一完整代，partial 只留在未被引用的 gen 目录，不污染
                  {task}-*.jsonl glob）；
-  crash-between  提交点两步之间死亡：预测已 os.replace 到最终路径、
-                 完成回执尚未 replace 时 os._exit(9)（留下「新预测配旧
-                 回执」的失配代际，供消费侧同代绑定 fail-closed 验收）；
+  crash-between  gen 就绪后、指针切换前 os._exit(9)（相位 between-steps，
+                 #198 指针语义：指针仍指旧代 → 旧完整代可见；本代 gen
+                 残留完整但未被引用、不可消费——059 修复前「两步之间
+                 死亡留下新预测配旧回执」的混合代际在指针协议下不可达）；
+  crash-post-commit  commit_yarn_generation 真实执行（指针已切 → 新完整
+                 代可见）后、锁释放前 os._exit(9)（相位 post-commit）；
+  legacy-twostep 红探针专用：复刻 #198 修复前的两步提交（预测
+                 os.replace → 最终路径、回执 → 最终旁挂，不写指针），
+                 供 B5 证明「绕过指针切换 → 066 缺陷态复现」；
+  legacy-twostep-crash-between  红探针专用：两步之间（预测已到最终路径、
+                 回执未落旁挂）os._exit(9)——066 审计原始死亡中间态；
   lock-hold      只 acquire 生产锁后 sleep(--hold) 再释放（不跑 main()），
                  供父进程做非阻塞互斥探测（LOCK_NB 必须失败）。
 
@@ -174,7 +183,11 @@ def main():
     ap.add_argument("--t", default="09090909")
     ap.add_argument("--mode", required=True,
                     choices=["success", "crash-mid", "crash-between",
-                             "lock-hold"])
+                             "crash-post-commit", "legacy-twostep",
+                             "legacy-twostep-crash-between", "lock-hold"])
+    ap.add_argument("--max-num", type=int, default=0,
+                    help="转发 pred_ruler --max-num（回执 generation_params."
+                         "max_num；B5 用不同值区分同字节异配置代际）")
     ap.add_argument("--rows", type=int, default=3,
                     help="stub 源数据行数（现场合成最小 RULER jsonl）")
     ap.add_argument("--crash-after", type=int, default=1,
@@ -235,14 +248,49 @@ def main():
                 return next(self._it)
         pred_ruler.tqdm = _CrashTqdm
 
-    # crash-between：提交点两步之间死亡（预测已 replace、回执未 replace）
+    # crash-between（#198 指针语义重定义）：gen 目录内预测+回执已就绪、
+    # 指针未切换 → 硬杀。指针仍指旧完整代（旧代可见），本代 gen 残留
+    # 完整但未被引用（不可消费）——059 两步提交的「新预测配旧回执」
+    # 混合代际在指针协议下不可达。
     if args.mode == "crash-between":
         def _hooked_commit(tmp_pred, tmp_receipt, out_path):
-            os.replace(tmp_pred, out_path)   # 第一步已执行（生产同款）
-            print(f"[RUNNER {os.getpid()}] crash-between：预测已 replace 到"
-                  f"最终路径、完成回执未 replace → os._exit(9)（持锁硬杀）",
+            print(f"[RUNNER {os.getpid()}] crash-between：gen 就绪、指针未切"
+                  f" → os._exit(9)（066/crash-recovery 死亡中间态：指针仍指"
+                  f"旧完整代）", flush=True)
+            os._exit(9)
+        pred_ruler.commit_yarn_generation = _hooked_commit
+
+    # crash-post-commit（B5 相位 post-commit）：真实提交执行完毕（指针已
+    # 切 → 新完整代可见）后、锁释放前硬杀——提交后死亡不得破坏已发布代
+    if args.mode == "crash-post-commit":
+        yarn_mod = importlib.import_module("benchmark.RULER.yarn_receipt")
+        _real_commit = yarn_mod.commit_yarn_generation
+
+        def _hooked_commit(tmp_pred, tmp_receipt, out_path):
+            _real_commit(tmp_pred, tmp_receipt, out_path)   # 指针已切
+            print(f"[RUNNER {os.getpid()}] crash-post-commit：指针已切（新"
+                  f"完整代可见）→ os._exit(9)（提交后死亡，锁由内核释放）",
                   flush=True)
             os._exit(9)
+        pred_ruler.commit_yarn_generation = _hooked_commit
+
+    # legacy-twostep / legacy-twostep-crash-between（B5 红探针专用，非生产
+    # 路径）：复刻 #198 修复前 059 的两步提交——绕过指针切换，验证
+    # 「绕过指针切换 → 066 缺陷态（B 物理写入 + A 旧回执，三方 SHA 全等）
+    # 复现且可被 B5 主相位断言抓红」
+    if args.mode in ("legacy-twostep", "legacy-twostep-crash-between"):
+        yarn_mod = importlib.import_module("benchmark.RULER.yarn_receipt")
+
+        def _hooked_commit(tmp_pred, tmp_receipt, out_path):
+            os.replace(tmp_pred, out_path)   # 旧协议第一步：预测 → 最终路径
+            if args.mode == "legacy-twostep-crash-between":
+                print(f"[RUNNER {os.getpid()}] legacy-twostep-crash-between："
+                      f"预测已到最终路径、回执未落旁挂 → os._exit(9)"
+                      f"（066 审计原始死亡中间态）", flush=True)
+                os._exit(9)
+            # 旧协议第二步：回执 → 最终旁挂路径（无指针文件）
+            os.replace(tmp_receipt,
+                       yarn_mod.producer_receipt_path_for(out_path))
         pred_ruler.commit_yarn_generation = _hooked_commit
 
     if args.barrier_dir:
@@ -254,7 +302,7 @@ def main():
         "--task", args.task, "--context_length", str(args.context_length),
         "--data-root", args.data_root, "--output-dir", args.out_dir,
         "--t", args.t, "--method", "tli", "--pred_postfix", "_stub",
-        "--max-num", "0",
+        "--max-num", str(args.max_num),
     ]
     print(f"[RUNNER {os.getpid()}] mode={args.mode} tag={args.pred_tag} "
           f"进入生产 main()", flush=True)

@@ -11,6 +11,9 @@
   TL-E119-YARN-TEST-ORACLE-065（P1）测试断言 -O 失效
 #197 增量红绿测试（GPT 2026-10-10 0834 审计）：
   TL-E119-YARN-SAME-BYTES-PROVENANCE-066（P2）三方 SHA 一致 ≠ 运行同代
+#198 增量红绿测试（GPT 2026-10-10 1130 审计）：
+  TL-E119-YARN-SAME-BYTES-PROVENANCE-066/crash-recovery（P2）死亡中间态
+  TL-E119-B4-SKIP-AS-PASS-067（P2）SKIP 计为 PASS
 
 违反事实（GPT 审计已复现）：
   059  pred_ruler.py 直接截断最终预测路径 + 回执在生成循环之前落最终
@@ -38,7 +41,30 @@
        max_num=1）与 run-B（seed=99/max_num=100）可产出字节完全相同的
        预测 JSONL——062 门禁全绿，formal 仍把冻结 A 代的 manifest 标上
        B 代的 run_id/seed/config（066 CPU 复现：verified_same_generation=
-       true 但身份字段错配）。
+       true 但身份字段错配）；
+  066/crash-recovery  #197 的锁只防【活进程】穿插；059 两步提交在
+       「第一步后、第二步前」死亡且 B 与 A 字节完全相同时留下「B 物理
+       写入的预测 + A 旧回执」，三方 SHA 全等，062③ 拒收不可达——
+       混合代际不可检（GPT 复现：同字节异配置 run-B 崩溃后 formal 仍
+       接受 run-A 身份且 verified=true）。#198 修复：不可变 generation
+       目录 + 单指针原子切换（指针切换 = 唯一提交信号）；
+  067  本套件 main 的 n += 1 无条件计数把 B4 的 SKIP 计为 PASS——
+       PASS/SKIP/FAIL 三分显式计数（测试函数返回状态；SKIP>0 或
+       FAIL>0 不打 ALL PASS 且非零退出）。
+#198 增量用例（指针协议崩溃三相位）：
+  066/crash-recovery 指针协议崩溃三相位（B5，真子进程 os._exit 注入）：
+    pre-commit（crash-mid：gen 未就绪/指针未切）/ between-steps
+    （crash-between：gen 就绪、指针未切）/ post-commit（指针已切后死亡）
+    × 同字节（同 pred-tag）/ 异字节（异 pred-tag），六组合——每组合：
+    ① 指针解析的 gen 内预测+回执完整（SHA/行数一致）；② 消费侧
+    freeze_and_stage 冻结身份 = 旧完整代 A（pre/between）或新完整代 B
+    （post），绝不出现「B 物理写入 + A config verified=true」的混合代；
+    ③ 最终路径无直写文件（B 物理写入只存在于未被指针引用的 gen 目录
+    ——混合态结构性不可达）；④ manifest generation_binding=pointer-v1。
+    红探针（B5 内）：legacy-twostep 复刻修复前两步提交（绕过指针切换）
+    → 同字节 crash-between → 066 缺陷态原样复现（legacy-direct 消费
+    verified=true + A 身份 + 物理写入者 B），证明 B5 主相位断言（指针
+    必须存在）对该态必然红。
 
 用例矩阵：
   059 生产侧（e119_yarn_producer_runner_059.py 真实子进程，056 同款——
@@ -157,10 +183,12 @@ from benchmark.RULER.score_ruler_formal import (  # noqa: E402
     _load_producer_yarn_receipt, freeze_and_stage,
 )
 from benchmark.RULER.yarn_receipt import (  # noqa: E402
+    GENERATION_BINDING_LEGACY, GENERATION_BINDING_POINTER,
     RECEIPT_V1_VERSION, RECEIPT_VERSION, attempt_lock_path,
     build_yarn_receipt, effective_config_sha256, manifest_correction_path_for,
-    producer_receipt_path_for, resolve_manifest_yarn_identity,
-    validate_producer_receipt, write_yarn_receipt,
+    producer_receipt_path_for, resolve_generation_pointer,
+    resolve_manifest_yarn_identity, validate_producer_receipt,
+    write_yarn_receipt,
 )
 
 NATIVE_MPE = 40960
@@ -292,15 +320,19 @@ def _cell_receipt(root, task):
 # ================================================================ 059 生产侧
 
 def _run_producer(base, name, mode, tag, rows=3, crash_after=1, wait=True,
-                  barrier=None, hold=2.0, context_length=32768):
-    """起一个真实生产子进程（runner），返回 Popen（wait=False 时）。"""
+                  barrier=None, hold=2.0, context_length=32768, max_num=0):
+    """起一个真实生产子进程（runner），返回 Popen（wait=False 时）。
+
+    #198 B5：max_num 转发 pred_ruler --max-num（回执 generation_params.
+    max_num）——同字节异配置代际靠 run_id+max_num 区分。"""
     out_dir = os.path.join(base, name, "out")
     data_root = os.path.join(base, "shared_data")
     argv = [sys.executable, RUNNER, "--out-dir", out_dir,
             "--data-root", data_root, "--mode", mode,
             "--pred-tag", tag, "--rows", str(rows),
             "--crash-after", str(crash_after), "--hold", str(hold),
-            "--context-length", str(context_length)]
+            "--context-length", str(context_length),
+            "--max-num", str(max_num)]
     if barrier:
         argv += ["--barrier-dir", barrier[0], "--barrier-count",
                  str(barrier[1])]
@@ -310,18 +342,26 @@ def _run_producer(base, name, mode, tag, rows=3, crash_after=1, wait=True,
 
 
 def _producer_products(base, name):
+    """#198 指针协议产物定位：预测与回执同置指针所指不可变 generation
+    目录（最终路径 {out}.jsonl 不落盘）。返回 (pred_dir, final_path,
+    gen_pred_path, gen_rcp_path)。"""
     d = os.path.join(base, name, "out", "L32768", "pred_stub")
-    pred = os.path.join(d, "vt-stubm-09090909.jsonl")
-    return d, pred, producer_receipt_path_for(pred)
+    pred_final = os.path.join(d, "vt-stubm-09090909.jsonl")
+    gi = resolve_generation_pointer(pred_final)
+    _check(gi is not None, f"{name}: 指针 {pred_final}.tli_gen 未生成"
+                            f"（#198 指针协议提交失败）")
+    return d, pred_final, gi["pred_path"], gi["rcp_path"]
 
 
-def _assert_consistent_generation(tag, pred_path, rcp_path):
-    """终态一致性：回执声明 SHA/行数与预测当前字节逐位一致（同代）。
+def _assert_consistent_generation(tag, pred_final, pred_path, rcp_path):
+    """终态一致性：指针所指 gen 内预测+回执齐备且回执声明 SHA/行数与
+    预测当前字节逐位一致（同代）。
 
-    062：_load_producer_yarn_receipt 签名重排为（staged, source）——此处
-    单文件直查场景 staged==source（同一文件既当评分副本又当回执旁挂
-    探查对象），消费侧三方一致语义退化为两方（staged==receipt==源同
-    一文件）；staging 路径分離场景由 B1/B2 barrier 用例覆盖。"""
+    062：_load_producer_yarn_receipt 签名（staged, source, ..., final）——
+    此处单文件直查场景 staged==source（gen 内预测既当评分副本又当回执
+    旁挂探查对象），消费侧三方一致语义退化为两方；staging 路径分離
+    场景由 B1/B2 barrier 用例覆盖。#198：source_final_path 传最终路径
+    （指针解析基准）——消费侧从指针同时读预测与回执，物理来源同源。"""
     rcp = json.load(open(rcp_path, encoding="utf-8"))
     _check(rcp["receipt_version"] == RECEIPT_VERSION, rcp["receipt_version"])
     _check(rcp["status"] == "complete")
@@ -329,32 +369,51 @@ def _assert_consistent_generation(tag, pred_path, rcp_path):
     _check(rcp["prediction_sha256"] == _sha(pred_path), f"{tag}: 回执 SHA 与预测字节不一致（不同代）")
     _check(rcp["prediction_lines"] == _nlines(pred_path), f"{tag}: 回执行数与预测不一致")
     # 消费侧入口同口径接受（真实 _load_producer_yarn_receipt，非复制品）
-    got = _load_producer_yarn_receipt(pred_path, pred_path, "vt", 32768)
+    got = _load_producer_yarn_receipt(pred_path, pred_path, "vt", 32768,
+                                       source_final_path=pred_final)
     _check(got is not None and \
+        got["generation_binding"] == GENERATION_BINDING_POINTER and \
         got["prediction_binding"]["verified_same_generation"] is True, got)
 
 
 def test_P1_success_single(base):
-    """P1：success 单跑——v2 同代绑定四件齐备 + 无临时残留 + 消费侧接受。"""
+    """P1：success 单跑——v2 同代绑定四件齐备（指针所指 gen 内预测+回执）
+    + 指针切换 + 无临时残留 + 消费侧接受 + 最终路径无直写文件。"""
     _run_producer(base, "p1", "success", "A")
-    d, pred, rcp = _producer_products(base, "p1")
+    d, pred_final, pred, rcp = _producer_products(base, "p1")
     _check(os.path.isfile(pred) and os.path.isfile(rcp))
-    _assert_consistent_generation("P1", pred, rcp)
-    # 无临时残留（.gen-/.tmp- 均经 os.replace 提交或不存在）
-    _check(not glob.glob(os.path.join(d, "*.gen-*")), "gen 临时残留")
+    _assert_consistent_generation("P1", pred_final, pred, rcp)
+    # 指针协议：预测只在 gen 目录内，最终路径无直写文件（B 物理写入
+    # 不落最终路径——066/crash-recovery 混合态结构性不可达的根）
+    _check(not os.path.exists(pred_final), "最终路径不应有直写预测（指针协议）")
+    # gen 目录均为目录（非散文件）、不以 .jsonl 结尾 → 不进 glob；
+    # 已提交 gen 按设计保留（指针引用，不可变旧代）
+    gens = glob.glob(os.path.join(d, "*.gen-*"))
+    _check(gens and all(os.path.isdir(g) for g in gens),
+           ("gen 应为目录且存在", gens))
+    _check(all(not g.endswith(".jsonl") for g in gens), "gen 目录名不得以 .jsonl 结尾（会污染 best-file glob）")
     _check(not glob.glob(os.path.join(d, "*tmp-*")), "tmp 临时残留")
-    # 重复成功提交（不同 tag）→ 终态仍同代一致（重跑覆盖一代完整产物）
+    _check(not glob.glob(os.path.join(d, "vt-*.jsonl")), "预测不得落在 pred_dir 顶层（污染 best-file glob）")
+    # 重复成功提交（不同 tag）→ 指针切到新 gen，终态仍同代一致
+    old_gen = os.path.dirname(pred)
     _run_producer(base, "p1", "success", "B")
-    _assert_consistent_generation("P1-re", pred, rcp)
-    print("P1 PASS  success 单跑：v2 回执 status/basename/SHA/行数与预测"
-          "逐位同代一致；无 gen/tmp 残留；重跑后仍同代一致")
+    d, pred_final, pred, rcp = _producer_products(base, "p1")
+    _check(os.path.dirname(pred) != old_gen, "重跑应提交新 generation 并切指针")
+    _assert_consistent_generation("P1-re", pred_final, pred, rcp)
+    # 旧 gen 不可变保留（崩溃语义需要旧完整代可见；指针不再引用）
+    _check(os.path.isdir(old_gen), "旧 generation 应不可变保留（不清理）")
+    print("P1 PASS  success 单跑：指针所指 gen 内 v2 回执 status/basename/"
+          "SHA/行数与预测逐位同代一致；最终路径无直写；无 tmp 残留；"
+          "重跑切新指针且旧 gen 不可变保留")
 
 
 def test_P2_crash_mid_preserves_old(base):
-    """P2：crash-mid（生成中途持锁硬杀）——最终路径保持上一代完整产物
-    （SHA 逐位不变），partial 只留临时 generation 且不进 jsonl glob。"""
+    """P2：crash-mid（生成中途持锁硬杀，相位 pre-commit）——指针仍指
+    上一代完整 gen（SHA 逐位不变），partial 只留未被引用的 gen 目录且
+    不进 jsonl glob。"""
     _run_producer(base, "p2", "success", "A")          # 第一代
-    d, pred, rcp = _producer_products(base, "p2")
+    d, pred_final, pred, rcp = _producer_products(base, "p2")
+    gen_a = os.path.dirname(pred)
     sha_before = _sha(pred)
     rcp_before = _sha(rcp)
     out, rc = _run_producer(base, "p2", "crash-mid", "B",
@@ -362,36 +421,61 @@ def test_P2_crash_mid_preserves_old(base):
     _check(rc == 9, (rc, out[-300:]))
     _check(_sha(pred) == sha_before, "crash-mid 改写了上一代完整预测")
     _check(_sha(rcp) == rcp_before, "crash-mid 改写了上一代回执")
-    # partial 只在临时 generation（不以 .jsonl 结尾 → 不进 {task}-*.jsonl glob）
+    # 指针未切：仍指旧 gen（旧完整代可见）
+    gi = resolve_generation_pointer(pred_final)
+    _check(gi is not None and os.path.abspath(gi["gen_dir"]) ==
+           os.path.abspath(gen_a), "crash-mid 后指针必须仍指 A 代 gen")
+    # partial 只在未被引用的 B gen 目录（不以 .jsonl 结尾 → 不进 glob）
     gens = glob.glob(os.path.join(d, "*.gen-*"))
-    _check(gens, "crash-mid 应留下临时 generation（partial 证据）")
-    _check(not glob.glob(os.path.join(d, "vt-*.jsonl.gen-*"[:-7] + "*")) \
-        or all(not g.endswith(".jsonl") for g in gens))
+    _check(len(gens) >= 2 and all(os.path.isdir(g) for g in gens),
+           "crash-mid 应留下未被引用的 B gen 目录（partial 证据）")
     _check(all(not g.endswith(".jsonl") for g in gens), "临时 generation 不得以 .jsonl 结尾（会污染 best-file glob）")
     jsonl_glob = glob.glob(os.path.join(d, "vt-*.jsonl"))
-    _check(jsonl_glob == [pred], ("glob 污染", jsonl_glob))
-    # 消费侧仍接受旧代（上一代预测+回执同代自洽）
-    _assert_consistent_generation("P2", pred, rcp)
-    print("P2 PASS  crash-mid：最终路径 SHA 逐位不变；partial 只留 "
-          ".gen- 临时文件（不污染 {task}-*.jsonl glob）；旧代仍可消费")
+    _check(jsonl_glob == [], ("glob 污染", jsonl_glob))
+    # 消费侧仍接受旧代（指针所指 A 代预测+回执同代自洽）
+    _assert_consistent_generation("P2", pred_final, pred, rcp)
+    print("P2 PASS  crash-mid（相位 pre-commit）：指针仍指 A 代、gen 内"
+          " SHA 逐位不变；partial 只留未被引用的 .gen- 目录（不污染 "
+          "{task}-*.jsonl glob）；旧代仍可消费")
 
 
-def test_P3_crash_between_mismatch(base):
-    """P3：crash-between（提交点两步之间硬杀）——新预测配旧回执 →
-    消费侧同代绑定校验 fail-closed（坏态可检，不静默）。"""
+def test_P3_crash_between_old_gen_visible(base):
+    """P3：crash-between（#198 指针语义：gen 就绪、指针未切换时硬杀）——
+    指针仍指 A 代 → 旧完整代可见；B 代 gen 残留完整但未被引用、不可消费。
+    059 修复前「两步之间死亡 → 新预测配旧回执」的混合代际在指针协议下
+    物理不可达（预测不再落最终路径）；残余风险由 B5 红探针单独证明。"""
     _run_producer(base, "p3", "success", "A")
-    d, pred, rcp = _producer_products(base, "p3")
+    d, pred_final, pred, rcp = _producer_products(base, "p3")
+    gen_a = os.path.dirname(pred)
+    a_sha = _sha(pred)
     out, rc = _run_producer(base, "p3", "crash-between", "C", rows=2)
     _check(rc == 9, (rc, out[-300:]))
-    rcp_obj = json.load(open(rcp, encoding="utf-8"))
-    _check(rcp_obj["prediction_sha256"] != _sha(pred), "crash-between 后应留下新预测配旧回执的失配态")
-    try:
-        _load_producer_yarn_receipt(pred, pred, "vt", 32768)
-        raise AssertionError("失配代际未被消费侧拒收（059 绑定失效）")
-    except SystemExit as e:
-        _check("prediction_sha256" in str(e) and "不同代" in str(e), e)
-    print("P3 PASS  crash-between：新预测配旧回执 → 消费侧同代绑定校验"
-          "fail-closed 拒收")
+    # 指针未切 → 旧完整代 A 可见且同代自洽（不是「新预测配旧回执」）
+    gi = resolve_generation_pointer(pred_final)
+    _check(gi is not None and os.path.abspath(gi["gen_dir"]) ==
+           os.path.abspath(gen_a), "crash-between 后指针必须仍指 A 代")
+    _check(_sha(gi["pred_path"]) == a_sha, "A 代 gen 预测被改写")
+    # 最终路径无 B 的物理写入（混合态结构性不可达）
+    _check(not os.path.exists(pred_final), "crash-between 不得在最终路径留下预测")
+    # B 代 gen 残留（完整：预测+回执同目录就绪），但未被指针引用
+    b_gens = [g for g in glob.glob(os.path.join(d, "*.gen-*"))
+              if os.path.abspath(g) != os.path.abspath(gen_a)]
+    _check(b_gens, "crash-between 应留下未被引用的 B gen 残留")
+    b_gen_pred = os.path.join(b_gens[0], os.path.basename(pred_final))
+    _check(os.path.isfile(b_gen_pred) and os.path.isfile(
+        producer_receipt_path_for(b_gen_pred)),
+        "B gen 残留应为完整（预测+回执同目录）——仅缺指针切换")
+    # 消费侧（真实入口）接受旧代 A，身份 = A
+    got = _load_producer_yarn_receipt(pred, pred, "vt", 32768,
+                                       source_final_path=pred_final)
+    _check(got is not None and
+           got["prediction_binding"]["verified_same_generation"] is True and
+           got["prediction_binding"]["run_id"] ==
+           json.load(open(rcp, encoding="utf-8"))["run_id"],
+           f"P3: 消费侧应接受旧代 A: {got}")
+    print("P3 PASS  crash-between（gen 就绪/指针未切）：旧完整代 A 可见"
+          "且同代自洽；B gen 完整残留但未被引用；最终路径无 B 物理写入"
+          "（混合代际不可达）")
 
 
 def test_P4_dual_success(base):
@@ -407,8 +491,8 @@ def test_P4_dual_success(base):
     ob = pb.communicate()[0]
     rb = pb.returncode
     _check(ra == 0 and rb == 0, (ra, oa[-400:], rb, ob[-400:]))
-    d, pred, rcp = _producer_products(base, "p4")
-    _assert_consistent_generation("P4", pred, rcp)
+    d, pred_final, pred, rcp = _producer_products(base, "p4")
+    _assert_consistent_generation("P4", pred_final, pred, rcp)
     rcp_obj = json.load(open(rcp, encoding="utf-8"))
     # 终态属于其中一代（pred 内容与回执 run_id 同代），而非 A 预测配 B 回执
     with open(pred, encoding="utf-8") as f:
@@ -433,30 +517,38 @@ def test_P5_success_crash_mix(base):
     rb = pb.returncode
     _check(ra == 0, (ra, oa[-400:]))
     _check(rb == 9, (rb, ob[-400:]))
-    d, pred, rcp = _producer_products(base, "p5")
-    _assert_consistent_generation("P5", pred, rcp)
+    d, pred_final, pred, rcp = _producer_products(base, "p5")
+    _assert_consistent_generation("P5", pred_final, pred, rcp)
     print("P5 PASS  success/crash-mid 并发：终态为 success 方完整代际"
           "（crash 方 partial 只留临时 generation）")
 
 
 def test_P6_crash_between_then_success(base):
-    """P6：crash-between 失配态被后继成功提交修复——终态恢复同代一致。"""
+    """P6：crash-between（指针未切）后后继成功提交——终态指针切到新代、
+    同代一致；旧 A 代与 B 残留代均不可变保留。"""
     _run_producer(base, "p6", "success", "A")
+    d, pred_final, pred_a, rcp_a = _producer_products(base, "p6")
+    gen_a = os.path.dirname(pred_a)
     _run_producer(base, "p6", "crash-between", "C", rows=2)
-    d, pred, rcp = _producer_products(base, "p6")
-    rcp_obj = json.load(open(rcp, encoding="utf-8"))
-    _check(rcp_obj["prediction_sha256"] != _sha(pred), "前置：应处失配态")
+    # 前置复核：指针仍指 A 代（不是失配态——指针协议下混合代不可达）
+    gi = resolve_generation_pointer(pred_final)
+    _check(gi is not None and os.path.abspath(gi["gen_dir"]) ==
+           os.path.abspath(gen_a), "前置：crash-between 后指针应仍指 A 代")
     _run_producer(base, "p6", "success", "D")
-    _assert_consistent_generation("P6", pred, rcp)
-    print("P6 PASS  crash-between 失配态 → 后继 success 提交修复为同代一致")
+    d, pred_final, pred, rcp = _producer_products(base, "p6")
+    _check(os.path.dirname(pred) != gen_a, "success 提交应切指针到新 gen")
+    _assert_consistent_generation("P6", pred_final, pred, rcp)
+    _check(os.path.isdir(gen_a), "旧 A 代 gen 应不可变保留")
+    print("P6 PASS  crash-between（指针未切）→ 后继 success 切新指针、"
+          "终态同代一致；旧代不可变保留")
 
 
 def test_P7_lock_mutual_exclusion(base):
     """P7：lock-hold 持锁期间 LOCK_NB 非阻塞探测必失败；释放后可获锁
     （056 口径跨进程互斥，崩溃内核自动释放）。"""
     _run_producer(base, "p7", "success", "A")   # 确保输出目录存在
-    d, pred, rcp = _producer_products(base, "p7")
-    lock_path = attempt_lock_path(pred)
+    d, pred_final, pred, rcp = _producer_products(base, "p7")
+    lock_path = attempt_lock_path(pred_final)
     holder = _run_producer(base, "p7", "lock-hold", "H", wait=False,
                            hold=5.0)
     # 轮询 holder stdout 直到其报告「已获锁」（import torch 耗时抖动大，
@@ -956,10 +1048,15 @@ def test_B4_lock_unavailable_fail_closed(base):
     """B4（066 锁不可用 fail-closed）：冻结窗口输出路径锁获取失败
     （只读源目录，锁文件不可创建）→ freeze_and_stage 必须 fail-closed
     拒收，不得静默降级为无锁冻结。环境无法模拟只读（root 用户/无效
-    chmod 的网络 FS）时如实 SKIP 不冒充。"""
-    if os.geteuid() == 0:
-        print("B4 SKIP  以 root 运行，chmod 无法模拟只读目录——不冒充通过")
-        return
+    chmod 的网络 FS）时如实返回 "SKIP"（067：SKIP 不再被计为 PASS，
+    汇总显式 PASS/SKIP/FAIL；E119_B4_FORCE_ROOT=1 供非 root 环境确定性
+    验收 SKIP 计数口径——模拟 root）。"""
+    # 067：root 分支显式模拟（非 root 环境可测 SKIP 计数：mock os.geteuid
+    # 语义——环境变量开关等价于 geteuid()==0 的分支走向）
+    if os.geteuid() == 0 or os.environ.get("E119_B4_FORCE_ROOT") == "1":
+        print("B4 SKIP  以 root 运行（或 E119_B4_FORCE_ROOT=1 模拟），"
+              "chmod 无法模拟只读目录——不冒充通过")
+        return "SKIP"
     root = _single_task_root(base, "b4_root")
     _write_receipts(root, 32768, 2.0)
     pred_dir = os.path.dirname(_cell_file(root, BTASK))
@@ -977,7 +1074,7 @@ def test_B4_lock_unavailable_fail_closed(base):
         if not probe_blocked:
             print("B4 SKIP  chmod 0o555 未使目录只读（网络 FS/root-squash"
                   "等）——环境无法模拟锁不可用，不冒充通过")
-            return
+            return "SKIP"
         try:
             freeze_and_stage(root, "_fx", 1, True,
                              os.path.join(base, "b4_staging"), 2,
@@ -992,6 +1089,135 @@ def test_B4_lock_unavailable_fail_closed(base):
         os.chmod(pred_dir, 0o755)
     print("B4 PASS  锁不可用（只读源目录）→ fail-closed 拒收"
           "（不静默降级为无锁冻结）")
+
+
+# ================================================================ 066/crash-recovery
+
+def test_B5_crash_three_phase(base):
+    """B5（#198 066/crash-recovery 指针协议崩溃三相位，P2）：真子进程
+    os._exit(9) 注入，pre-commit（crash-mid）/ between-steps（gen 就绪、
+    指针未切）/ post-commit（指针已切后死亡）× 同字节（同 pred-tag；
+    run_id+max_num 异配置——A=4/B=5 均 >rows=3 不截断，同 tag 字节相同）
+    / 异字节（异 pred-tag），六组合验收：
+
+      ① 指针解析的 gen 内预测+回执完整（同代自洽）；
+      ② 消费侧 freeze_and_stage 冻结身份 = 旧完整代 A（pre/between）
+        或新完整代 B（post），binding.verified_same_generation=true 时
+        身份字段与指针所指 gen 严格同源——「B 物理写入 + A config
+        verified=true」的混合代不可达（066 审计复现态）；
+      ③ 最终路径无直写文件（B 物理写入只存在于 gen 目录内，未被指针
+        引用的 gen 残留不可消费）；
+      ④ manifest 逐格 generation_binding=pointer-v1。
+
+    红探针：legacy-twostep 模式复刻修复前 059 两步提交（绕过指针切换）
+    → 同字节 crash-between → 066 缺陷态原样复现（legacy-direct 消费
+    verified=true + A 身份，而物理写入者是 B）——证明绕过指针切换时
+    B5 主相位断言（指针必须存在且指向完整代）必然红。"""
+    data_root = os.path.join(base, "shared_data")
+    combos = []
+    for bytes_mode in ("same", "diff"):
+        for phase, mode in (("pre", "crash-mid"),
+                            ("between", "crash-between"),
+                            ("post", "crash-post-commit")):
+            name = f"b5_{bytes_mode}_{phase}"
+            # ---- A 代（run-A：max_num=4，> rows=3 不截断）正常提交 ----
+            outA, rcA = _run_producer(base, name, "success", "A", max_num=4)
+            _check(rcA == 0, (name, "A 提交失败", rcA, outA[-300:]))
+            pred_dir = os.path.join(base, name, "out", "L32768", "pred_stub")
+            pred_final = os.path.join(pred_dir, "vt-stubm-09090909.jsonl")
+            gi_a = resolve_generation_pointer(pred_final)
+            _check(gi_a is not None, f"{name}: A 代提交后指针必须存在")
+            a_rcp = json.load(open(gi_a["rcp_path"], encoding="utf-8"))
+            a_run, a_sha, a_gen = (a_rcp["run_id"], _sha(gi_a["pred_path"]),
+                                   os.path.abspath(gi_a["gen_dir"]))
+            _check(a_rcp["generation_params"]["max_num"] == 4, a_rcp)
+            # ---- B 代崩溃注入：同字节=同 tag（run_id/max_num 异配置）；
+            #      异字节=异 tag ----
+            b_tag = "A" if bytes_mode == "same" else "B"
+            outB, rcB = _run_producer(base, name, mode, b_tag, max_num=5)
+            _check(rcB == 9, (name, "B 崩溃注入失败", rcB, outB[-300:]))
+            # ① 崩溃后指针所指 gen 完整（预测+回执同代自洽）
+            gi = resolve_generation_pointer(pred_final)
+            _check(gi is not None, f"{name}: 崩溃后指针必须仍在（旧/新完整代可见）")
+            g_rcp = json.load(open(gi["rcp_path"], encoding="utf-8"))
+            _check(g_rcp["prediction_sha256"] == _sha(gi["pred_path"]) and
+                   g_rcp["prediction_lines"] == _nlines(gi["pred_path"]),
+                   f"{name}: 指针所指 gen 不完整: {g_rcp}")
+            if bytes_mode == "same":
+                _check(_sha(gi["pred_path"]) == a_sha,
+                       f"{name}: 同字节前提复核失败")
+            # ②③ 混合代不可达：最终路径无直写文件
+            _check(not os.path.exists(pred_final),
+                   f"{name}: 最终路径出现直写预测——混合代可达（066 修复失效）")
+            # ② 消费侧 freeze 冻结身份 = 指针所指完整代
+            _, cells_info, _, _ = freeze_and_stage(
+                os.path.join(base, name, "out"), "_stub", 1, True,
+                os.path.join(base, f"{name}_staging"), 2, data_root)
+            cell = cells_info["L32768/stubm"]["tasks"]["vt"]
+            rcp = cell["producer_yarn_receipt"]
+            b = rcp["prediction_binding"]
+            _check(b is not None and b["verified_same_generation"] is True,
+                   f"{name}: 冻结 binding 异常: {b}")
+            # ④ manifest 绑定口径
+            _check(cell["generation_binding"] == GENERATION_BINDING_POINTER,
+                   f"{name}: generation_binding 应为 pointer-v1: {cell}")
+            _check(rcp["generation_binding"] == GENERATION_BINDING_POINTER,
+                   f"{name}: 回执摘要 binding 异常: {rcp}")
+            if phase in ("pre", "between"):
+                # 指针未切 → 旧完整代 A 可见；冻结身份 = A（同字节下也
+                # 不会错挂 B——物理来源 = 指针所指 gen，非内容等价推断）
+                _check(os.path.abspath(gi["gen_dir"]) == a_gen,
+                       f"{name}/{phase}: 指针应仍指 A 代 gen")
+                _check(b["run_id"] == a_run,
+                       f"{name}/{phase}: 冻结身份应为 A 代 run_id="
+                       f"{a_run!r}，实得 {b['run_id']!r}——混合代错挂")
+                _check(rcp["config_fingerprint"]["max_num"] == 4,
+                       f"{name}/{phase}: 冻结配置指纹应属 A 代")
+            else:
+                # 指针已切 → 新完整代 B 可见；冻结身份 = B
+                _check(os.path.abspath(gi["gen_dir"]) != a_gen,
+                       f"{name}/post: 指针应已切到 B 代 gen")
+                _check(b["run_id"] != a_run,
+                       f"{name}/post: 冻结身份应为 B 代（≠ A 的 "
+                       f"{a_run!r}）")
+                _check(rcp["config_fingerprint"]["max_num"] == 5,
+                       f"{name}/post: 冻结配置指纹应属 B 代")
+            combos.append(f"{bytes_mode}/{phase}={b['run_id'][:8]}…")
+    # ---- 红探针：绕过指针切换（legacy-twostep 复刻 059 两步提交）----
+    # 066 审计原始缺陷态必须原样复现：B 物理写入最终路径 + A 旧回执
+    # 旁挂在位、三方 SHA 全等 → legacy-direct 消费 verified=true + A
+    # 身份——B5 主相位断言（指针必须存在）对此态必然红（有齿证明：
+    # 若指针协议被从生产路径移除，六组合主相位全部落在此态 → B5 红）。
+    name = "b5_red_twostep"
+    outA, rcA = _run_producer(base, name, "legacy-twostep", "A", max_num=4)
+    _check(rcA == 0, ("红探针 A 提交失败", rcA, outA[-300:]))
+    red_final = os.path.join(base, name, "out", "L32768", "pred_stub",
+                             "vt-stubm-09090909.jsonl")
+    _check(os.path.isfile(red_final), "legacy 两步提交产物应在最终路径")
+    _check(resolve_generation_pointer(red_final) is None,
+           "legacy 两步提交不产生指针（B5 主相位断言必红的根）")
+    red_rcp_path = producer_receipt_path_for(red_final)
+    red_a_run = json.load(open(red_rcp_path, encoding="utf-8"))["run_id"]
+    red_a_sha = _sha(red_final)
+    outB, rcB = _run_producer(base, name, "legacy-twostep-crash-between",
+                              "A", max_num=5)
+    _check(rcB == 9, ("红探针 B 崩溃注入失败", rcB, outB[-300:]))
+    _check(_sha(red_final) == red_a_sha, "红探针：同字节前提复核")
+    red_rcp = json.load(open(red_rcp_path, encoding="utf-8"))
+    _check(red_rcp["run_id"] == red_a_run,
+           "红探针：死亡中间态留下 B 物理写入 + A 旧回执（066 缺陷态）")
+    got = _load_producer_yarn_receipt(red_final, red_final, "vt", 32768)
+    _check(got is not None and
+           got["generation_binding"] == GENERATION_BINDING_LEGACY and
+           got["prediction_binding"]["verified_same_generation"] is True and
+           got["prediction_binding"]["run_id"] == red_a_run,
+           f"红探针：066 缺陷态未复现（legacy-direct 消费应 verified=true "
+           f"+ A 身份而物理写入者是 B）: {got}")
+    print(f"B5 PASS  崩溃三相位六组合（{'；'.join(combos)}）：pre/between →"
+          f" 旧完整代 A、post → 新完整代 B，verified=true 时身份与指针同源；"
+          f"最终路径无直写（混合代不可达）；generation_binding=pointer-v1。"
+          f"红探针：绕过指针切换（legacy-twostep）→ 066 缺陷态复现且"
+          f"主相位断言必红")
 
 
 # ================================================================ 060
@@ -1530,13 +1756,25 @@ def test_T_oracle_meta():
 # ================================================================ main
 
 def main():
+    """067（TL-E119-B4-SKIP-AS-PASS，#198）：PASS/SKIP/FAIL 三分显式计数。
+
+    修复前 main 的 `n += 1` 无条件计数把 B4 的 SKIP 计为 PASS，汇总行
+    「ALL PASS (29/29)」在 SKIP 时虚报。修复语义：
+      - 每个测试函数返回 None（PASS）或 "SKIP"（环境不可模拟，如实降级，
+        冒充通过才是 bug——067 修的是【计数】不是 SKIP 本身）；
+      - 异常（含 _check 的 SystemExit）→ FAIL（打印首个失败位置，继续
+        跑完其余用例——一次运行给出完整红绿图）；
+      - 汇总 `RESULT: PASS=n SKIP=m FAIL=k (total T)`；SKIP>0 或 FAIL>0
+        时不打 ALL PASS 且非零退出（SKIP 同样不达标：环境覆盖有缺口，
+        不得与全绿混同）；
+      - E119_ONLY=B4,B5 环境变量过滤子集（验收口径：SKIP 计数的确定性
+        验收运行，如 B4 单跑 + E119_B4_FORCE_ROOT=1 模拟 root）。"""
     global PASS
     base = tempfile.mkdtemp(prefix="e119_binding_195_")
-    n = 0
     plan = [
         ("P1", lambda: test_P1_success_single(base)),
         ("P2", lambda: test_P2_crash_mid_preserves_old(base)),
-        ("P3", lambda: test_P3_crash_between_mismatch(base)),
+        ("P3", lambda: test_P3_crash_between_old_gen_visible(base)),
         ("P4", lambda: test_P4_dual_success(base)),
         ("P5", lambda: test_P5_success_crash_mix(base)),
         ("P6", lambda: test_P6_crash_between_then_success(base)),
@@ -1566,16 +1804,52 @@ def main():
         # #197 增量用例：066 同字节异代 provenance 锁窗口
         ("B3", lambda: test_B3_same_bytes_provenance_locked(base)),
         ("B4", lambda: test_B4_lock_unavailable_fail_closed(base)),
+        # #198 增量用例：066/crash-recovery 指针协议崩溃三相位
+        ("B5", lambda: test_B5_crash_three_phase(base)),
         ("TOR", test_T_oracle_meta),
     ]
+    only = os.environ.get("E119_ONLY", "")
+    if only:
+        keep = {x.strip() for x in only.split(",") if x.strip()}
+        plan = [p for p in plan if p[0] in keep]
+    n_pass = n_skip = n_fail = 0
+    failed = []
     try:
         for name, fn in plan:
-            fn()
-            n += 1
-        PASS = n
+            try:
+                status = fn()
+            except SystemExit as e:
+                n_fail += 1
+                failed.append(name)
+                print(f"[{name}] FAIL  {e}", flush=True)
+                continue
+            except BaseException as e:   # noqa: BLE001——一次跑完给全红绿图
+                n_fail += 1
+                failed.append(name)
+                import traceback
+                print(f"[{name}] FAIL  {type(e).__name__}: {e}\n"
+                      f"{traceback.format_exc()[-1500:]}", flush=True)
+                continue
+            if status == "SKIP":
+                n_skip += 1
+            else:
+                n_pass += 1
     finally:
         shutil.rmtree(base, ignore_errors=True)
-    print(f"\nE119-YARN-BINDING-059/060/061 ALL PASS ({PASS}/{len(plan)})")
+    PASS = n_pass
+    print(f"\nE119-YARN-BINDING-059/060/061 RESULT: "
+          f"PASS={n_pass} SKIP={n_skip} FAIL={n_fail} (total {len(plan)})")
+    if n_skip == 0 and n_fail == 0:
+        print(f"E119-YARN-BINDING-059/060/061 ALL PASS "
+              f"({n_pass}/{len(plan)})")
+        return 0
+    if failed:
+        print(f"FAILED: {failed}")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 
 
 if __name__ == "__main__":

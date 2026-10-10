@@ -68,6 +68,34 @@
 #       064①（model_config_sha256=None 的 config_identity=missing 降级
 #       标注）在消费侧 score_ruler_formal.py 落地。
 #
+# ===== #198（GPT 2026-10-10 1130 审计 TL-E119-YARN-SAME-BYTES-
+#   PROVENANCE-066/crash-recovery，P2）=====
+#   059 的两步 os.replace 提交（预测先替换 → 回执后替换）在「B 预测与
+#   A 字节完全相同」的死亡中间态下不可检：第一步完成后、第二步完成前
+#   进程死亡 → 盘上为「B 物理写入的预测 + A 旧回执」，三方 SHA 全等
+#   （staging == 回执声明 == 源当前字节），消费侧同代绑定校验全过，
+#   formal 接受 A 的 run_id/seed/config 并标 verified_same_generation=
+#   true——物理运行来源保证过强（GPT 复现：同字节异配置 run-B 崩溃后
+#   仍接受 run-A/seed=42 且 verified=true；异字节则 SHA 失配 fail-closed
+#   正确拒绝）。066 回应里「两步之间死亡 → SHA 必失配 → fail-closed」
+#   的前提在同字节场景不成立——SHA 校验只能拒绝【内容失配】的坏态，
+#   不能证明【运行同代】。
+#   修复（主 AI 已定，GPT 建议 1：不可变 generation + 单指针原子切换）：
+#   预测与完成回执最终写入不可变 generation 目录 {out}.gen-{attempt_id}/
+#   （两文件同目录共存，059 已有 .gen- 命名前例；目录名不以 .jsonl 结尾
+#   → 不污染 best-file glob），提交 = 单次 os.replace 原子切指针
+#   （{out}.tli_gen，内容为 gen 目录名；E116f「指针切换 = 唯一提交信号」
+#   同语义）。崩溃三阶段只剩：指针未切 → 旧完整代可见；指针已切 →
+#   新完整代可见；混合代不可达（消费侧从指针解析 generation 后【同时】
+#   读预测与回执——物理来源 = 指针所指 gen 目录，不再依赖内容等价推断）。
+#   flock 语义保留（066 活进程负例 B3 不回归）：锁窗口内完成
+#   「stage → gen 就绪 → 指针切换」。既有产物无指针文件 → 消费侧维持
+#   直接读路径（generation_binding="legacy-direct"），有指针则标
+#   "pointer-v1"（既有收口数据/manifest 字节零改动）。
+#   TL-E119-B4-SKIP-AS-PASS-067（P2，测试侧落地）：binding 套件 main
+#   的 n += 1 无条件计数把 B4 的 SKIP 计为 PASS——PASS/SKIP/FAIL 三分
+#   显式计数，SKIP>0 时不打 ALL PASS（详见测试文件）。
+#
 # 本模块刻意零重依赖（不 import torch/transformers/sparse_attn）——
 # 生成侧、消费侧与 CPU 红绿测试三方共享同一解析/校验口径，干净检出
 # 恒可单测。
@@ -97,6 +125,16 @@ CORRECTION_VERSION = "yarn-identity-057-v1"
 CORRECTION_VERSIONS = (CORRECTION_VERSION,)
 # 060：yarn_factor_source 合法枚举（与 build_yarn_receipt 三态一致）
 YARN_FACTOR_SOURCES = ("explicit", "auto", "off")
+# 066/crash-recovery（#198）：generation 指针协议——预测与完成回执同置
+# 不可变 generation 目录，{pred}.tli_gen 指针文件（内容 = gen 目录名）
+# 单次原子切换 = 唯一提交信号。指针不以 .jsonl 结尾 → 不污染
+# {task}-*.jsonl best-file glob。
+GENERATION_POINTER_SUFFIX = ".tli_gen"
+# manifest 的 generation 绑定口径标注：pointer-v1 = 指针协议产物
+# （消费侧从指针解析后同时读预测与回执）；legacy-direct = 既有产物
+# （无指针文件，按最终路径直接读——059 v2 与更早协议，历史数据不撤销）
+GENERATION_BINDING_POINTER = "pointer-v1"
+GENERATION_BINDING_LEGACY = "legacy-direct"
 
 
 def resolve_yarn_config(use_yarn, yarn_factor, context_length, auto_map,
@@ -205,9 +243,10 @@ def write_yarn_receipt(pred_out_path, receipt):
     更危险——消费侧把「存在」当证据，半写/损坏须 fail-closed 拒收）。
     返回 receipt 路径。
 
-    注意（059）：生产路径 pred_ruler.py 已改走 stage_yarn_receipt +
-    commit_yarn_generation 两段式（完成回执不落最终路径直到提交点）；
-    本函数保留给测试/工具直写场景。"""
+    注意（059 + 066/crash-recovery）：生产路径 pred_ruler.py 已走
+    stage_yarn_generation/stage_yarn_receipt（预测与回执同置不可变
+    generation 目录）+ commit_yarn_generation（单次原子切指针）；
+    本函数保留给测试/工具与 legacy-direct fixture 直写场景。"""
     path = pred_out_path[: -len(".jsonl")] + RECEIPT_SUFFIX
     tmp = f"{path}.tmp-{os.getpid()}"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -244,12 +283,13 @@ def acquire_output_lock(pred_out_path):
     （fcntl.flock，LOCK_EX 阻塞等待）。
 
     生命周期持锁（056 同口径）：调用点在创建临时 generation 之前，锁
-    覆盖「临时 generation 写入 → SHA/行数计算 → 完成回执 → 单次提交」
+    覆盖「generation 目录写入 → SHA/行数计算 → 完成回执 → 指针切换」
     全程，到提交完成 / 进程退出为止。后到者阻塞等待；flock 属内核锁，
     持锁进程崩溃即自动释放，不留死锁。锁是咨询锁：仅约束同样走
-    pred_ruler.py 生成路径的进程；即便两个进程交错（如旧版本进程），
-    消费侧同代绑定校验也会把「A 预测配 B 回执」的混合代际 fail-closed
-    拒收（锁保证良态一致，绑定校验兜底检测坏态）。"""
+    pred_ruler.py 生成路径的进程；066/crash-recovery 后消费侧从指针
+    解析 generation 后同时读预测与回执（混合代不可达），锁额外保证
+    formal 冻结窗口与生产者提交互斥（B3 活进程负例），legacy-direct
+    产物仍由锁 + 同代绑定校验双层兜底。"""
     path = attempt_lock_path(pred_out_path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
@@ -266,41 +306,156 @@ def release_output_lock(fd):
         os.close(fd)
 
 
-def stage_yarn_generation(pred_out_path, attempt_id):
-    """059：预测的不可变临时 generation 路径（{out}.gen-{attempt_id}）。
+def generation_dir_for(pred_out_path, attempt_id):
+    """066/crash-recovery（#198）：不可变 generation 目录名。
 
-    临时名不以 .jsonl 结尾 → 不进任何 {task}-*.jsonl glob——生成中断
-    留下的 partial 临时文件不污染 best-file 仲裁 / SKIP 幂等的行数
-    口径，最终路径保持上一代完整产物。"""
+    {out}.gen-{attempt_id}/——预测与完成回执同目录共存；目录名不以
+    .jsonl 结尾 → 不进任何 {task}-*.jsonl glob（059 命名前例保留）。"""
     return f"{pred_out_path}.gen-{attempt_id}"
 
 
+def generation_pointer_path(pred_out_path):
+    """066/crash-recovery（#198）：generation 指针文件路径。
+
+    {out}.tli_gen（内容 = gen 目录名）。指针不以 .jsonl 结尾 → 不污染
+    best-file glob；消费侧以指针解析当前 generation（物理来源 = 指针
+    所指目录，预测与回执同源同代）。"""
+    return pred_out_path + GENERATION_POINTER_SUFFIX
+
+
+def stage_yarn_generation(pred_out_path, attempt_id):
+    """059+066/crash-recovery：预测写入不可变 generation 目录。
+
+    返回 gen 目录内的预测文件路径（生成循环直接写这里）：
+    {out}.gen-{attempt_id}/{basename}。修复前（059 两步提交）临时
+    预测是 pred_dir 下的散文件、提交点第一步把它 os.replace 到最终
+    路径——两步之间死亡且 B 与 A 字节完全相同时留下「B 物理写入的
+    预测 + A 旧回执」（三方 SHA 全等，混合代不可检，066）。指针协议
+    下预测不再落最终路径，与完成回执同置 gen 目录，提交 =
+    commit_yarn_generation 单次原子切指针。目录名不以 .jsonl 结尾
+    → 生成中断留下的 partial gen 目录不污染 best-file 仲裁 / SKIP
+    幂等的行数口径。"""
+    gdir = generation_dir_for(pred_out_path, attempt_id)
+    os.makedirs(gdir, exist_ok=True)
+    return os.path.join(gdir, os.path.basename(pred_out_path))
+
+
 def stage_yarn_receipt(pred_out_path, receipt, attempt_id):
-    """059：完成回执写入临时旁挂（不落最终路径）。
+    """059+066/crash-recovery：完成回执写入同一不可变 generation 目录。
 
     仅在生成循环结束、预测文件关闭并算出 SHA256/行数后调用（v2 回执
-    的绑定字段由此闭合）。临时文件 + fsync；提交点由
-    commit_yarn_generation 统一执行。返回临时 receipt 路径。"""
-    path = producer_receipt_path_for(pred_out_path)
+    的绑定字段由此闭合）。回执与预测同目录共存 → 指针切换后消费侧
+    从同一 gen 目录同时读到两文件（同代同源）。目录内临时文件 + fsync
+    + os.replace 落位；指针切换由 commit_yarn_generation 统一执行。
+    返回 gen 目录内的回执路径。"""
+    gdir = generation_dir_for(pred_out_path, attempt_id)
+    os.makedirs(gdir, exist_ok=True)
+    path = os.path.join(
+        gdir, os.path.basename(producer_receipt_path_for(pred_out_path)))
     tmp = f"{path}.tmp-{attempt_id}"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(receipt, f, indent=1, ensure_ascii=False)
         f.flush()
         os.fsync(f.fileno())
-    return tmp
+    os.replace(tmp, path)
+    return path
 
 
 def commit_yarn_generation(tmp_pred, tmp_receipt, pred_out_path):
-    """059：单次原子提交点（generation → 最终路径 + 完成回执）。
+    """066/crash-recovery（#198）：单次原子提交点 = 切指针。
 
-    顺序：先 os.replace 临时预测 → 最终路径，再 os.replace 临时完成
-    回执 → 旁挂路径——回执最后落盘 = 提交信号（与 E116f「receipt 最后
-    落盘 = 唯一提交信号」同语义）。两步之间死亡 → 最终路径为新预测配
-    旧回执（SHA 必失配）→ 消费侧同代绑定校验 fail-closed（坏态可检，
-    不静默）。提交前死亡 → 最终路径保持上一代完整产物（旧预测配旧
-    回执，同代自洽），临时文件残留无 glob 污染。"""
-    os.replace(tmp_pred, pred_out_path)
-    os.replace(tmp_receipt, producer_receipt_path_for(pred_out_path))
+    修复前（059）顺序为「os.replace 临时预测 → 最终路径，再
+    os.replace 完成回执 → 旁挂路径」，docstring 声称「两步之间死亡
+    → 新预测配旧回执（SHA 必失配）→ 消费侧 fail-closed」——该前提
+    在 B 与 A 字节完全相同时【不成立】（066 审计复现：同字节异配置
+    崩溃中间态被 verified_same_generation=true 接受），SHA 校验只能
+    拒绝内容失配的坏态、不能证明运行同代。
+
+    指针协议：预测与回执已在不可变 gen 目录内就绪（tmp_pred /
+    tmp_receipt 须同目录），提交 = 写指针临时文件 + fsync + 单次
+    os.replace 原子切换 {out}.tli_gen（E116f「指针切换 = 唯一提交
+    信号」同语义）。崩溃三阶段：
+      - gen 未就绪 / 指针未切 → 旧完整代可见（指针仍指旧 gen 目录）；
+      - 指针已切 → 新完整代可见；
+      - 混合代不可达（预测与回执同目录，消费侧从指针同时读两文件）。
+    提交后的旧 gen 目录不清理（指针已不再引用；崩溃语义需要旧完整
+    代可见，与 059「临时残留不污染 glob」同纪律——.gen 目录名不以
+    .jsonl 结尾）。返回指针路径。"""
+    gdir = os.path.dirname(tmp_pred)
+    if os.path.dirname(tmp_receipt) != gdir:
+        raise ValueError(
+            f"commit_yarn_generation: 预测与回执不在同一 generation 目录"
+            f"（{tmp_pred!r} vs {tmp_receipt!r}）——指针协议要求两文件同"
+            f"目录共存，否则指针切换后无法保证同代同源（066/crash-"
+            f"recovery）")
+    if not os.path.isfile(tmp_pred) or not os.path.isfile(tmp_receipt):
+        raise ValueError(
+            f"commit_yarn_generation: generation {gdir} 缺预测或回执"
+            f"（isfile(pred)={os.path.isfile(tmp_pred)}, "
+            f"isfile(receipt)={os.path.isfile(tmp_receipt)}）——不得提交"
+            f"半成品 generation（066/crash-recovery）")
+    pointer_path = generation_pointer_path(pred_out_path)
+    tmp_pointer = f"{pointer_path}.tmp-{os.getpid()}"
+    with open(tmp_pointer, "w", encoding="utf-8") as f:
+        f.write(os.path.basename(gdir) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_pointer, pointer_path)
+    return pointer_path
+
+
+def resolve_generation_pointer(pred_out_path):
+    """066/crash-recovery（#198）消费侧：指针 → generation 解析入口。
+
+    {out}.tli_gen 存在 → 读其内容为 gen 目录名，校验 gen 目录及其内
+    预测/回执两文件齐备，返回 dict：
+        {"binding": "pointer-v1",
+         "pointer_path": ..., "gen_dir": <gen 目录绝对路径>,
+         "pred_path": <gen 内预测>, "rcp_path": <gen 内回执>}
+    指针不存在 → 返回 None（legacy-direct：调用方按既有最终路径直接
+    读，既有产物零改动）。
+    指针存在但内容为空/指向不存在的 gen 目录/缺预测或缺回执 →
+    SystemExit fail-closed（存在即证据：不静默回退 legacy-direct——
+    回退会把指针协议的死亡中间态静默解释成完整代；python -O 不失效）。
+    本函数不校验回执内容（schema/同代绑定由消费侧
+    score_ruler_formal._load_producer_yarn_receipt 承载）。"""
+    pointer_path = generation_pointer_path(pred_out_path)
+    if not os.path.isfile(pointer_path):
+        return None
+    try:
+        with open(pointer_path, "r", encoding="utf-8") as f:
+            gen_name = f.read().strip()
+    except OSError as e:
+        raise SystemExit(
+            f"[GATE-FAIL] {pointer_path}: generation 指针读取失败（{e}）"
+            f"——存在即证据，fail closed（066/crash-recovery）")
+    if not gen_name or os.path.basename(gen_name) != gen_name or \
+            gen_name in (".", "..") or "/" in gen_name:
+        raise SystemExit(
+            f"[GATE-FAIL] {pointer_path}: 指针内容 {gen_name!r} 非合法"
+            f" generation 目录名——fail closed（066/crash-recovery）")
+    gen_dir = os.path.join(os.path.dirname(os.path.abspath(pred_out_path)),
+                           gen_name)
+    pred_path = os.path.join(gen_dir, os.path.basename(pred_out_path))
+    rcp_path = os.path.join(gen_dir, os.path.basename(
+        producer_receipt_path_for(pred_out_path)))
+    if not os.path.isdir(gen_dir) or not os.path.isfile(pred_path):
+        raise SystemExit(
+            f"[GATE-FAIL] {pointer_path}: 指向的 generation {gen_name} 目录"
+            f"或其中预测缺失（{pred_path}）——指针存在即证据，不得静默"
+            f"回退直接读路径，fail closed（066/crash-recovery）")
+    if not os.path.isfile(rcp_path):
+        raise SystemExit(
+            f"[GATE-FAIL] {pointer_path}: 指向的 generation {gen_name} 缺"
+            f"完成回执（{rcp_path}）——gen 未就绪的死亡中间态，指针未切换"
+            f"才对（存在即证据），fail closed（066/crash-recovery）")
+    return {
+        "binding": GENERATION_BINDING_POINTER,
+        "pointer_path": os.path.abspath(pointer_path),
+        "gen_dir": os.path.abspath(gen_dir),
+        "pred_path": os.path.abspath(pred_path),
+        "rcp_path": os.path.abspath(rcp_path),
+    }
 
 
 # ---- 060：严格 schema 校验 + 配置指纹 ----

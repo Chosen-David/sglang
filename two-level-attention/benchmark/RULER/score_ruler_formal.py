@@ -226,10 +226,16 @@ from benchmark.RULER.score_ruler import (  # noqa: E402
 # 059/060（#195）：v2 同代绑定校验 + 严格 schema + 跨格配置一致性门禁
 # 066（#197）：acquire/release_output_lock——freeze 冻结窗口与生产者
 #   同键互斥（056/059 口径 realpath 输出路径锁原语，见 yarn_receipt.py）
+# 066/crash-recovery（#198）：resolve_generation_pointer——指针协议产物
+#   从 {pred}.tli_gen 解析不可变 generation（预测与回执同目录同源），
+#   混合代不可达；无指针 → legacy-direct 直接读路径（既有产物零改动）
 from benchmark.RULER.yarn_receipt import (  # noqa: E402
-    RECEIPT_V1_VERSION, RECEIPT_VERSION, acquire_output_lock,
-    effective_config_sha256, producer_receipt_path_for,
-    release_output_lock, validate_producer_receipt,
+    GENERATION_BINDING_LEGACY, GENERATION_BINDING_POINTER,
+    GENERATION_POINTER_SUFFIX, RECEIPT_V1_VERSION, RECEIPT_VERSION,
+    acquire_output_lock, effective_config_sha256,
+    generation_pointer_path, producer_receipt_path_for,
+    release_output_lock, resolve_generation_pointer,
+    validate_producer_receipt,
 )
 
 FORMAL_PATH = os.path.abspath(__file__)
@@ -494,13 +500,18 @@ def _stamp_or_copy(src, dst, task, stamp):
     return True, out_rows
 
 
-def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum):
-    """057+059/060/062：探查 best-file 旁挂生产者 receipt，做自洽 +
-    同代绑定 + 严格 schema + staging 快照三方一致校验。
+def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum,
+                                 source_final_path=None):
+    """057+059/060/062+066/crash-recovery：探查 best-file 旁挂生产者
+    receipt，做自洽 + 同代绑定 + 严格 schema + staging 快照三方一致
+    校验。
 
-    参数（062 重排）：staged_pred = staging 派生副本路径（评分对象，
-    freeze_and_stage 已复制完成）；source_pred = 原始源路径（回执在其
-    旁挂探查，basename 与 staging 副本相同）。
+    参数（062 重排 + 066/crash-recovery 扩展）：staged_pred = staging
+    派生副本路径（评分对象，freeze_and_stage 已复制完成）；source_pred
+    = 实际被复制进 staging 的源文件路径（指针协议下位于 gen 目录内，
+    basename 与 staging 副本相同）；source_final_path = 指针探查基准
+    （best-file 最终路径 {task}-*.jsonl；None = 退回 source_pred——
+    直查/legacy 场景两者本就同一路径）。
 
     返回 receipt 摘要 dict；文件不存在 → None（legacy，如实标 missing）。
     存在但损坏/自相矛盾/协议不符/档位不符 → _fail（存在即证据：半写或
@@ -562,9 +573,46 @@ def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum):
     一代际；三方 SHA 校验仍保留为纵深防御（锁防活进程穿插，SHA 防死亡
     中间态——crash-between 留下的「新预测配旧回执」失配代际不经过锁，
     由 ②③ 拒收）。单独调用本函数（无调用方锁）时只有内容等价语义，
-    不得据此宣称运行同代（测试直查场景 staged==source 同文件退化）。"""
+    不得据此宣称运行同代（测试直查场景 staged==source 同文件退化）。
+
+    066/crash-recovery（#198）：上述 066 锁上下文声明成立的前提是
+    059 的【两步提交】——但两步之间死亡且 B 与 A 字节完全相同时，
+    盘上留下「B 物理写入的预测 + A 旧回执」，三方 SHA 全等，②③ 全过，
+    SHA 校验只能拒绝内容失配的坏态、不能证明运行同代。指针协议下
+    （yarn_receipt.resolve_generation_pointer）：生产者把预测与完成
+    回执同置不可变 generation 目录 {out}.gen-{attempt_id}/，提交 =
+    单次原子切指针 {out}.tli_gen。本函数先以 best-file 最终路径解析
+    指针：
+      - 有指针 → generation_binding="pointer-v1"：source_pred 必须
+        位于指针所指 gen 目录内（否则指针在发现与冻结之间被切换，
+        fail-closed），回执取 gen 目录内与预测同源的那份——物理来源
+        = 指针所指目录，混合代不可达；
+      - 无指针 → generation_binding="legacy-direct"（既有产物零改动，
+        维持 062①②③ 的锁 + SHA 双层兜底口径）。
+    两种绑定下 ②③ 三方一致校验保留为纵深防御（防同代文件被事后改写）。"""
     best_basename = os.path.basename(source_pred)
-    rcp_path = producer_receipt_path_for(source_pred)
+    # ---- 066/crash-recovery：先以 best-file 最终路径解析 generation 指针 ----
+    # 有指针 = pointer-v1（预测与回执同置指针所指 gen 目录，物理来源同源，
+    # 混合代不可达）；无指针 = legacy-direct（既有产物按旁挂约定路径直接读，
+    # 059 v2 及更早协议——062①②③ 锁 + SHA 双层兜底口径不变）。
+    final_path = (source_final_path if source_final_path is not None
+                  else source_pred)
+    gen_info = resolve_generation_pointer(final_path)
+    if gen_info is None:
+        binding_mode = GENERATION_BINDING_LEGACY
+        rcp_path = producer_receipt_path_for(source_pred)
+    else:
+        binding_mode = gen_info["binding"]  # = GENERATION_BINDING_POINTER
+        # 指针发现与冻结窗口之间的换代由调用方锁 + ②③ 三方校验兜底；
+        # source_pred 不在指针所指 gen 目录内 = 指针已被切换或 source
+        # 非 gen 代成员 —— fail-closed，不发布混合代际
+        if os.path.abspath(os.path.dirname(os.path.abspath(source_pred))) \
+                != os.path.abspath(gen_info["gen_dir"]):
+            _fail(f"{gen_info['pointer_path']}: staging 源 {source_pred} 不在"
+                  f"指针所指 generation 目录 {gen_info['gen_dir']} 内——"
+                  f"指针在解析与冻结之间被切换，或源非该 generation 成员，"
+                  f"fail closed（066/crash-recovery）")
+        rcp_path = gen_info["rcp_path"]
     if not os.path.isfile(rcp_path):
         return None
     # ---- 062①：回执单一 bytes 快照（解析与 SHA 同源）----
@@ -642,6 +690,19 @@ def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum):
         # 062①：receipt SHA 与解析同源（同一 bytes 快照）
         "sha256": rcp_sha,
         "receipt_version": version,
+        # 066/crash-recovery：generation 绑定口径——pointer-v1 = 从
+        # {out}.tli_gen 指针解析后同时读预测与回执（物理来源同源）；
+        # legacy-direct = 无指针产物按旁挂约定直接读（既有口径零改动）
+        "generation_binding": binding_mode,
+        # 066/crash-recovery：指针协议产物附带 generation 身份闭包
+        # （指针路径/gen 目录名/预测 SHA256/回执 SHA256——manifest 级
+        # 证据：本格评分对象的物理来源是指针所指不可变 gen 目录）
+        "generation": (
+            {"pointer_path": gen_info["pointer_path"],
+             "gen_dir_name": os.path.basename(gen_info["gen_dir"]),
+             "gen_pred_sha256": _file_sha256(gen_info["pred_path"]),
+             "gen_rcp_sha256": rcp_sha}
+            if gen_info is not None else None),
         "yarn_enabled": rcp["yarn_enabled"],
         "effective_yarn_factor": rcp["effective_yarn_factor"],
         "yarn_factor_source": rcp["yarn_factor_source"],
@@ -710,10 +771,41 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
         if not os.path.isdir(pred_dir):
             continue
         for task in TASKS:
-            files = sorted(glob.glob(
+            # ---- 066/crash-recovery：候选发现 = legacy 直写文件 + 指针代预测 ----
+            # 指针协议（#198）下预测不再落最终路径 {out}.jsonl，而是与完成
+            # 回执同置不可变 gen 目录 {out}.gen-{attempt_id}/，提交 = 切指针
+            # {out}.tli_gen。候选发现双通道：
+            #   ① legacy 直写文件（{task}-*.jsonl glob，既有口径零改动）；
+            #   ② 指针文件（{task}-*.jsonl.tli_gen glob）→ resolve_
+            #      generation_pointer 解析出 gen 目录内预测作为复制源
+            #      （指针存在但损坏/缺件 → resolve 内部 fail-closed，不静默
+            #      回退 legacy 直读）。同基名双通道并存时指针代优先——指针
+            #      切换 = 唯一提交信号，直写残留只可能来自更早的旧协议运行
+            #      （新代码不写直写文件）；-merged 派生物两通道一致排除。
+            legacy_files = [f for f in sorted(glob.glob(
                 os.path.join(pred_dir, f"{task}-*.jsonl")))
-            files = [f for f in files
-                     if not os.path.basename(f).endswith("-merged.jsonl")]
+                if not os.path.basename(f).endswith("-merged.jsonl")]
+            cand = {}   # basename -> {source, final, binding}
+            for f in legacy_files:
+                cand[os.path.basename(f)] = {
+                    "source": f, "final": f,
+                    "binding": GENERATION_BINDING_LEGACY}
+            for p in sorted(glob.glob(
+                    os.path.join(pred_dir,
+                                 f"{task}-*{GENERATION_POINTER_SUFFIX}"))):
+                final = p[: -len(GENERATION_POINTER_SUFFIX)]
+                base = os.path.basename(final)
+                if base.endswith("-merged.jsonl"):
+                    continue
+                gen_info = resolve_generation_pointer(final)
+                if gen_info is None:
+                    _fail(f"{p}: 指针文件存在但 resolve 返回 None——"
+                          f"指针协议解析内部矛盾，fail closed"
+                          f"（066/crash-recovery）")
+                cand[base] = {
+                    "source": gen_info["pred_path"], "final": final,
+                    "binding": GENERATION_BINDING_POINTER}
+            files = sorted(cand)   # 候选基名（排序确定性，既有口径）
             if not files:
                 continue
             # 032 源数据身份绑定：{data_root}/{L}/{task}.jsonl 必须存在
@@ -752,7 +844,11 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
                 #（同代冻结窗口无锁即不可闭合）；acquire 等待时长逐格记入
                 # manifest（cells[].tasks[].freeze_lock 轻量审计字段，长
                 # 时间 formal 持锁对补跑吞吐的影响据此可审计）。----
-                lock_keys = sorted(gfiles)
+                # 066/crash-recovery：锁键 = 候选【最终路径】——生产者锁
+                # 在 {out} 最终路径上（pred_ruler acquire_output_lock
+                # (out_path)），指针代候选的 source 在 gen 目录内但互斥
+                # 键必须与生产者同键，否则 B3 活进程互斥失效。
+                lock_keys = sorted(cand[f]["final"] for f in gfiles)
                 lock_fds = []
                 _lock_t0 = time.perf_counter()
                 for _lf in lock_keys:
@@ -775,9 +871,13 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
                     staged_files = []
                     stamped_flags = {}
                     for f in gfiles:
+                        # 066/crash-recovery：复制源 = 候选实际源（legacy =
+                        # 直写文件本身；指针代 = gen 目录内预测）
+                        src_f = cand[f]["source"]
                         dst = os.path.join(staged_root, Lname, f"pred{postfix}",
-                                           os.path.basename(f))
-                        stamped, rows = _stamp_or_copy(f, dst, task, stamp=stamp)
+                                           f)
+                        stamped, rows = _stamp_or_copy(src_f, dst, task,
+                                                       stamp=stamp)
                         staged_files.append(dst)
                         stamped_flags[dst] = stamped
                         if stamped:
@@ -840,14 +940,22 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
                         }
                     # ---- 057：生产者 yarn receipt 探查（best-file 旁挂）----
                     # best 是 staging 派生副本（与原始文件同名）；receipt 在
-                    # 原始 pred_dir 探查。缺 receipt = legacy（missing 如实
-                    # 记录，由 _resolve_yarn_identity 裁决 provenance）。
+                    # 原始源旁挂（legacy）/ gen 目录内（指针代）探查。缺
+                    # receipt = legacy（missing 如实记录，由
+                    # _resolve_yarn_identity 裁决 provenance）。
                     # 062：staged=评分对象、source=回执旁挂探查对象——同代
                     # 绑定与三方一致校验在 _load_producer_yarn_receipt 内
                     # 以 staging bytes 为锚完成。
-                    src_best = os.path.join(pred_dir, os.path.basename(best))
+                    # 066/crash-recovery：src_best = 实际复制源（legacy 直写
+                    # 文件 / 指针代 gen 目录内预测），source_final_path =
+                    # best-file 最终路径（指针解析基准，回执与代归属从
+                    # {final}.tli_gen 解析——物理来源同源，混合代不可达）。
+                    best_base = os.path.basename(best)
+                    src_best = cand[best_base]["source"]
+                    best_final = cand[best_base]["final"]
                     cell_rcp = _load_producer_yarn_receipt(
-                        best, src_best, task, Lnum)
+                        best, src_best, task, Lnum,
+                        source_final_path=best_final)
                     cell_key = f"{key}/{task}"
                     if cell_rcp is None:
                         producer_yarn["missing"].append(cell_key)
@@ -868,10 +976,18 @@ def freeze_and_stage(root, postfix, expect_tasks, stamp, staging,
                         "tasks": {},
                     })["tasks"][task] = {
                         "n": len(rows),
-                        "best_file": os.path.basename(best),
+                        "best_file": best_base,
                         "source_path": os.path.abspath(
-                            # best 与 staged 同名，映射回原始源文件
+                            # best 与 staged 同名，映射回实际复制源
+                            # （legacy 直写文件 / 指针代 gen 内预测）
                             src_best),
+                        # 066/crash-recovery：best-file 最终路径（指针解析
+                        # 基准；legacy 候选 = source_path 本身）
+                        "source_final_path": os.path.abspath(best_final),
+                        # 066/crash-recovery：generation 绑定口径——
+                        # pointer-v1（预测+回执从 {final}.tli_gen 指针解析，
+                        # 同 gen 目录同源）/ legacy-direct（直写路径直接读）
+                        "generation_binding": cand[best_base]["binding"],
                         "source_sha256": cell_source_sha,
                         # v2 时三者已断言一致（staged == receipt == source）
                         "derived_sha256": _file_sha256(best),
@@ -1047,6 +1163,14 @@ def _resolve_yarn_identity(args, producer_yarn):
         # 064①：True = 全部格 config.json 字节已 SHA 绑定；False = 存在
         # missing 格（model_config_sha256=None），完整模型配置闭包不成立
         "model_config_closure": model_config_closure,
+        # 066/crash-recovery：generation 绑定口径聚合（pointer-v1 = 预测与
+        # 回执从 {out}.tli_gen 指针解析（同 gen 目录同源，混合代不可达）；
+        # legacy-direct = 直写路径直接读（059 v2 及更早，锁+SHA 双层兜底）。
+        # 逐格明细见 cells[].tasks[].generation_binding；过渡期混装如实
+        # 记录两种口径（协议代际一致性仍由上方 versions 门禁承载）
+        "generation_binding_modes": sorted({
+            c.get("generation_binding", GENERATION_BINDING_LEGACY)
+            for c in found.values()}),
         "cells_with_receipt": len(found),
         "cells_total": n_total,
         "yarn_enabled": enabled,
