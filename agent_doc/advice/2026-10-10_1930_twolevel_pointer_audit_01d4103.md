@@ -134,3 +134,14 @@ POINTER_EXISTS=True
 1. Unicode 解码错误是否在共享解析边界稳定归一，并保持批量逐格继续；
 2. audit traversal 是否对 symlink 子树与 `scandir` 错误明确 fail-closed，且无环、无重复计数；
 3. 在具备 `torch` 的项目环境运行完整 068/069 普通与 `-O` 套件，再对真实 E109 根及允许别名做只读审计。
+
+## 主 AI 回应（2026-10-10 晚）
+
+**073/074 双核验属实全接受。** 亲验：yarn_receipt.py L517-523 `open(...,encoding="utf-8")` 只捕 `OSError`，`UnicodeDecodeError`（UnicodeError→ValueError 族）穿透 probe L284 / audit L247 的 `(SystemExit, OSError)` 兜底 → 裸 traceback，四态契约与逐格继续双双失效——073 成立。gen_completion_probe.py L229 `os.walk(root)` 无 `onerror` + `followlinks=False`：symlink 子目录静默不入、scandir 错误静默忽略，`total=0 invalid=0 rc=0` 把「没看到」表述成「零对象」——074 成立，你的「覆盖缺失没有 fail-closed，成功摘要不能证明清单完整」定性准确。hardlink 降 residual hardening、v1 receipt 兼容策略不算缺陷，两处独立复核裁决均同意。影响面同你判定：E109 收口数据零 pointer，无既有数据污染；风险在未来 pointer 产物预检/聚合别名目录。
+
+**修复（已派 agent，worktree 隔离）：**
+1. 073：`resolve_generation_pointer` 指针文本读取边界以 bytes 读 + 受控分支严格解码，`UnicodeError` 归一为带路径 `[GATE-FAIL] SystemExit`（共享解析器单口径，不在 probe/audit/formal 三处各补）；调用入口最后防线同步加 `UnicodeError`。
+2. 074：`os.walk` 挂 `onerror` → 覆盖错误 fail-closed（计入 coverage-error，不得静默继续后返回干净摘要）；symlink 子目录采你的最小安全修复——遇到即报覆盖错误/INVALID，不开 `followlinks=True`（环/重复计数/逃逸风险）；不实现聚合 symlink 边界（当前无该需求，留 residual）。
+3. 测试四类：非法 UTF-8 坏格夹两好格（单格 invalid/rc=2 + audit 三格全列 rc=2）、嵌套 symlink 子树、两个别名指向同目录（去重不重复计数）、不可读/消失子树——python±-O 双跑。修复后对 E109 真实输出根只读复扫，若出现 coverage error 先修可达性再谈重跑。
+
+**同期状态：E121（kimi3 13 修复）+ E122（γ off 自由竞争）已合并主仓 push（384dabe41）**——info.py 冲突取 E121 渲染超集（α/β/γ 全进名，γ off 渲染 goff），合并中抓到并修掉一个真问题：info.py γ 缺省 getattr 兜底 None 与 TLIIndexer 运行时兜底 1.0 失配（程序化 args 文件名标 goff 实际跑 γ=1.0，B09 族），已统一 1.0。联合验收全绿：E121 17/17 + E122 6/6 + near-SWA 3/3+4/4 + C3 5/5 + sparse_prefill 7/7 + e110 9/9 + e112 59 + binding 31/31 + 057 10/10 + 068/069 16/16 + E116f 12/12（python±-O）。E123 cavg GPU 小试已按用户授权起跑（4 臂 × 5 任务新口径，本地双卡），与 073/074 修复无耦合。
