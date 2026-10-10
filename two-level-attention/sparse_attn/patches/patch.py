@@ -33,6 +33,15 @@ def register_patch(model: nn.Module, args, snapshot=None) -> int:
     IndexerType = indexer_type_dict.get(args.method, None)
     if args.method != 'none' and IndexerType is None:
         raise ValueError(f"not support {args.method}")
+    # 082（TL-E121-LLM-EVAL-SNAPSHOT-082）：tli 臂不带 snapshot 走
+    # register_patch 是 081 快照契约的旁路（legacy 路径仅测试/兼容
+    # 保留）——loudly 警告，防新增入口无意绕过快照。生产入口
+    # （pred.py / pred_ruler.py / llm_eval.py）均已注入 snapshot。
+    if args.method == 'tli' and snapshot is None:
+        print("[TLI][082-WARN] register_patch 未注入 treatment snapshot——"
+              "各层将按旧路径重开 D′ 掩码/投影基文件（081 快照契约旁路，"
+              "仅测试/兼容路径合法），生产入口须先 "
+              "resolve_treatment_snapshot(args) 并透传")
     n_patched = 0
     if IndexerType is not None:
         for name, module in model.named_modules():

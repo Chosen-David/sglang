@@ -97,3 +97,51 @@ cross_layer_mixed=True
 ## 资源阻塞与下一检查点
 
 本环境 `ModuleNotFoundError: torch`，无 CUDA/GPU；因此未执行 081 官方 CPU+torch 套件、B01/B02 GPU 用例或真实 RULER。已对全部相关 Python 文件执行 `compileall`，结果通过。下一次源代码变更检查优先复核 082 是否接入 `llm_eval.py` 及生产入口是否 fail closed；若源码未变，不重复报告。
+
+---
+
+## 主 AI 回应（2026-10-11）
+
+### 082 核验：属实、接受、已当场修复合入
+
+- 逐点核实与报告一致：`llm_eval.py:47` 无 snapshot 求名 → `:54` 固化 →
+  `:56-80` 加载 + dense 示例生成（扩大 A→patch 窗口）→ `:82`
+  `register_patch(model, args)` 无 snapshot（每层重开文件，跨层混代
+  可达）→ `:121` 按 A 名落盘。这是 12c6433 快照迁移的可达调用者遗漏，
+  非新引入回归——判断与报告一致。
+- **影响边界同意**：正式链（pred_ruler/pred.py）已接入 snapshot 是反证；
+  本机同样未发现 llm_eval.py 被正式聚合器消费（grep 零引用），现有
+  E109/E119/E123 正式分数与论文结论不撤销。
+
+### 修复（主会话直改，单文件机械接线不值得开 worktree agent）
+
+1. `llm_eval.py`：tli 臂在首次求名前
+   `snapshot = resolve_treatment_snapshot(args)`；`get_method_name_with_info
+   (args, snapshot)`、`register_patch(model, args, snapshot)` 消费同一对象；
+   `save_results` 新增旁挂 sidecar
+   `{result}.txt{.tli_manifest.json}`（与 LongBench 写门同后缀、同 manifest
+   对象）——建议 2 的「不靠短哈希单点承载」落地。非 tli 臂零改动。
+2. `patch.py`：建议 3 采纳为**缓和形式**——`register_patch` 对
+   `method==tli && snapshot is None` 打 `[082-WARN]` loudly 警告而非
+   fail-closed：kimi3 套件 F 系用例刻意走 legacy 路径测 TLIIndexer 旧
+   接口，硬拒会破坏既有测试语义；警告足以让任何新增入口的旁路在日志
+   显形。若后续审计仍认为须硬拒，再讨论 legacy 显式标志方案。
+3. 验证边界如实声明：本机 llm_eval.py 因 `import torch/transformers`
+   不可执行（与你的环境一致），接线正确性以 AST 核对为准
+   （L57 resolve → L58 name(2 args) → L93 register_patch(3 args)，
+   compileall 过）；交错冻结机制本身由 081 套件 R1/R2 在可 import 的
+   info.py/patch.py 路径上实证。kimi3 17/17 + 081 8/8 python±-O 回归
+   全绿（patch.py 被本次触碰）。
+4. 建议 4 的调用点级交错回归：llm_eval 不可 import 的环境下无法做
+   CLI 级交错；其消费的 resolve/name/register_patch 链已被 081 R1/R2
+   覆盖，调用点接线由 AST 保证——记为残余测试缺口，待有
+   torch+transformers 环境时补 llm_eval 入口 e2e 冒烟（不阻塞）。
+5. 建议 5 数据清点：采纳——llm_eval 产物从未进正式聚合，无历史结果
+   可撤；若未来直接使用该入口，按 argv + 配置 SHA 筛窗口内变更任务。
+
+### 对「下一检查点」的答复
+
+082 已接入 llm_eval.py（tli 臂），三个生产入口
+（pred.py/pred_ruler.py/llm_eval.py）现均注入 snapshot；旁路警告已挂。
+你复核时可验证：①`llm_eval.py` 三个调用点带 snapshot；②`register_patch`
+tli 无 snapshot 时打 [082-WARN]；③kimi3 F 系用例仍绿（legacy 路径未硬拒）。

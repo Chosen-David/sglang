@@ -10,7 +10,11 @@ from transformers import (
 from sparse_attn.arguments import add_sparse_attn_args
 from sparse_attn.patches import register_patch
 from sparse_attn.metrics import get_metrics
-from sparse_attn.info import get_method_name_with_info
+from sparse_attn.info import (
+    get_method_name_with_info,
+    resolve_treatment_snapshot,
+    TREATMENT_MANIFEST_SIDECAR_SUFFIX,
+)
 
 os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
@@ -44,7 +48,14 @@ def main():
     args = parse_args()
     print("model: {}".format(args.model))
 
-    method_name = get_method_name_with_info(args)
+    # 082（TL-E121-LLM-EVAL-SNAPSHOT-082）：tli 臂在首次求 method name
+    # 之前一次冻结 treatment snapshot（081 同款契约）——本入口此前在
+    # 无 snapshot 状态下先固化名称、后逐层 patch，配置文件在窗口内
+    # 替换可形成「名 A / 运行时 B」乃至跨层混代。name / register_patch /
+    # 结果落盘 manifest 全程消费同一 snapshot。非 tli 臂零改动。
+    snapshot = (
+        resolve_treatment_snapshot(args) if args.method == "tli" else None)
+    method_name = get_method_name_with_info(args, snapshot)
     
     # 创建输出目录
     os.makedirs(args.output_dir, exist_ok=True)
@@ -79,7 +90,7 @@ def main():
     results = tokenizer.batch_decode(outputs)
     print(results)
 
-    register_patch(model, args)
+    register_patch(model, args, snapshot)
 
     import lm_eval
     from lm_eval import utils as lm_eval_utils
@@ -118,9 +129,11 @@ def main():
     print("mean select tokens:", metrics["mean_select_tokens"])
     
     # 保存结果到文件
-    save_results(args, result_filename, result_dict, result_table, metrics)
+    save_results(args, result_filename, result_dict, result_table, metrics,
+                 snapshot)
 
-def save_results(args, filename, result_dict, result_table, metrics):
+def save_results(args, filename, result_dict, result_table, metrics,
+                 snapshot=None):
     """保存评估结果到文件"""
         
     # 保存文本格式的结果表格
@@ -138,6 +151,15 @@ def save_results(args, filename, result_dict, result_table, metrics):
         f.write("Sparse Attention Metrics:\n")
         f.write(f"Mean Select Tokens: {metrics['mean_select_tokens']}\n")
     print(f"Text results saved to: {txt_path}")
+
+    # 082：tli 臂结果旁挂 canonical treatment manifest sidecar（与
+    # LongBench 写门/sidecar 同一 manifest 对象、同一后缀语义）——
+    # 结果身份不靠短哈希单点承载，可独立复核。
+    if snapshot is not None:
+        sidecar_path = txt_path + TREATMENT_MANIFEST_SIDECAR_SUFFIX
+        with open(sidecar_path, "w", encoding="utf-8") as f:
+            f.write(snapshot.manifest_json)
+        print(f"Treatment manifest saved to: {sidecar_path}")
     
 
 if __name__ == '__main__':
