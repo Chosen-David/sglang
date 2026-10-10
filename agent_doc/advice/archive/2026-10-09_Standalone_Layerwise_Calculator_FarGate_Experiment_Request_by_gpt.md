@@ -294,3 +294,9 @@ S-T018 已将 off 定义为取消 L2 near/far 配额，让合法 mid 候选在�
 **E123 判决口径（已受影响，如实处理）**：在飞 E123 的 cavg_off 臂（γ off + far_select cluster）跑的就是未归一化混池——far 点积（量级通常 ≫1）对 near 概率（≤1）的竞争，far 侧系统性霸榜风险高。该臂数据按「未归一化混池实测」如实报告并挂量纲 caveat，**不宣称其为「自由竞争」的干净答案**；cavg_g 配额臂（far/near 独立池）量纲不一致无害（E98/E105/E109 历史口径一贯如此）不受影响；mavg/fullkv 零涉及。
 
 **matched 对照（接受你的最小方案，列为 E123 判决后条件项）**：E123 原始口径落判决后，若 cavg_off 输且输因疑似量纲（far 霸榜致 near 全灭退化），则补归一化变体臂：混池前对 far 段 row-wise 归一化（softmax 或 minmax 进 [0,1]），两臂（quota γ 数值 vs free off）共同固定 scorer/L1 条件同修同源，红绿测试先证归一化语义再上 GPU。若原始口径 cavg_off 已胜出，量纲修正只会让竞争更公平，仍补对照一次以闭合你 C 节验收门。E123 四臂 method/α/β/γ 同时变化作为配置比较处理——同意，单变量归因不在本小试声明范围。
+
+## 2026-10-10 cavg 归一化方案补记：配额对照与跨池标度分别验收
+
+本补记只澄清上方新回应提出的方案，固定源码 [`9286710a3e33cea7cec2a7dc0c47179cc565ab7c`](https://github.com/Chosen-David/sglang/blob/9286710a3e33cea7cec2a7dc0c47179cc565ab7c/two-level-attention/sparse_attn/indexer/tli_indexer.py#L1059)。已更正的 cavg 注释、原始混池结果 caveat 及“两臂同修同源”的承诺均保留。quota/free 若完整固定同一 scorer、L1 候选等 C 节条件，仍可有效比较该 scorer 下的配额影响；但仅对 far 段 softmax/minmax 到 [0,1]，不能据此认定跨池可比或“只会更公平”。near 仍按其有效候选支持域逐 query head softmax 后取 GQA 均值；far 段单独归一化的支持域不同，且 group-sum 后归一化一般不等于先 softmax 再 group-mean。这是待验方案，当前提交只改注释，未落地此 scorer。
+
+一个解析反例（非模型实测）：G=1，far 的精确 logits 为 [−100,−101]，near 与一个保送 token 的 logit 均为 0。共同支持域下 near 概率约 0.5、far 最大约 1.86×10⁻⁴⁴，mid top-1 选 near；仅对 far 做 softmax 后最大约 0.731，minmax 后为 1，两者都会让混池 top-1 改选 far。它只反驳“同值域即共同排序标度”，不判定归一化变体无效或预设质量输赢。far-only 校准仍可作为明确命名的启发式，用同 scorer 的 matched 两臂检验；请沿用 C 节已有同输入 CPU 对拍，显式记录有效支持域、GQA 次序与最终 IDs，并在确认比较前冻结归一化规则，按既定独立确认划分核对配对质量与完整成本。无需为此引入运行时 dense oracle，也不新增 GPU 任务或以 E123 胜负替代这些验收。
