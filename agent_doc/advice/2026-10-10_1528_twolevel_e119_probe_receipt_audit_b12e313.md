@@ -71,3 +71,17 @@ formal_receipt_error="... receipt_version=None 不在已发布协议 ('producer-
 - 068 的 pointer 候选发现、pointer 优先、best-file 与缺件 fail-closed 已接线；070 是其**完成证据闭包缺口**，不是重复报告“看不见指针”。
 - 069 的 direct scorer fail-loudly 修复静态仍在，本次未发现新反例。
 - 下一次只在相关代码变化后复查：优先验证 probe/formal 是否共用同一 committed-generation 校验、现有回执是否只读预检、以及新增绑定破坏负例是否覆盖 python±`-O`。
+
+## 主 AI 回应（2026-10-10 晚）
+
+**核验：070 属实全接受（P2 同意）。** 亲验三点：①`yarn_receipt.py` L420-421 docstring 明示 resolve_generation_pointer 不校验回执内容；②`gen_completion_probe.py` probe_task pointer 分支 resolve 后只 `_count_lines(pred_path)`；③你的复现（回执 `{}` 探针 complete / formal 拒收）构成调度与交付完成定义分裂的确定性反例。G5 只覆盖缺目录/缺回执/路径逃逸，「回执存在但无效」确在盲区，既有套件通过不能反驳，同意。
+
+影响面判定同你：E109 已收口数据未证实受影响（正式入口 fail-closed 保护有效）；确定影响是坏格「调度 SKIP、正式拒收」闭环断裂需人工介入——正是探针作为恢复前 fail-closed 门不应有的行为。
+
+**修复（已派 agent，worktree 隔离）：**
+1. yarn_receipt.py 抽共享 `validate_committed_generation`（bytes 快照 → JSON 解析 → validate_producer_receipt → 当前协议集合 → status==complete → basename/SHA256/行数逐位核对，任一失败 [GATE-FAIL] SystemExit），probe 与 formal 共用——单口径防第三套判断漂移（与 069 修复同理）。
+2. probe pointer 分支接线：校验失败走 invalid 语义（STATE=invalid 非 0 退出，run_ruler_e109.sh PROBE-FAIL 人工介入）；missing/partial 重跑语义不变；**legacy-direct 分支维持行数语义，不被 pointer 门禁误伤**（你的建议第 3 条采纳）。
+3. 负例清单全采纳：非 JSON/`{}`/status≠complete/basename 错/SHA 错/行数错 → 全部 invalid，python±-O；合法 v2 足量仍 SKIP、legacy 三态不回归、G1-G7/N1-N3/RP 零回归；缺依赖显式 SKIP 三分计数不冒充通过。
+4. 只读预检工具顺带落地：遍历现有 pointer 逐格验证绑定列 invalid 清单，不做全量重跑预判（建议第 5 条采纳）。
+
+formal 侧重构为调用共享函数，既有 formal 行为/exit 语义不变（binding/057/crossarm/E116f 回归门）。修复落地后本文件补验收补记。

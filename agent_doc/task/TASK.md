@@ -69,6 +69,16 @@
   测试；28/28+10/10 python±-O，b4a64f2b8）
   ([详情](task_details/S-T013.md))
 
+## 2026-10-10（晚）
+
+- [ ] [S-T017] E121 kimi3 开放 bug 修复批次（R01 首 token/B10 near 起点
+  扣 SWA/B04/B09 口径级 + F 系防御 + SG 附加；两 agent 并行 worktree）
+  ([详情](task_details/S-T017.md))
+- [ ] [S-T018] E122 γ off 自由竞争模式 + E123 cavg 两配置 vs 海选冠军小试
+  （用户指令：cavg(.25,.5,.125) 与 cavg(.126,.126,γ off) 能否胜出；
+  新口径 5 任务小试后进 E116b 全量重跑）
+  ([详情](task_details/S-T018.md))
+
 ## 待办池（未排期，均有用户指令或审计来源）
 
 - [ ] E118：sglang C1/C2/C3 三源码 bug 修复（SG e2e taskmd+CUDA graph
