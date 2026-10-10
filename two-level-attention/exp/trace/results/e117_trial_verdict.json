@@ -1,0 +1,81 @@
+{
+  "verdict": "NO-GO",
+  "avg_perlayer": 50.2731,
+  "avg_uniform": 50.4308,
+  "mean_delta": -0.1577,
+  "bootstrap_ci95": [
+    -0.44,
+    0.1254
+  ],
+  "per_task": {
+    "narrativeqa": {
+      "perlayer": 24.25,
+      "uniform": 25.18,
+      "delta": -0.93
+    },
+    "qasper": {
+      "perlayer": 44.21,
+      "uniform": 44.21,
+      "delta": 0.0
+    },
+    "multifieldqa_en": {
+      "perlayer": 52.4,
+      "uniform": 52.93,
+      "delta": -0.53
+    },
+    "hotpotqa": {
+      "perlayer": 54.23,
+      "uniform": 53.53,
+      "delta": 0.7
+    },
+    "2wikimqa": {
+      "perlayer": 38.98,
+      "uniform": 39.64,
+      "delta": -0.66
+    },
+    "musique": {
+      "perlayer": 34.59,
+      "uniform": 35.63,
+      "delta": -1.04
+    },
+    "gov_report": {
+      "perlayer": 33.2,
+      "uniform": 33.4,
+      "delta": -0.2
+    },
+    "qmsum": {
+      "perlayer": 23.72,
+      "uniform": 23.99,
+      "delta": -0.27
+    },
+    "multi_news": {
+      "perlayer": 24.62,
+      "uniform": 24.32,
+      "delta": 0.3
+    },
+    "passage_retrieval_en": {
+      "perlayer": 99.0,
+      "uniform": 98.5,
+      "delta": 0.5
+    },
+    "triviaqa": {
+      "perlayer": 90.41,
+      "uniform": 89.99,
+      "delta": 0.42
+    },
+    "lcc": {
+      "perlayer": 67.95,
+      "uniform": 67.87,
+      "delta": 0.08
+    },
+    "repobench": {
+      "perlayer": 65.99,
+      "uniform": 66.41,
+      "delta": -0.42
+    }
+  },
+  "wins": 5,
+  "significant": false,
+  "method": "paired bootstrap over 13 task deltas, B=10000, seed=42",
+  "scorer": "benchmark/LongBench/eval.py (E116a gated)"
+}

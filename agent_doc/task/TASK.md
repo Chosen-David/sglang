@@ -46,8 +46,9 @@
 
 ## 2026-10-10
 
-- [ ] [S-T011] E117 8 层逐层配置 e2e 小试（进行中 8/13；两臂 perlayer vs uniform
-  配对，GPU0/GPU1 并行；判决规则：perlayer 优于 uniform → GO 并入生产）
+- [x] [S-T011] E117 8 层逐层配置 e2e 小试（**NO-GO**：perlayer 50.27 vs
+  uniform 50.43，配对差 −0.16 CI 含 0，5/13 胜；E85f 教训第三次验证，
+  E117 线负结果关闭，生产保持 uniform 冠军）
   ([详情](task_details/S-T011.md))
 - [x] [S-T014] E119-066 同字节异配置 provenance 修复（formal 冻结窗口生产者
   同键 flock + B3/B4 负例 + 锁开销实测；30/30+10/10 python±-O，c943bb028）
