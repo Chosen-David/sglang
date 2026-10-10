@@ -260,6 +260,12 @@ class TLIIndexer(TIAIndexer):
                 "k_qat": k_qat,
                 "cu_seqlens_k_coarse": cu_seqlens_k_coarse,
                 "cu_seqlens_k_fine": cu_seqlens_k,
+                # 【075 修复 2026-10-10（GPT 审计 TL-E121-PROJ-PAD-S-075）】投影
+                # 路径 k_qat 从 pad_k 派生 → score_fine 宽度 = Tpad（pad 后），
+                # 真实长度必须显式携带（= pad 前 k 的 token 数；B=1 下与
+                # cu_seqlens_k[-1]-cu_seqlens_k[0] 相等），供 compute_mask 把
+                # near/far 边界与 SWA 强制区落在真实域。
+                "valid_length": k.shape[1],
             }
             if self._need_avg_score():
                 # near/far 粗筛 avg 分数（E64f：near=avg / far=minmax；far=avg 单池也需）
@@ -305,6 +311,9 @@ class TLIIndexer(TIAIndexer):
             "k_qat": k_qat,
             "cu_seqlens_k_coarse": cu_seqlens_k_coarse,
             "cu_seqlens_k_fine": cu_seqlens_k,
+            # 075：非投影路径 k_qat 从真实 k 派生，valid_length == score_fine
+            # 宽度 → compute_mask 行为逐位不变（对称携带，接口统一）
+            "valid_length": k.shape[1],
         }
         # ---- B：远端/近端聚类（cluster/sim_greedy 消融模式构建；默认 4bit 分区无需聚类）----
         if (self.enable_kmeans and not self.skip_far
@@ -627,7 +636,11 @@ class TLIIndexer(TIAIndexer):
         # 现仅在「双池都不用 avg」时才走父类捷径；否则走本类路径
         # （idx_sub=None 时 minmax 分数与父类逐位等价，且计算 k_avg 分数源）。
         if not self.enable_subspace and not self._need_avg_score():
-            return super().compute_score(q, q_ids, index_dict, softmax_scale)
+            d = super().compute_score(q, q_ids, index_dict, softmax_scale)
+            # 075：父类捷径同样携带真实长度（该路径无投影，valid_length ==
+            # score_fine 宽度，行为不变；保持 score_dict 接口统一）
+            d["valid_length"] = index_dict.get("valid_length")
+            return d
         # A：L1 上界只在 d' 子空间维上算（q 同步取子空间，与 k_min/k_max 对齐）
         assert q.shape[0] == 1 and q.shape[1] == 1
         from einops import rearrange as _rearrange
@@ -704,6 +717,9 @@ class TLIIndexer(TIAIndexer):
             "score_coarse_avg": None if score_coarse_avg is None else score_coarse_avg.unsqueeze(0),
             "score_moba": None if score_moba is None else score_moba.unsqueeze(0),
             "score_fine": score_fine.unsqueeze(0),
+            # 075：真实序列长度随分数透传给 compute_mask（投影路径
+            # score_fine 宽 = Tpad ≠ 真实 S；无值时消费端回退宽度口径）
+            "valid_length": index_dict.get("valid_length"),
         }
 
     def _far_token_score(self, q):
@@ -745,11 +761,15 @@ class TLIIndexer(TIAIndexer):
         cscore = torch.einsum("hd,hkd->hk", q_g, self._km_near_centroids)  # [Hkv, K_c]
         return cscore.gather(1, self._km_near_assign)       # [Hkv, Tn]
 
-    def _moba_mask(self, score_dict, kt, bs):
+    def _moba_mask(self, score_dict, kt, bs, S_real):
         """E89 MoBA 复现臂：chunk gate top-K 块全展开（training-free，统一 harness）。
 
         gate = 全维 q·chunk-mean 分数；选 top-(K2/BS) 块 + 当前块强制，
         sink/swa 保送与 PSI 同口径。返回与 score_fine 同宽的 bool mask。
+        【075 修复】S_real = 真实序列长度（非投影 == score_fine 宽度，
+        行为逐位不变）；投影路径 tok_hi/swa 强制区必须落真实域——
+        旧口径 tok_hi=sf 宽=Tpad 使尾块展开 clamp 进 padding、swa 强制区
+        落 padded 尾部。
         """
         sm = score_dict.get("score_moba")
         assert sm is not None, "moba 臂需 prepare_index/compute_score 走 moba_gate 路径"
@@ -765,14 +785,16 @@ class TLIIndexer(TIAIndexer):
             sm.shape[:-1] + (sf.shape[-1],), dtype=torch.bool, device=sm.device
         )
         # 块展开：每块 bs 个 token（尾块按序列长度截断）
-        tok_hi = min(sf.shape[-1], kt * bs)
+        # 075：截断上界按真实 S_real（非投影 = sf 宽，逐位不变；投影防选 padding）
+        tok_hi = min(S_real, kt * bs)
         tok = (i_blk.unsqueeze(-1) * bs
                + torch.arange(bs, device=sm.device).view(1, 1, 1, bs)
                ).clamp(max=tok_hi - 1).reshape(i_blk.shape + (bs,))  # [1,1,Hkv,nb*bs]
         m.scatter_(-1, tok.reshape(*m.shape[:-1], -1), True)
         # 正交强制区：sink 头部 + swa 尾部（与 PSI/sigma 臂同口径，不占 gate 预算）
+        # 075：swa 尾部 = 真实 S 尾（非 padded 尾）；padding 段保持 False
         m[..., :sink_tok] = True
-        m[..., max(0, tok_hi - swa_tok):] = True
+        m[..., max(0, S_real - swa_tok):S_real] = True
         import os as _os
         if _os.environ.get("TLI_DEBUG") and self.layer_idx == 1:
             n_sel = int(m[..., :tok_hi].sum(dim=-1).float().mean().item())
@@ -782,6 +804,24 @@ class TLIIndexer(TIAIndexer):
     def compute_mask(self, q_ids, score_dict):
         score_coarse = score_dict["score_coarse"]
         score_fine = score_dict["score_fine"]
+        # ---- 【075 修复 2026-10-10（GPT 审计 TL-E121-PROJ-PAD-S-075，P1）】----
+        # 投影路径（--tli_proj_basis）的 k_qat 从 pad 后的 pad_k 派生 →
+        # score_fine 宽度 = Tpad（块对齐 padding 后长度）而非真实 S。
+        # 修复三件事（主会话拍板方向，与 GPT 建议一致）：
+        #   ① S_real 显式取 prepare_index 携带的 valid_length（= pad 前 k
+        #      真实 token 数；非投影路径 == score_fine 宽度，行为逐位不变）；
+        #   ② padding token（[S_real, Tpad) 段）在任何选择之前永久置 -inf，
+        #      保证 padding 永不入选任何池（topk/σ/强制区展开均免疫）；
+        #   ③ SWA 强制区与 near/far 边界全按真实 S 计算。
+        # 无 valid_length（外部直接合成 score_dict 驱动 compute_mask 的
+        # 既有测试/回放 harness）→ 回退 score_fine 宽度口径，逐位兼容。
+        _vl = score_dict.get("valid_length")
+        S_width = score_fine.shape[-1]
+        S_real = S_width if _vl is None else min(int(_vl), S_width)
+        if _vl is not None and S_real < S_width:
+            # 原地写 score_dict：p（softmax 源）、σ 分支与 ccluster 分支的
+            # sf_raw 均从 score_dict["score_fine"] 现读 → 同一份屏蔽全生效
+            score_dict["score_fine"][..., S_real:] = float("-inf")
         # ---- E103：kv-head 共享消融----
         # 共享口径（默认）：组内 mean 聚合到 kv-head 级 [1,1,Hkv,kt]；
         # per_q_head：旁路聚合，保留 per-q-head 分数 [1,1,H,kt] 直接进 topk
@@ -811,13 +851,19 @@ class TLIIndexer(TIAIndexer):
         # （kt*bs − near_len_dyn）逐位不变——(0,0) 的 far_hi = S − swa_tok
         # 恰为正确单池语义，不受本修复影响。
         # 【F5 修复 2026-10-10（kimi3 清单 2026-10-08）】e64 分区臂 mid/near_base
-        # 用真实 S（= score_fine 宽度，与本函数 L955 swa 强制区的 p.shape[-1]
-        # 同源）而非 pad 后 kt*bs——非对齐 S 下 α·mid 偏差 ≤ α·63 token
+        # 用真实 S 而非 pad 后 kt*bs——非对齐 S 下 α·mid 偏差 ≤ α·63 token
         # （decode 每步序列长多数不整除 bs；SG 侧 taskmd 本按真实因果长
         # S_r=t+1 计算，本修使 HF/SG 非对齐行口径一致）。对齐 S 行为逐位
         # 不变；(0,0)/老逻辑分支保持 pad 口径（_maybe_build_kmeans 的 far_hi
         # 必须块对齐——E72 decode 缓存依赖，不动）。
-        S_real = score_fine.shape[-1]
+        # 【075 修复（2026-10-10）】F5 原取「真实 S = score_fine 宽度」只在
+        # 非投影路径成立（k_qat 从真实 k 派生）；投影路径 score_fine 宽 =
+        # Tpad，F5 的真实 S 实取 pad 后长度 → mid/near/far 边界右移、SWA
+        # 强制区落 padded 尾部（S=6145/bs=64 实测 far_hi 5312 应 5248、
+        # 真实 SWA 只保 65/128）。现 S_real 统一取函数顶部的 valid_length
+        # 口径（见函数头 075 注释）；非投影路径 valid_length == 宽度，
+        # F5 修复行为逐位不变。
+        # S_real 已在函数顶部解析（valid_length 优先，回退 score_fine 宽度）
         if e64_partition:
             sink_tok = self.sink_blocks * bs
             mid_len = max(0, S_real - sink_tok - swa_tok)
@@ -966,7 +1012,11 @@ class TLIIndexer(TIAIndexer):
         if not self.per_q_head:
             # E103：共享口径组内 mean；per_q_head 保留 [1,1,H,T] 直接 topk
             p = rearrange(p, "b qt (h g) kt -> b qt h g kt", g=self.group_size).mean(dim=-2)
-        p[..., -self.sliding_window_size:] = 1.0
+        # 【075 修复】SWA 强制区按真实 S：p[..., -swa:] 在投影路径落 padded
+        # 尾部（消费端裁剪后真实序列尾只保 swa−(Tpad−S) 个 token，S=6145
+        # 实测 65/128）。改为 [S_real−swa, S_real)；非投影路径 S_real==宽度
+        # → 与旧 p[..., -swa:] 逐位等价（S_real<swa 时两者同为全宽度置位）。
+        p[..., max(0, S_real - swa_tok):S_real] = 1.0
         # 【B4 修复（kimi3 清单 F4，2026-10-08）】σ 死参数 fail-closed：
         # sigma_select≠none 但分区选择路径不可用（use_partition=False：
         # enable_kmeans 与 α/β 分区均未开，或 skip_far 跳层）或与
@@ -989,7 +1039,7 @@ class TLIIndexer(TIAIndexer):
         # 无两级、无量化、无分区；sink/swa 保送与 PSI 同口径（预算 K2=1024
         # → 16 块 + sink 2 块 + swa 16 块，选中 token 数与 PSI 严格对齐）。
         if self.moba_gate:
-            return self._moba_mask(score_dict, kt, bs)
+            return self._moba_mask(score_dict, kt, bs, S_real)
         # ---- E87：top-σ 选择（用户 2026-10-02 定义）----
         # sigma 侧不做两级：该区全部 token 的细筛原始分（GQA group-mean 口径与 p
         # 一致）≥ sink token 分数 max − σ 即选中；预算可变（σ 为质量-预算旋钮）。
@@ -999,7 +1049,8 @@ class TLIIndexer(TIAIndexer):
             far_tok_lo = far_lo_blk * bs
             far_tok_hi = min(near_blks * bs, p.shape[-1])
             sink_tok = far_tok_lo
-            swa_lo_tok = max(0, p.shape[-1] - self.sliding_window_size)
+            # 075：swa 起点按真实 S（p 宽度在投影路径是 Tpad）
+            swa_lo_tok = max(0, S_real - self.sliding_window_size)
             sf_raw = score_dict["score_fine"][..., : p.shape[-1]].to(torch.float32)
             sf_g = rearrange(sf_raw, "b qt (h g) kt -> b qt h g kt",
                              g=self.group_size).mean(dim=-2)
@@ -1025,8 +1076,9 @@ class TLIIndexer(TIAIndexer):
                 i_n = torch.topk(near_p, k2_near, dim=-1).indices + far_tok_hi
                 m.scatter_(-1, i_n, True)
             # 正交强制区直接置位（必选不占预算）：sink 头部 + swa 尾部
+            # 075：swa 尾部 = 真实 S 尾（非 padded 尾）；padding 段保持 False
             m[..., :sink_tok] = True
-            m[..., swa_lo_tok:] = True
+            m[..., swa_lo_tok:S_real] = True
             import os as _os
             if _os.environ.get("TLI_DEBUG") and self.layer_idx == 1:
                 n_sig = int(m[..., far_tok_lo:swa_lo_tok].sum(dim=-1).float().mean().item())
@@ -1046,8 +1098,10 @@ class TLIIndexer(TIAIndexer):
             # 固定区 token 不进任何 topk 池，最终 mask 直接置位
             # （如 K2=2048、sink=128、swa=128 → mid_token = 1792 全给创新管线）
             sink_tok = far_tok_lo
-            swa_lo_tok = max(0, p.shape[-1] - self.sliding_window_size)
-            K2_mid = max(0, K2 - sink_tok - (p.shape[-1] - swa_lo_tok))
+            # 075：swa 起点/强制区宽度按真实 S——投影路径 p 宽 = Tpad，
+            # 旧口径 swa 强制区落 padded 尾且 K2_mid 把 padding 段当 swa 扣除
+            swa_lo_tok = max(0, S_real - self.sliding_window_size)
+            K2_mid = max(0, K2 - sink_tok - (S_real - swa_lo_tok))
             # ---- E122：γ=off 自由竞争（用户 2026-10-10 指令，cavg 探索臂）----
             # 取消 near/far 配额分割：全部 mid 候选在统一预算 K2_mid 内单池
             # topk 竞争。语义边界（全部保持不变）：
@@ -1103,8 +1157,9 @@ class TLIIndexer(TIAIndexer):
                 m_off = torch.zeros_like(p, dtype=torch.bool)
                 m_off.scatter_(-1, i_tok, True)
                 # 正交强制区直接置位（必选不占预算）：sink 头部 + swa 尾部
+                # 075：swa 尾部 = 真实 S 尾；padding 段保持 False
                 m_off[..., :sink_tok] = True
-                m_off[..., swa_lo_tok:] = True
+                m_off[..., swa_lo_tok:S_real] = True
                 return m_off
             nt_near = 0
             # 【C-1 修复 2026-10-08（pool_starvation_audit §5-1）】far token 池空
@@ -1199,10 +1254,16 @@ class TLIIndexer(TIAIndexer):
             topk_mask.scatter_(-1, i_f, True)
             topk_mask.scatter_(-1, i_n, True)
             # 正交强制区直接置位（必选不占预算）：sink 头部 + swa 尾部
+            # 075：swa 尾部 = 真实 S 尾；padding 段保持 False
             topk_mask[..., :sink_tok] = True
-            topk_mask[..., swa_lo_tok:] = True
+            topk_mask[..., swa_lo_tok:S_real] = True
             return topk_mask
-        values, indices = torch.topk(p, min(p.shape[-1], self.args.tia_level2_topk), dim=-1)
+        # 【075 修复】legacy 全序列 topk 只在真实 token 域 [0, S_real) 内选：
+        # 投影路径 p 宽 = Tpad，旧 topk k=min(Tpad, K2) 在预算 ≥ 候选数时会把
+        # p=0 的 padding 位选进 mask（挤占真实 token 预算 + 虚增 select_tokens
+        # 统计）。非投影路径 S_real==p 宽 → 逐位不变。
+        p_real = p[..., :S_real]
+        values, indices = torch.topk(p_real, min(p_real.shape[-1], self.args.tia_level2_topk), dim=-1)
         topk_mask = (
             torch.zeros_like(p, dtype=torch.bool)
             .scatter_(-1, indices, torch.ones_like(values, dtype=torch.bool))
