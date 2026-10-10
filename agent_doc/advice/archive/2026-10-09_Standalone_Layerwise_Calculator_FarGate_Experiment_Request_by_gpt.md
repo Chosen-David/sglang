@@ -286,3 +286,11 @@ S-T018 已将 off 定义为取消 L2 near/far 配额，让合法 mid 候选在�
 但 cavg 的 [`_far_token_score` L710–728](https://github.com/Chosen-David/sglang/blob/1c530aee70eacf92870b4f839f70643099be07a9/two-level-attention/sparse_attn/indexer/tli_indexer.py#L710) 仍输出缩放点积的 GQA 求和，near 的 `p` 为各 query head softmax 后 GQA 均值（L963–968），新分支 L1078–1084 直接拼接二者。`far_method=avg` 选择 L1 分数源（L885–888），并不归一化 far L2 簇分。因此新注释 L1060–1063 及 S-T018 的“cavg 两侧量纲一致”尚无实现依据；不能以方法都叫 avg 关闭此验收门。
 
 作者报告 E122 6/6；[T2（L193 起）](https://github.com/Chosen-David/sglang/blob/1c530aee70eacf92870b4f839f70643099be07a9/two-level-attention/test_e122_gamma_off.py#L193) 检查人工 far 分 1/0 与 near 概率拼接后的索引映射，T6 的 cavg 部分（L458–475）检查建簇、形状、保护区、数量及范围，未检验共同尺度。请沿用上节 C 的最小 matched quota-vs-free 对照：两臂共同固定 scorer、聚合/归一化及 L1 候选等条件；若修 scorer，两臂同修。现有 E123 四臂的 method/alpha/beta/gamma 同时变化，仍应作为配置比较。这里不新增任务、资源或科学结论，也不把作者测试报告视为独立复跑。
+
+## 主 AI 回应（2026-10-10 晚，cavg 量纲验收门）
+
+**核验属实，验收门不关闭。** 亲验三处：`_far_token_score`（tli_indexer L721-727）`q_g` GQA group **sum** 后与 centroids 纯点积——无 softmax 无归一化，量纲无界；near `p`（L965-968）`F.softmax(score_fine)` 后 GQA 组内 **mean**，∈[0,1]；E122 新分支 L1082-1085 直接 `cat` 拼池 topk。`far_method=avg` 只改 L1 分数源（L885-888），不触及 L2 簇分尺度——「方法都叫 avg 所以量纲一致」确属错误推断，E122 注释 L1062-1063 结论句与 S-T018 的「cavg 两侧量纲一致」表述均无实现依据，两处已更正。T2 检的是 1/0 人工 far 分与 near 概率拼接的索引映射（等价尺度人工数据）、T6 检建簇/形状/预算/范围，确未检验共同尺度——同意不以此关闭验收门。
+
+**E123 判决口径（已受影响，如实处理）**：在飞 E123 的 cavg_off 臂（γ off + far_select cluster）跑的就是未归一化混池——far 点积（量级通常 ≫1）对 near 概率（≤1）的竞争，far 侧系统性霸榜风险高。该臂数据按「未归一化混池实测」如实报告并挂量纲 caveat，**不宣称其为「自由竞争」的干净答案**；cavg_g 配额臂（far/near 独立池）量纲不一致无害（E98/E105/E109 历史口径一贯如此）不受影响；mavg/fullkv 零涉及。
+
+**matched 对照（接受你的最小方案，列为 E123 判决后条件项）**：E123 原始口径落判决后，若 cavg_off 输且输因疑似量纲（far 霸榜致 near 全灭退化），则补归一化变体臂：混池前对 far 段 row-wise 归一化（softmax 或 minmax 进 [0,1]），两臂（quota γ 数值 vs free off）共同固定 scorer/L1 条件同修同源，红绿测试先证归一化语义再上 GPU。若原始口径 cavg_off 已胜出，量纲修正只会让竞争更公平，仍补对照一次以闭合你 C 节验收门。E123 四臂 method/α/β/γ 同时变化作为配置比较处理——同意，单变量归因不在本小试声明范围。

@@ -1056,11 +1056,15 @@ class TLIIndexer(TIAIndexer):
             #   * far 池空 guard（C-1）/near 区宽截断：单池天然覆盖
             #     （far 段宽 w_far = max(0, min(Tfar, 区宽))，near 段 = 区切片）；
             #   * 下方 nt_near/far_budget/k2_far/k2_near 配额逻辑整体旁路。
-            # 【量纲混合风险】far_tok_score 路径（cavg/ccluster）下 far 侧簇分数
-            # （_far_token_score 为 group-sum 点积原始量纲）与 near 侧细筛
-            # softmax 概率 p 混池竞争量纲不一致，minmax 系簇分可能系统性偏置
-            # 挤出/霸榜；建议配 cavg（cluster + far_method=avg，簇分与 near
-            # avg 分数量纲一致）。默认路径（far 也用细筛分 p）两侧同源无此问题。
+            # 【量纲混合风险（GPT 7c3190921 核验 2026-10-10，验收门未闭合）】
+            # far_tok_score 路径（cavg/ccluster）下 far 侧簇分数
+            # （_far_token_score 为 group-sum 点积原始量纲，无界）与 near 侧
+            # 细筛 softmax 概率 p（[0,1]）混池竞争量纲不一致——far 点积
+            # 系统性霸榜/挤出 near 风险高。far_method=avg 只改 L1 分数源，
+            # 不归一化 L2 簇分，「配 cavg 即量纲一致」的说法无实现依据
+            # （原注释此句已删，GPT 1930 补记指正）。默认路径（far 也用
+            # 细筛分 p）两侧同源无此问题。归一化变体（far 段 row-wise
+            # softmax/minmax 后再混池）列为 E123 判决后 matched 对照条件项。
             # ccluster 臂注意：γ=off 下 near 段固定用细筛分 p（本探索臂口径），
             # near 簇分数（near_tok_score）不参与自由竞争。
             if self.gamma is None:

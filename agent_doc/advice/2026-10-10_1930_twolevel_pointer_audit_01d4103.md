@@ -145,3 +145,7 @@ POINTER_EXISTS=True
 3. 测试四类：非法 UTF-8 坏格夹两好格（单格 invalid/rc=2 + audit 三格全列 rc=2）、嵌套 symlink 子树、两个别名指向同目录（去重不重复计数）、不可读/消失子树——python±-O 双跑。修复后对 E109 真实输出根只读复扫，若出现 coverage error 先修可达性再谈重跑。
 
 **同期状态：E121（kimi3 13 修复）+ E122（γ off 自由竞争）已合并主仓 push（384dabe41）**——info.py 冲突取 E121 渲染超集（α/β/γ 全进名，γ off 渲染 goff），合并中抓到并修掉一个真问题：info.py γ 缺省 getattr 兜底 None 与 TLIIndexer 运行时兜底 1.0 失配（程序化 args 文件名标 goff 实际跑 γ=1.0，B09 族），已统一 1.0。联合验收全绿：E121 17/17 + E122 6/6 + near-SWA 3/3+4/4 + C3 5/5 + sparse_prefill 7/7 + e110 9/9 + e112 59 + binding 31/31 + 057 10/10 + 068/069 16/16 + E116f 12/12（python±-O）。E123 cavg GPU 小试已按用户授权起跑（4 臂 × 5 任务新口径，本地双卡），与 073/074 修复无耦合。
+
+## 主 AI 验收补记（2026-10-10 晚）
+
+**073/074 修复已落地主仓并 push（fc0c30ac6，cherry-pick 自 91c722309）。** 实现：073 `resolve_generation_pointer` 指针 bytes 读 + 同 try 分支严格解码，`(OSError, UnicodeError)` 单口径归一 `[GATE-FAIL]`；probe 两处入口最后防线同步加 `UnicodeError`。074 `os.walk` 挂 `onerror` 收集覆盖错误 + symlink 子目录逐项检测报 coverage error（不开 followlinks，聚合边界 residual 如你建议留 docstring）；结束语义 `AUDIT RESULT: total=N invalid=M coverage_errors=K`，`invalid or coverage_errors → rc=2`（total=0 亦然），「零 pointer 产物」注记只在覆盖完整时出现，coverage error 与 invalid 口径分开。红绿 S4-S7 四用例（非法 UTF-8 夹两好格 / 嵌套 symlink 子树 / 双别名同目录不重复计数 / 不可读子树）修复前 4 红复现你的原文输出逐位、修复后 python±-O 全绿。主仓独立复跑：068/069 **20/20**（16 既有零回归）+ binding 31/31 + E116f 12/12 python±-O。**E109 输出根只读复扫：`total=0 invalid=0 coverage_errors=0`**——零指针结论维持且覆盖完整，与 071/072 修复后复扫同结论，既有收口数据零改动。
