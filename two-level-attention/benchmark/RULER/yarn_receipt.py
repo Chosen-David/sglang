@@ -111,6 +111,25 @@
 #   绑定字段 → 不做字节比对，与 formal 的降级消费同口径——指针协议
 #   生产路径只产 v2，v1 属理论边界，按 formal 既有行为不在此拒收）。
 #
+# ===== #201（GPT 2026-10-10 1732 审计 071/072 两项修复）=====
+#   TL-E119-POINTER-SYMLINK-071（P2，resolve_generation_pointer）：
+#       修复前用词法路径 + 跟随 symlink 的 isdir/isfile 判存在——
+#       generation 内预测/回执可为指向目录外的 symlink，且外部字节与
+#       receipt 声明逐位自洽时 probe complete / audit OK / formal 标
+#       verified_same_generation=true，违反「不可变 generation 内物理
+#       同源」契约。修复：指针本身 lstat 门禁（islink/lexists）+ gen
+#       目录/预测/回执终分量 islink 拒 + realpath+commonpath 闭包
+#       （_realpath_within，防中间分量逃逸；取舍与 TOCTOU 残余风险
+#       声明见该函数 docstring）；resolve 返回值附带 canonical
+#       realpath，formal 来源闭包比对锚改用它（不再只比词法 dirname）。
+#   TL-E119-PROBE-PRED-IO-072（P3，validate_committed_generation）：
+#       回执读取异常已归一（062①），预测 _file_sha256/_count_lines 的
+#       OSError 此前直接 traceback——单格探针无 STATE=invalid、
+#       --audit-dir 首个坏格中止无法列全。修复：预测读取 OSError 统一
+#       转 [GATE-FAIL] SystemExit（带路径+阶段）；audit_directory 逐格
+#       以 (SystemExit, OSError) 兜底捕获，坏格计 invalid 后继续下一格
+#       （gen_completion_probe.py 侧落地）。
+#
 # 本模块刻意零重依赖（不 import torch/transformers/sparse_attn）——
 # 生成侧、消费侧与 CPU 红绿测试三方共享同一解析/校验口径，干净检出
 # 恒可单测。
@@ -419,24 +438,82 @@ def commit_yarn_generation(tmp_pred, tmp_receipt, pred_out_path):
     return pointer_path
 
 
+def _realpath_within(path, anchor_dir):
+    """071（TL-E119-POINTER-SYMLINK）：realpath 闭包检查——path 跟随
+    全部 symlink 分量解析后仍位于 anchor_dir 目录内。
+
+    实现取舍声明（审计建议 1+2 组合的落地选择）：无竞态的 fd 级方案
+    （os.open(gen_dir, O_DIRECTORY|O_NOFOLLOW) 取目录 fd + dir_fd +
+    O_NOFOLLOW 逐文件打开 + fstat 确认普通文件）需要把 fd/inode 贯穿
+    probe 行数计数、formal staging 复制、共享校验器哈希与 062③ 三方
+    SHA 比对的全部调用链——改动面远超「最小可靠修复」；此处采用
+    lstat（islink，拒终分量 symlink）+ realpath+commonpath（拒中间
+    分量/目录链逃逸）双查。残余风险为 TOCTOU（检查与后续按路径打开
+    之间被并发替换为 symlink）——由指针协议的生产/消费同键 flock
+    （066）与 062②③ 三方 SHA 一致性纵深防御兜底；committed
+    generation 目录按协议不可变，窗口内主动注入 symlink 不属本门禁
+    威胁模型（如实声明，不冒充无竞态）。commonpath 对不可比较路径抛
+    ValueError → 视为逃逸（fail closed，不吞异常）。"""
+    try:
+        a = os.path.realpath(anchor_dir)
+        p = os.path.realpath(path)
+        return os.path.commonpath([p, a]) == a
+    except ValueError:
+        return False
+
+
 def resolve_generation_pointer(pred_out_path):
     """066/crash-recovery（#198）消费侧：指针 → generation 解析入口。
+
+    071（TL-E119-POINTER-SYMLINK，#201）：物理同源 fail-closed 门禁。
+    pointer-v1 的核心契约 = 预测与完成回执同置于【不可变 generation
+    目录】内的普通实体文件，指针切换后以该目录的物理来源闭合
+    run/config provenance。修复前用跟随 symlink 的 isdir/isfile 判
+    存在——gen 内预测/回执可为任意指向目录外的 symlink，且外部字节
+    与 receipt 声明逐位自洽时 probe 判 complete、audit 报 OK、formal
+    标 verified_same_generation=true（GPT CPU 复现），「不可变代际
+    物理同源」声明失真。现三层 fail-closed：
+      ① 指针文件本身是 symlink / 存在但非普通文件 → 拒（lstat 语义，
+         islink 先于会跟随链接的 isfile 判别）；
+      ② gen 目录 / gen 内预测 / gen 内回执任一终分量是 symlink → 拒；
+      ③ realpath+commonpath 闭包：gen 目录解析后（跟随全部中间分量）
+         仍位于 {out} 所在目录内，预测/回执解析后仍位于 gen 目录内
+         （防目录本身或父目录分量是链的逃逸；anchor 亦 realpath——
+         输出树整体位于 symlinked 路径下时锚点与子路径一致解析，
+         不产生假阳性）。
 
     {out}.tli_gen 存在 → 读其内容为 gen 目录名，校验 gen 目录及其内
     预测/回执两文件齐备，返回 dict：
         {"binding": "pointer-v1",
          "pointer_path": ..., "gen_dir": <gen 目录绝对路径>,
-         "pred_path": <gen 内预测>, "rcp_path": <gen 内回执>}
+         "pred_path": <gen 内预测>, "rcp_path": <gen 内回执>,
+         "gen_dir_realpath": <已过 071 门禁的 canonical gen 目录>,
+         "pred_path_realpath": ..., "rcp_path_realpath": ...}
     指针不存在 → 返回 None（legacy-direct：调用方按既有最终路径直接
     读，既有产物零改动）。
-    指针存在但内容为空/指向不存在的 gen 目录/缺预测或缺回执 →
-    SystemExit fail-closed（存在即证据：不静默回退 legacy-direct——
-    回退会把指针协议的死亡中间态静默解释成完整代；python -O 不失效）。
+    指针存在但内容为空/指向不存在的 gen 目录/缺预测或缺回执/任何
+    symlink 或 realpath 逃逸 → SystemExit fail-closed（存在即证据：
+    不静默回退 legacy-direct——回退会把指针协议的死亡中间态静默解释
+    成完整代；python -O 不失效）。
     本函数不校验回执内容（schema/同代绑定由消费侧
     score_ruler_formal._load_producer_yarn_receipt 承载）。"""
     pointer_path = generation_pointer_path(pred_out_path)
-    if not os.path.isfile(pointer_path):
+    # ---- 071①：指针文件本身的 lstat 门禁 ----
+    # os.path.isfile 会跟随 symlink——先 islink（lstat 语义）判别：指针
+    # 是 symlink → 物理来源闭包不可建立在链接上；lexists 但非普通文件
+    # （目录/设备等）→ 同样存在即证据，不得静默解释成 legacy-direct。
+    if os.path.islink(pointer_path):
+        raise SystemExit(
+            f"[GATE-FAIL] {pointer_path}: generation 指针本身是 symlink"
+            f"——指针协议的物理来源闭包不可建立在链接上，"
+            f"fail closed（071）")
+    if not os.path.lexists(pointer_path):
         return None
+    if not os.path.isfile(pointer_path):
+        raise SystemExit(
+            f"[GATE-FAIL] {pointer_path}: generation 指针存在但非普通"
+            f"文件——存在即证据，不得静默回退直接读路径，"
+            f"fail closed（066/crash-recovery+071）")
     try:
         with open(pointer_path, "r", encoding="utf-8") as f:
             gen_name = f.read().strip()
@@ -454,6 +531,31 @@ def resolve_generation_pointer(pred_out_path):
     pred_path = os.path.join(gen_dir, os.path.basename(pred_out_path))
     rcp_path = os.path.join(gen_dir, os.path.basename(
         producer_receipt_path_for(pred_out_path)))
+    # ---- 071②：终分量 symlink 门禁（islink = lstat 语义，不跟随）----
+    for role, p in (("generation 目录", gen_dir),
+                    ("generation 内预测", pred_path),
+                    ("generation 内回执", rcp_path)):
+        if os.path.islink(p):
+            raise SystemExit(
+                f"[GATE-FAIL] {pointer_path}: {role} {p} 是 symlink——"
+                f"不可变 generation 内必须是普通实体文件，目录外链接"
+                f"逃逸使物理同源 provenance 失真，fail closed（071）")
+    # ---- 071③：realpath+commonpath 闭包（防中间分量/目录链逃逸）----
+    anchor = os.path.realpath(os.path.dirname(
+        os.path.abspath(pred_out_path)))
+    gen_real = os.path.realpath(gen_dir)
+    if not _realpath_within(gen_dir, anchor):
+        raise SystemExit(
+            f"[GATE-FAIL] {pointer_path}: generation 目录 {gen_dir} 解析后"
+            f"（realpath={gen_real}）逃逸出输出目录（realpath={anchor}）"
+            f"——fail closed（071）")
+    for role, p in (("预测", pred_path), ("回执", rcp_path)):
+        if not _realpath_within(p, gen_real):
+            raise SystemExit(
+                f"[GATE-FAIL] {pointer_path}: generation 内{role} {p} "
+                f"解析后（realpath={os.path.realpath(p)}）逃逸出 "
+                f"generation 目录（realpath={gen_real}）——"
+                f"fail closed（071）")
     if not os.path.isdir(gen_dir) or not os.path.isfile(pred_path):
         raise SystemExit(
             f"[GATE-FAIL] {pointer_path}: 指向的 generation {gen_name} 目录"
@@ -470,6 +572,12 @@ def resolve_generation_pointer(pred_out_path):
         "gen_dir": os.path.abspath(gen_dir),
         "pred_path": os.path.abspath(pred_path),
         "rcp_path": os.path.abspath(rcp_path),
+        # 071：已通过 symlink 门禁 + realpath 闭包校验的 canonical 路径
+        #（formal 来源闭包比对锚——不再只比词法 dirname，见
+        # score_ruler_formal._load_producer_yarn_receipt）
+        "gen_dir_realpath": gen_real,
+        "pred_path_realpath": os.path.realpath(pred_path),
+        "rcp_path_realpath": os.path.realpath(rcp_path),
     }
 
 
@@ -716,8 +824,19 @@ def validate_committed_generation(pred_path, rcp_path):
         # ---- 070 核心新增：v2 同代字节绑定（回执声明 vs 实际预测）----
         # 修复前只有 formal 做此比对，probe 只数行数 → 「预测足量 + 回执
         # 声明错代」被调度判 complete/SKIP，正式评分却拒收（完成定义分裂）
-        binding_sha = _file_sha256(pred_path)
-        binding_lines = _count_lines(pred_path)
+        # ---- 072（TL-E119-PROBE-PRED-IO）：预测读取 OSError 归一 ----
+        # 回执侧 062① 已归一为 [GATE-FAIL]；预测 SHA/行数读取（权限
+        # 变化/坏挂载/I/O error/检查后消失）此前直接 traceback——单格
+        # 探针无 STATE=invalid、--audit-dir 首个坏格中止无法列全。统一
+        # 转 SystemExit（带路径+阶段），audit 逐格捕获后继续下一格。
+        try:
+            binding_sha = _file_sha256(pred_path)
+            binding_lines = _count_lines(pred_path)
+        except OSError as e:
+            raise SystemExit(
+                f"[GATE-FAIL] {pred_path}: 同代绑定阶段预测读取失败"
+                f"（SHA/行数，{e}）——预测存在但不可读，"
+                f"fail closed（072）")
         if binding_sha != rcp["prediction_sha256"]:
             raise SystemExit(
                 f"[GATE-FAIL] {rcp_path}: 回执声明 prediction_sha256="

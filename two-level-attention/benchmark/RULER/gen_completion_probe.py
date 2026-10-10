@@ -59,6 +59,14 @@ schema → v2 同代字节绑定（实际 SHA/行数 vs 回执声明逐位比对
 同口径），输出 OK/INVALID 清单与汇总；INVALID 存在 → exit 2。全程零写
 （E109 已收口数据零改动），供定点重跑决策，不修改任何数据。
 
+#201（GPT 2026-10-10 1732 审计 071/072）：
+  071 物理同源门禁在 yarn_receipt.resolve_generation_pointer 内统一
+      落地（指针/gen 目录/预测/回执任一 symlink 或 realpath 逃逸 →
+      SystemExit）——本探针/audit/formal 复用其返回路径，不重复实现。
+  072 预测读取 OSError 由共享校验器归一为 [GATE-FAIL] SystemExit；
+      audit_directory 逐格以 (SystemExit, OSError) 兜底捕获，坏格计
+      invalid 后继续下一格（total/invalid 计数完整，rc=2）。
+
 用法：
   python benchmark/RULER/gen_completion_probe.py \
       --out-dir exp/results_ruler/e109_full_Qwen3-8B/mavg/L65536/pred_1024 \
@@ -225,6 +233,10 @@ def audit_directory(root):
     invalid = 0
     for ptr in sorted(pointers):
         logical = ptr[: -len(GENERATION_POINTER_SUFFIX)]
+        # 072：逐格兜底捕获 (SystemExit, OSError)——坏格计 invalid 后
+        # 继续下一格（修复前首个 I/O 坏格直接 traceback 中止，后续好格
+        # 与坏格均未列出，无法形成定点重跑清单；validate 内部已把预测
+        # 读取 OSError 归一为 SystemExit，此处 OSError 为最后防线）。
         try:
             gen = resolve_generation_pointer(logical)
             if gen is None:
@@ -232,7 +244,7 @@ def audit_directory(root):
                     f"[GATE-FAIL] {ptr}: 指针文件存在但 resolve 返回 None"
                     f"——指针协议解析内部矛盾（070 预检）")
             validate_committed_generation(gen["pred_path"], gen["rcp_path"])
-        except SystemExit as e:
+        except (SystemExit, OSError) as e:
             invalid += 1
             print(f"POINTER {ptr} INVALID: {e}", flush=True)
             continue
@@ -269,9 +281,12 @@ def main(argv=None):
                  "（或改用 --audit-dir 只读预检）")
     try:
         info = probe_task(args.out_dir, args.task, args.max_num)
-    except SystemExit as e:
+    except (SystemExit, OSError) as e:
         # invalid：非零退出（shell 分支 PROBE-FAIL，不当需要重跑处理）。
-        # str(SystemExit(msg)) == msg，GATE-FAIL 原因原样透传
+        # str(SystemExit(msg)) == msg，GATE-FAIL 原因原样透传。
+        # 072：OSError（validate_committed_generation 已归一为 SystemExit，
+        # 此处覆盖 probe_task 自身 _count_lines 的残余 I/O 异常——如
+        # 检查后消失/权限翻转）同样归一为四态 invalid，不留裸 traceback。
         print(f"STATE={STATE_INVALID} REASON={e}", flush=True)
         return 2
     print(f"STATE={info['state']} N={info['n']} "

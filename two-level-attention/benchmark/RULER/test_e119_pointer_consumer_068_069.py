@@ -66,6 +66,20 @@
   A1 --audit-dir 只读预检：全 valid root → rc=0；含破坏 pointer →
      rc=2 + invalid 格清单；零 pointer 目录 → 如实报告 rc=0；全程零写
      （目录内容快照前后逐位一致）
+  S1（071 审计复现格，#201）generation symlink 逃逸四负例：gen 内预测
+     symlink / 回执 symlink / gen 目录 symlink / 双文件共同外链且内容
+     完全自洽（审计 §1 原始复现：外部两文件字节与 receipt 声明逐位
+     一致——修复前 probe complete / audit OK / formal
+     verified_same_generation=true）→ resolve/probe/audit/formal 真实
+     入口全链 fail-closed（lstat 终分量 + realpath 闭包双层）
+  S2（072 审计复现格，#201）不可读预测（chmod 000）夹在两个好格之间：
+     单格探针 STATE=invalid rc=2（修复前 PermissionError traceback、
+     无四态输出）；--audit-dir 不在首个坏格中止 → total=3 invalid=1
+     rc=2 三格均有记录（坏格之后的好格仍被列出——定点重跑清单完整）
+  S3（071 反向验收）输出树整体位于 symlinked 路径下（合法环境别名非
+     逃逸）不得误伤——经链路径与真实路径双入口 probe complete、
+     resolve canonical realpath 闭合、formal 消费入口接受
+     （防 071 门禁把父目录分量是 symlink 的正常部署误判成逃逸）
 
 065 纪律：零裸 assert（全部 _check 显式判定，python -O 不失效）；
 067 纪律：PASS/SKIP/FAIL 三分显式计数，SKIP>0 不打 ALL PASS。
@@ -727,6 +741,264 @@ def test_A1_audit_dir_readonly_prec_check(base):
           " total=0；目录快照逐位一致零写")
 
 
+# ================================================================ 071/072（#201）
+
+def _s1_committed_gen(base, name):
+    """S1 公共构造：真实生产提交（非手写伪指针）→ 破坏前绿基线
+    （complete/SKIP——负例非平凡：证明 fail-closed 判定确实行使了
+    071 物理同源门禁而非碰巧文件缺失）。返回 (pred_dir, gen_info)。"""
+    out, rc = _run_producer(base, name, "success", "A", rows=3)
+    _check(rc == 0, f"{name}: 生产者提交失败 rc={rc}: {out[-300:]}")
+    d = _pred_dir(base, name)
+    r0 = _probe(d, max_num=3)
+    _check_state(r0, "complete", n=3, src="pointer", tag=f"{name}-pre-green")
+    _check(_decision(r0) == "SKIP",
+           f"{name}: 破坏前合法提交代必须 complete/SKIP（071 门禁不得"
+           f"误伤真实代），得到 {_decision(r0)}")
+    gi = resolve_generation_pointer(_logical(base, name))
+    _check(gi is not None, f"{name} 前提：真实提交代指针可解析")
+    return d, gi
+
+
+def test_S1_symlink_escape_fail_closed(base):
+    """S1（071 审计复现格，#201）：generation 内预测/回执/gen 目录为
+    指向目录外的 symlink——即使外部字节与 receipt 声明逐位自洽（内容
+    自洽 ≠ 物理同源），resolve/probe/audit/formal 真实入口全链必须
+    fail-closed。修复前 probe 判 complete、audit 报 OK、formal 标
+    verified_same_generation=true（不可变代际物理同源 provenance 失真，
+    外部两文件可一起更新后继续通过——「不可变代际」保证失真）。
+
+    四负例（全部在真实提交代上注入，先验绿基线）：a) 预测 symlink
+    （外部副本字节逐位一致）；b) 回执 symlink；c) gen 目录整体 symlink
+    （预测/回执经目录链逃逸）；d) 预测+回执共同外链且内容完全自洽
+    （审计 §1 原始复现场景）。"""
+    cases = []
+    # a) gen 内预测 → 目录外 symlink（move 保字节：receipt 声明 SHA 仍逐位匹配）
+    d, gi = _s1_committed_gen(base, "s1a")
+    ext_a = os.path.join(base, "s1a", "external")
+    os.makedirs(ext_a, exist_ok=True)
+    shutil.move(gi["pred_path"],
+                os.path.join(ext_a, os.path.basename(gi["pred_path"])))
+    os.symlink(os.path.join(ext_a, os.path.basename(gi["pred_path"])),
+               gi["pred_path"])
+    cases.append(("s1a", "gen 内预测 symlink（外部字节与 receipt 自洽）", d))
+    # b) gen 内回执 → 目录外 symlink
+    d, gi = _s1_committed_gen(base, "s1b")
+    ext_b = os.path.join(base, "s1b", "external")
+    os.makedirs(ext_b, exist_ok=True)
+    shutil.move(gi["rcp_path"],
+                os.path.join(ext_b, os.path.basename(gi["rcp_path"])))
+    os.symlink(os.path.join(ext_b, os.path.basename(gi["rcp_path"])),
+               gi["rcp_path"])
+    cases.append(("s1b", "gen 内回执 symlink", d))
+    # c) gen 目录整体 → 目录外 symlink（预测/回执本身词法在 gen 内，
+    #    经目录链逃逸——终分量 islink 与 realpath 闭包须至少一层拒收）
+    d, gi = _s1_committed_gen(base, "s1c")
+    ext_c = os.path.join(base, "s1c", "external_gen")
+    shutil.move(gi["gen_dir"], ext_c)
+    os.symlink(ext_c, gi["gen_dir"])
+    cases.append(("s1c", "gen 目录 symlink", d))
+    # d) 预测+回执共同外链且内容完全自洽（审计 §1 复现：外部两文件
+    #    字节与 receipt 声明逐位一致——修复前全链通过的唯一危险态）
+    d, gi = _s1_committed_gen(base, "s1d")
+    ext_d = os.path.join(base, "s1d", "external")
+    os.makedirs(ext_d, exist_ok=True)
+    pred_ext = os.path.join(ext_d, os.path.basename(gi["pred_path"]))
+    rcp_ext = os.path.join(ext_d, os.path.basename(gi["rcp_path"]))
+    shutil.copy2(gi["pred_path"], pred_ext)
+    shutil.copy2(gi["rcp_path"], rcp_ext)
+    os.remove(gi["pred_path"])
+    os.remove(gi["rcp_path"])
+    os.symlink(pred_ext, gi["pred_path"])
+    os.symlink(rcp_ext, gi["rcp_path"])
+    cases.append(("s1d", "双文件共同外链且内容完全自洽（审计 §1 复现）", d))
+
+    for name, why, d in cases:
+        # ① resolve 直查（probe/audit/formal 共用的唯一解析口径）
+        try:
+            resolve_generation_pointer(_logical(base, name))
+            _check(False, f"{name}（{why}）: resolve_generation_pointer "
+                          f"必须拒绝 symlink 逃逸（071）")
+        except SystemExit as e:
+            _check("[GATE-FAIL]" in str(e) and "071" in str(e),
+                   f"{name}: resolve 拒绝原因须带 [GATE-FAIL]+071: {e}")
+            _check("symlink" in str(e) or "逃逸" in str(e),
+                   f"{name}: 拒绝原因须指明 symlink/逃逸: {e}")
+        # ② 单格探针 → STATE=invalid rc=2（四态契约，无 traceback）
+        r = _probe(_pred_dir(base, name), max_num=3)
+        _check(r.returncode == 2,
+               f"{name}（{why}）: symlink 逃逸必须 rc=2，得到 {r.returncode}"
+               f" out={r.stdout[-300:]}")
+        _check("STATE=invalid" in r.stdout,
+               f"{name}: 必须显式输出 STATE=invalid: {r.stdout!r}")
+        _check("[GATE-FAIL]" in r.stdout and "071" in r.stdout,
+               f"{name}: 必须 [GATE-FAIL]+071 原因透传: {r.stdout!r}")
+        _check("Traceback" not in (r.stdout + r.stderr),
+               f"{name}: 不得留裸 traceback（四态 CLI 契约）")
+        _check(_decision(r) == "PROBE-FAIL",
+               f"{name}（{why}）: symlink 逃逸的决策必须 PROBE-FAIL"
+               f"（协议错误不盲目重跑），得到 {_decision(r)}")
+        _check("STATE=complete" not in r.stdout,
+               f"{name}: 逃逸代不得被判 complete（071 修复核心断言）")
+        # ③ --audit-dir 只读预检 → 该格 INVALID（修复前报 OK）
+        ra = _audit(d)
+        _check(ra.returncode == 2 and "INVALID" in ra.stdout,
+               f"{name}: audit 必须把逃逸格计 invalid（修复前报 OK），"
+               f"rc={ra.returncode} out={ra.stdout[-300:]}")
+        _check("OK" not in ra.stdout.replace("INVALID", ""),
+               f"{name}: 逃逸格不得出现 OK 行: {ra.stdout!r}")
+
+    # ④ formal 真实入口（审计同款 _load_producer_yarn_receipt 直调）：
+    #    修复前对 s1d 返回 verified_same_generation=true——071 修复后
+    #    resolve 在入口即 SystemExit，不得标 pointer-v1/verified=true
+    from benchmark.RULER.score_ruler_formal import _load_producer_yarn_receipt
+    gi_d = None
+    try:
+        gi_d = resolve_generation_pointer(_logical(base, "s1d"))
+    except SystemExit:
+        pass
+    _check(gi_d is None, "S1d: resolve 必须已拒绝（formal 前置一致）")
+    # 用 s1d 的外部自洽副本构造 formal 直查入参（staged=源同 basename 副本）
+    staged_dir = os.path.join(base, "s1d", "staging")
+    os.makedirs(staged_dir, exist_ok=True)
+    staged = os.path.join(staged_dir, "vt-stubm-09090909.jsonl")
+    shutil.copy2(os.path.join(base, "s1d", "external",
+                              "vt-stubm-09090909.jsonl"), staged)
+    gen_pred = None
+    for gdir in sorted(os.listdir(_pred_dir(base, "s1d"))):
+        if ".gen-" in gdir:
+            gen_pred = os.path.join(_pred_dir(base, "s1d"), gdir,
+                                    "vt-stubm-09090909.jsonl")
+    _check(gen_pred is not None, "S1d 前提：gen 目录仍在")
+    try:
+        got = _load_producer_yarn_receipt(
+            staged, gen_pred, "vt", 32768,
+            source_final_path=_logical(base, "s1d"))
+        _check(False, f"S1d: formal 真实入口必须拒绝 symlink 逃逸（071），"
+                     f"却返回 {got}")
+    except SystemExit as e:
+        _check("[GATE-FAIL]" in str(e) and "071" in str(e),
+               f"S1d: formal 拒绝原因须带 [GATE-FAIL]+071: {e}")
+    print("S1 PASS  symlink 逃逸四负例（预测/回执/gen 目录/双文件外链自洽"
+          "——审计 §1 复现场景）→ resolve/probe/audit/formal 全链 "
+          "STATE=invalid + [GATE-FAIL]+071 + PROBE-FAIL；内容自洽不冒充"
+          "物理同源（071 闭合：verified_same_generation 不再可达于目录外"
+          "来源）")
+
+
+def test_S2_unreadable_pred_probe_invalid_audit_continues(base):
+    """S2（072 审计复现格，#201）：不可读预测（chmod 000，存在但
+    open 失败——区别于 071 的 symlink：文件本体是普通实体）夹在两个
+    好格之间。修复前：单格探针 PermissionError traceback（无
+    STATE=invalid，违反四态 CLI 契约）、--audit-dir 在首个坏格中止
+    （后续好格/坏格均未列出，无法形成定点重跑清单）。修复后：单格
+    STATE=invalid rc=2；audit 坏格计 invalid 后继续下一格 →
+    total=3 invalid=1 rc=2 三格均有记录。"""
+    root = os.path.join(base, "s2root")
+    # 字典序 g1good < m2bad < z3last → 坏格居中（audit 按路径排序）
+    for name in ("g1good", "m2bad", "z3last"):
+        out, rc = _run_producer(root, name, "success", "A", rows=3)
+        _check(rc == 0, f"S2: 生产者提交失败（{name}）rc={rc}: {out[-300:]}")
+    bad_dir = os.path.join(root, "m2bad", "out", "L32768", "pred_stub")
+    gi = resolve_generation_pointer(
+        os.path.join(bad_dir, "vt-stubm-09090909.jsonl"))
+    _check(gi is not None, "S2 前提：坏格的提交代指针可解析")
+    os.chmod(gi["pred_path"], 0)   # 存在但不可读（stat 过、open 拒）
+    try:
+        # ① 单格探针：四态 invalid（072 归一，无裸 traceback）
+        r = _probe(bad_dir, max_num=3)
+        _check(r.returncode == 2,
+               f"S2: 不可读预测必须 rc=2（STATE=invalid），得到 "
+               f"{r.returncode} out={r.stdout[-300:]} err={r.stderr[-300:]}")
+        _check("STATE=invalid" in r.stdout,
+               f"S2: 必须显式输出 STATE=invalid（四态契约）: {r.stdout!r}")
+        _check("[GATE-FAIL]" in r.stdout and "072" in r.stdout,
+               f"S2: 必须 [GATE-FAIL]+072（带路径+阶段）: {r.stdout!r}")
+        _check("Traceback" not in (r.stdout + r.stderr),
+               f"S2: 修复前 PermissionError traceback 不得复现: "
+               f"{r.stderr[-300:]!r}")
+        _check(_decision(r) == "PROBE-FAIL",
+               f"S2: 不可读预测的决策必须 PROBE-FAIL（协议错误不盲目"
+               f"重跑），得到 {_decision(r)}")
+        # ② --audit-dir：坏格计 invalid 后继续（修复前首个坏格中止）
+        ra = _audit(root)
+        _check(ra.returncode == 2,
+               f"S2: audit 含坏格必须 rc=2，得到 {ra.returncode}"
+               f" out={ra.stdout[-400:]}")
+        _check("AUDIT RESULT: total=3 invalid=1" in ra.stdout,
+               f"S2: 必须 total=3 invalid=1（计数完整），得到: "
+               f"{ra.stdout[-300:]!r}")
+        lines = [l for l in ra.stdout.splitlines() if l.startswith("POINTER")]
+        _check(len(lines) == 3,
+               f"S2: 三格必须均有记录（修复前首坏格中止），得到 {lines}")
+        bad_idx = [i for i, l in enumerate(lines) if "m2bad" in l]
+        _check(len(bad_idx) == 1 and "INVALID" in lines[bad_idx[0]],
+               f"S2: 坏格必须计 INVALID: {lines}")
+        _check(bad_idx[0] == 1,
+               f"S2: 坏格须字典序居中（负例非平凡），得到 {[l[:60] for l in lines]}")
+        after = lines[bad_idx[0] + 1:]
+        _check(after and after[-1].endswith(" OK"),
+               f"S2: 坏格之后的好格仍被列出（audit 不中止），得到 {after}")
+        _check(any("g1good" in l and l.endswith(" OK") for l in lines),
+               f"S2: 坏格之前的好格也须有记录: {lines}")
+        _check("Traceback" not in (ra.stdout + ra.stderr),
+               f"S2: audit 不得留裸 traceback: {ra.stderr[-300:]!r}")
+    finally:
+        os.chmod(gi["pred_path"], 0o644)   # 恢复，供 main 收尾 rmtree
+    print("S2 PASS  不可读预测（chmod 000）：单格 STATE=invalid rc=2 + "
+          "[GATE-FAIL]+072（无 traceback）；audit 坏格居中不中止 → "
+          "total=3 invalid=1 rc=2 三格均有记录（072 闭合：定点重跑清单"
+          "完整）")
+
+
+def test_S3_symlinked_output_tree_no_false_positive(base):
+    """S3（071 反向验收）：输出树整体位于 symlinked 路径下（合法环境
+    别名，父目录分量是 symlink——非逃逸）不得误伤。071 的 realpath 锚点
+    与子路径一致解析：经链路径与真实路径双入口 probe 均 complete/SKIP、
+    resolve 返回 canonical realpath 闭合、formal 真实消费入口接受并标
+    pointer-v1/verified（与 binding 套件 _assert_consistent_generation
+    同款直查）。"""
+    real = os.path.join(base, "s3real")
+    os.makedirs(real, exist_ok=True)
+    link = os.path.join(base, "s3link")
+    if not os.path.lexists(link):
+        os.symlink(real, link)
+    _check(os.path.islink(link), "S3 前提：link 须为 symlink（复刻链路径部署）")
+    out, rc = _run_producer(link, "c1", "success", "A", rows=3)
+    _check(rc == 0, f"S3: 经链路径生产提交失败 rc={rc}: {out[-300:]}")
+    # ① 经 symlink 路径探查 → complete/SKIP（无误伤）
+    d_link = os.path.join(link, "c1", "out", "L32768", "pred_stub")
+    r = _probe(d_link, max_num=3)
+    _check_state(r, "complete", n=3, src="pointer", tag="S3-via-link")
+    _check(_decision(r) == "SKIP",
+           f"S3: 链路径下合法提交代必须 SKIP（071 不得误伤），"
+           f"得到 {_decision(r)}")
+    # ② 经真实路径探查（同一物理代）→ 同口径 complete
+    d_real = os.path.join(real, "c1", "out", "L32768", "pred_stub")
+    r2 = _probe(d_real, max_num=3)
+    _check_state(r2, "complete", n=3, src="pointer", tag="S3-via-real")
+    # ③ resolve 直查：canonical realpath 闭合（锚点一致解析）
+    gi = resolve_generation_pointer(
+        os.path.join(d_link, "vt-stubm-09090909.jsonl"))
+    _check(gi is not None, "S3: 链路径下 resolve 必须成功")
+    _check(gi["gen_dir_realpath"].startswith(
+               os.path.realpath(real) + os.sep),
+           f"S3: canonical gen 须位于真实树内: {gi['gen_dir_realpath']}")
+    # ④ formal 真实消费入口经链路径接受（物理同源声明成立）
+    from benchmark.RULER.score_ruler_formal import _load_producer_yarn_receipt
+    got = _load_producer_yarn_receipt(
+        gi["pred_path"], gi["pred_path"], "vt", 32768,
+        source_final_path=os.path.join(d_link, "vt-stubm-09090909.jsonl"))
+    _check(got is not None and
+           got["generation_binding"] == "pointer-v1" and
+           got["prediction_binding"]["verified_same_generation"] is True,
+           f"S3: 链路径下 formal 必须接受合法提交代（071 误伤即回归），"
+           f"得到 {got}")
+    print("S3 PASS  symlinked 输出树（合法别名非逃逸）零误伤：链/真实双"
+          "入口 probe complete/SKIP；resolve canonical realpath 闭合；"
+          "formal 接受并标 pointer-v1/verified（071 门禁不误伤正常部署）")
+
+
 # ================================================================ main
 
 def main():
@@ -748,6 +1020,9 @@ def main():
         ("N3", test_N3_shell_wiring_static),
         ("RP", lambda: test_RP_red_probe_ignore_pointer(base)),
         ("A1", lambda: test_A1_audit_dir_readonly_prec_check(base)),
+        ("S1", lambda: test_S1_symlink_escape_fail_closed(base)),
+        ("S2", lambda: test_S2_unreadable_pred_probe_invalid_audit_continues(base)),
+        ("S3", lambda: test_S3_symlinked_output_tree_no_false_positive(base)),
     ]
     only = os.environ.get("E119_ONLY", "")
     if only:

@@ -610,13 +610,22 @@ def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum,
         binding_mode = gen_info["binding"]  # = GENERATION_BINDING_POINTER
         # 指针发现与冻结窗口之间的换代由调用方锁 + ②③ 三方校验兜底；
         # source_pred 不在指针所指 gen 目录内 = 指针已被切换或 source
-        # 非 gen 代成员 —— fail-closed，不发布混合代际
-        if os.path.abspath(os.path.dirname(os.path.abspath(source_pred))) \
-                != os.path.abspath(gen_info["gen_dir"]):
+        # 非 gen 代成员 —— fail-closed，不发布混合代际。
+        # 071（TL-E119-POINTER-SYMLINK）：来源闭包比对锚改用 resolve
+        # 已通过 symlink 门禁 + realpath 闭包校验的 canonical gen 目录
+        # （gen_dir_realpath）——词法 dirname 相等不证明物理同源（gen
+        # 目录/中间分量是 symlink 时词法路径同、物理来源异）；symlink
+        # 逃逸在 resolve 内已 fail-closed（formal 到达此处即指针产物
+        # 已过 071 门禁，generation_binding=pointer-v1 与
+        # verified_same_generation=true 的物理同源声明自此成立），
+        # 此处比对为「解析 → 冻结」窗口的纵深防御（realpath 同锚）。
+        if os.path.realpath(os.path.dirname(os.path.abspath(source_pred))) \
+                != gen_info["gen_dir_realpath"]:
             _fail(f"{gen_info['pointer_path']}: staging 源 {source_pred} 不在"
-                  f"指针所指 generation 目录 {gen_info['gen_dir']} 内——"
-                  f"指针在解析与冻结之间被切换，或源非该 generation 成员，"
-                  f"fail closed（066/crash-recovery）")
+                  f"指针所指 generation 目录 {gen_info['gen_dir_realpath']}"
+                  f" 内（canonical 比对）——指针在解析与冻结之间被切换，"
+                  f"或源非该 generation 成员，fail closed"
+                  f"（066/crash-recovery+071）")
         rcp_path = gen_info["rcp_path"]
     if not os.path.isfile(rcp_path):
         return None
@@ -663,7 +672,10 @@ def _load_producer_yarn_receipt(staged_pred, source_pred, task, Lnum,
             "prediction_basename": rcp["prediction_basename"],
             "prediction_sha256": rcp["prediction_sha256"],
             "prediction_lines": rcp["prediction_lines"],
-            # 062：verified 只在 staging == 回执 == 源 三方一致时为真
+            # 062：verified 只在 staging == 回执 == 源 三方一致时为真；
+            # 071：pointer-v1 产物到达此处前，resolve_generation_pointer
+            # 已做 symlink/realpath 物理同源门禁（逃逸即 SystemExit，
+            # 不会以 pointer-v1/verified=true 收录目录外来源）
             "verified_same_generation": True,
             "staged_sha256": staged_sha,
             "source_sha256_at_freeze": source_sha,
