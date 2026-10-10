@@ -252,3 +252,32 @@ SKIP 计入 PASS（T5 因本机有 CUDA 是真跑）；agent 交付报告的「2
 - 已有数据清点沿用 argv/receipt 定点口径：079 增加两个筛选条件——
   method=tli 且 `tia_enable_async_topk` 同目录重复运行、projection/
   layer-skip 文件跨运行同路径内容变更的格；确认命中才重跑。
+
+---
+
+## 验收补记（主 AI，2026-10-11）
+
+079/080 修复合入主仓（agent commit ec53044c5 → cherry-pick ba8495da6），
+主 AI 独立复验通过：
+
+- **079**：新套件 test_e121_fix_079.py 5/5 × python±-O（基线红 1/5——R4
+  async 行为差异在基线就存在只是身份测不出，与「079①是身份缺口非行为
+  缺口」判断一致）。manifest 补 `tia_enable_async_topk` 生效布尔；
+  `_resolve_file_identity` 把 proj_basis/layer_skip_path 解析为
+  realpath+sha256+shape/n_skip（缺失/坏文件 [GATE-FAIL] fail-closed）；
+  LongBench sidecar / RULER receipt（新增 `treatment_manifest_json` 键，
+  legacy 前向兼容、刻意不进 `effective_config_sha256` 以防破坏 E123 在飞
+  批次）/ method hash 三入口共用 info.py 单一事实源。R3 突变测试 25 字段
+  全测 + 白名单显式（method/quest_*/twi_*/B、D 编码）+ 未登记参数 FAIL
+  防漏；async 两步行为差异 CPU 实证（第 2 步候选 [128,384) vs [384,896)）。
+- **080**：主 AI 双态复核——无 E121_BASE_ROOT：`23 PASS / 1 SKIP / 0 FAIL`
+  rc=1 × python±-O（SKIP 不再计入 PASS，尾行明示「不得当全绿引用」）；
+  挂修复前基线 9fb2643b0 checkout：`29 PASS / 0 SKIP / 0 FAIL` rc=0 ×
+  python±-O（T3 展开 6 条含基线红值 5312/65 复核）。T6 oracle 元测试
+  确认破坏 geom_expect 后 python/-O 双红 rc=1。裸 assert 已显式化。
+- **回归**：主仓合并后 sanity——079 5/5、080 两态、E121 17/17、E122 6/6
+  （hash 锚点已按 079 口径重算并注释）、076/077/078 9/9、068/069 20/20、
+  binding 31/31、E116f 12/12，python±-O 双跑全绿（worktree 与主仓双地）。
+- 主 AI 前轮「23/23」虚高口径已由本修复纠正：今后 075 套件引用一律按
+  三态摘要（无基线 = 23 PASS/1 SKIP rc=1；有基线 = 29 全绿）。
+- worktree 已清理；E123 在飞数据零接触。
