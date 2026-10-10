@@ -1,11 +1,16 @@
 # B01/B02 修复专项验证（GPT 审查 2026-10-08 反例场景）
-# 场景 1（B01）：S=4096, (α,β,γ)=(.125,.375,.625) → near 区仅 384 token
-#   配额 768 → 384 个无效槽位。修复前转 0（token 0 出现 385 次）；
+# 【kimi3 2026-10-10 20:41 审查：数值期望已按 B10 near 左界新口径更新】
+#   本测试的哨兵数/n_valid/expect 硬编码依赖 near 左界公式：B10 修复把
+#   e64 分区臂 near 左界从序列末尾推（旧口径 near 区宽 384、n_valid=640、
+#   哨兵 384/head）改为从 swa 起点推（新口径 near 区宽 512、n_valid=768、
+#   哨兵 256/head）。若后续再调 near 左界公式，须同步更新这三处。
+# 场景 1（B01）：S=4096, (α,β,γ)=(.125,.375,.625) → near 区 512 token
+#   配额 768 → 256 个无效槽位（B10 新口径）。修复前转 0（token 0 多次）；
 #   修复后哨兵 S（valid=False），token 0 有效位恰 1 次。
 # 场景 2（B02）：early 行 t=999（L=1000 < K2=1024）→ 修复前前 24 token
 #   重复 2 次；修复后每 token 恰一次 + 哨兵尾垫（真 dense 等价）。
 # 场景 3（消费端数学）：q=0 等权 softmax + v_0=1 其余 0 →
-#   修复后输出 = 1/有效位数（去重语义），≠ 修复前 385/1024=0.376。
+#   修复后输出 = 1/有效位数（去重语义），B10 新口径 = 1/768。
 import os
 os.environ.setdefault("SGLANG_TLI_ALPHA", "0.125")
 os.environ.setdefault("SGLANG_TLI_BETA", "0.375")
@@ -38,12 +43,12 @@ sent = (sel == S).sum().item()
 tok0 = (sel == 0).sum().item()
 n_valid = (sel < S).sum().item() // Hkv  # 每 head 独立 → 除 Hkv
 # 预期：γ 悬崖配置 far_budget_cap=0 → far 池宽 0（v2 严格语义）；
-#   near 384 哨兵/head（GPT 反例 invalid_zero_slots=384 同款场景）
-assert sent == Hkv * 384, f"哨兵数 {sent} != {Hkv*384}"
+#   B10 新口径 near 区宽 512 → 哨兵 256/head、n_valid=768
+assert sent == Hkv * 256, f"哨兵数 {sent} != {Hkv*256}"
 assert tok0 == Hkv * 1, f"token 0 出现 {tok0} 次 != {Hkv}（修复前 385×Hkv）"
-assert n_valid == 640, f"有效位 {n_valid} != 640"
+assert n_valid == 768, f"有效位 {n_valid} != 768"
 print(f"[1] B01 near 池不足：哨兵 {sent//Hkv}/head（原 0 填充），"
-      f"token0 有效位恰 1 次（原 385），有效位 640 — PASS")
+      f"token0 有效位恰 1 次（原 385），有效位 768 — PASS")
 
 # ---- 场景 2：early 行 identity grid（B02）----
 q2 = torch.zeros(1, H, D, device=dev)
@@ -70,10 +75,10 @@ for h in range(Hkv):
     w_h = valid[0, h].float()
     w_h = w_h / w_h.sum()
     out[0, h] = (w_h.unsqueeze(-1) * v_sel_h).sum(0)
-expect = 1.0 / 640  # 去重语义
+expect = 1.0 / 768  # 去重语义（B10 新口径 n_valid=768）
 assert torch.allclose(out, torch.full_like(out, expect), atol=1e-6), \
-    f"消费端输出 {out[0,0,:3].tolist()} != 1/640={expect}"
-print(f"[3] 消费端 valid softmax：输出 = 1/640 = {expect:.6f}"
+    f"消费端输出 {out[0,0,:3].tolist()} != 1/768={expect}"
+print(f"[3] 消费端 valid softmax：输出 = 1/768 = {expect:.6f}"
       f"（修复前 385/1024 = {385/1024:.6f}）— PASS")
 
 print("\nB01/B02 修复验证 全部 PASS")
