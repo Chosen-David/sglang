@@ -52,6 +52,10 @@
 - [x] [S-T014] E119-066 同字节异配置 provenance 修复（formal 冻结窗口生产者
   同键 flock + B3/B4 负例 + 锁开销实测；30/30+10/10 python±-O，c943bb028）
   ([详情](task_details/S-T014.md))
+- [x] [S-T015] E119-066crash/067 崩溃残留指针协议 + SKIP 计数修复（不可变
+  generation+单指针 + B5 崩溃三相位六组合 + PASS/SKIP/FAIL 三分计数；
+  31/31+10/10 python±-O，99838ff3a）
+  ([详情](task_details/S-T015.md))
 - [x] [S-T012] E119-059/060/061 GPT 复审三连修复（回执同代绑定 v2 +
   完整配置 schema/跨格门禁 + correction 机器消费；23/23+10/10 python±-O，
   654c2f0c8）
