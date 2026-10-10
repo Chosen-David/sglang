@@ -24,10 +24,13 @@ def get_method_name_with_info(args):
         # 【B09 修复（kimi3 清单 2026-10-08）】α/β/γ 是 treatment 的一部分，
         # 必须进输出文件名（a0.25_b0.125_g0.625 风格），否则不同分区配置
         # 共享同 method_name → 同路径 w 模式互相覆盖 / 同名混装不可区分。
-        # γ 缺省/显式 None 渲染 "off"（argparse 路径默认 1.0 不会是 None）。
+        # γ=off（显式传 "off" → None）渲染 "off"；缺省属性按 1.0 兜底——与
+        # TLIIndexer.__init__ 的运行时缺省 getattr(args,"tli_gamma",1.0) 同源，
+        # 否则程序化构造的 args（无该属性）文件名标 goff 而实际跑 γ=1.0，
+        # 文件名/行为失配（B09 族）。
         alpha = getattr(args, "tli_alpha", 0.0)
         beta = getattr(args, "tli_beta", 0.0)
-        gamma = getattr(args, "tli_gamma", None)
+        gamma = getattr(args, "tli_gamma", 1.0)
         g_str = "off" if gamma is None else f"{gamma:g}"
         # 【10-09 TL-PREFILL-PROVENANCE-001 修复】稀疏 prefill 开关必须进输出文件名，
         # 否则 P-off/P-on 同路径 w 模式互相覆盖（GPT 审计 B09 族新实例）。默认不传

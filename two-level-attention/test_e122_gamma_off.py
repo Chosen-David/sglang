@@ -371,7 +371,9 @@ def t5_cli_and_info():
             raise AssertionError("非法 γ 值应 SystemExit（fail loudly）")
         except SystemExit:
             pass
-        # info.py：γ=None → "_goff" 显式进名；数值 γ → 文件名逐位不变（回归保护）
+        # info.py（E121+E122 合并口径）：γ=None → g"off" 渲染进名；数值 γ 亦进名
+        # （E121 B09：α/β/γ 是 treatment 必须可区分）；缺省属性按 1.0 兜底与
+        # TLIIndexer 运行时缺省同源。ab 按 F11 生效值：缺 tli_subspace → "full" → 无 A。
         ns = types.SimpleNamespace(
             method="tli", tia_block_size=64, tia_level1_topk=128,
             tia_level2_topk=1024, tia_level2_cmp_ratio=4,
@@ -386,11 +388,11 @@ def t5_cli_and_info():
         if name_off == name_f:
             raise AssertionError("γ=off 与 γ=1.0 文件名应不同（同名互覆 = "
                                  "TL-PREFILL-PROVENANCE-001 同型缺陷）")
-        if name_f != "tli_64_128_1024_c4_ABD":
-            raise AssertionError(f"数值 γ 文件名应逐位不变：{name_f!r}")
-        del ns.tli_gamma                      # 缺省属性按 1.0 处理（不加 goff）
-        if _info_mod.get_method_name_with_info(ns) != "tli_64_128_1024_c4_ABD":
-            raise AssertionError("缺省 tli_gamma 不应渲染 goff")
+        if name_f != "tli_64_128_1024_c4_BDa0_b0_g1":
+            raise AssertionError(f"数值 γ 文件名应含生效 α/β/γ（E121 B09 口径）：{name_f!r}")
+        del ns.tli_gamma                      # 缺省属性按 1.0 兜底（不加 goff）
+        if _info_mod.get_method_name_with_info(ns) != name_f:
+            raise AssertionError("缺省 tli_gamma 不应渲染 goff（须与显式 1.0 同名）")
         report(name, True, f"off→None / OFF→None / 0.625→float；非法值 SystemExit；"
                            f"info: {name_f} vs {name_off}")
     except AssertionError as e:
@@ -418,14 +420,16 @@ def run_mask(args, k, q):
 
 def t6_full_pipeline():
     name = "T6 全链 prepare_mask：默认 4bit 路径（off vs 0.625 行为不同）+ cavg 路径不崩"
-    # S=4224：kt=66，sink=128，swa_lo_tok=4096，mid=3968；K2=1024 → K2_mid=768
-    #   α=0.25 → near_len_dyn=992 → near_blks=50 → far_tok_hi=3200，
-    #   near 区 [3200,4096) 宽 796、far 区 [128,3200) 宽 3072
+    # S=4224：kt=66，sink=128，swa_tok=128，swa_lo_tok=4096，mid=3968；K2=1024 → K2_mid=768
+    #   【B10 修复后几何】α=0.25 → mid_len=3968、near_len_dyn=992、
+    #   near_base=S−swa=4096 → near_blks=(4096−992)//64=48 → far_tok_hi=3072，
+    #   near 区 [3072,4096) 宽 1024、far 区 [128,3072) 宽 2944
+    #   （旧口径从 kt*bs 推 → near_blks=50/far_hi=3200，B10 已改 swa 起点基准）
     try:
         S = 4224
         K2_mid = 1024 - 128 - 128
         sink_tok, swa_lo = 128, 4096
-        far_hi, near_lo = 3200, 3200
+        far_hi, near_lo = 3072, 3072   # B10 几何：near_blks=48（旧 3200 为 pre-B10 值）
         k, q = gen_kq(S)
         base = dict(tli_enable_layer_skip=False, tli_far_method="minmax",
                     tli_near_method="avg", tli_alpha=0.25, tli_beta=0.125,
