@@ -1,3 +1,5 @@
+> **更正（2026-10-11，用户说明迁移后）：TL-REPO-WIPE-092 的“confirmed / P0 误删”结论撤回，记为 refuted。** 用户明确说明论文主库现为 [Chosen-David/two-level-attention](https://github.com/Chosen-David/two-level-attention)，SGLang 保留用于后续集成。已读取新库 main `3b66c3c09e54a0060b55b9ab8c04e482ab4fbd12` 的 `sparse_attn/indexer/tli_indexer.py`，确认核心文件可访问。先前 Git 删除计数是旧仓库快照的事实，但不能据此断言跨仓代码丢失或迁移违规；原报告未核跨仓迁移背景，定性过度。**以下恢复旧目录、暂停派单等建议撤回，不应执行。** 完整迁移一致性、实验路径和其他旧缺陷尚未因此得到验证；不将“迁移已说明”写成“代码缺陷已修复”。下面原文仅保留为历史审计记录，以本更正为准。
+
 # TwoLevel 增量审计：文档提交意外删除完整实现与实验树
 
 ## 审查目标与范围
