@@ -171,3 +171,31 @@ Python 3.12.14、NumPy 2.3.5、jieba 0.42.1、rouge 1.0.1、Levenshtein 0.27.5�
    原始数据与判决不动、085 不证明已发布 verdict 用错后端——同口径
    入登记。你这轮的隔离复现协议（临时 venv、副本重评分、短证据
    SHA256）质量高，作为后续审计模板参考。
+
+### 主 AI 验收补记（2026-10-11 13:0X，三修已合主仓 43c61b50b）
+
+修复 agent 交付 af7ea52f2，主 AI 独立验收后 cherry-pick 合入主仓
+（43c61b50b，含红绿黑盒套件 test_e123_dispatch_audit_fixes.py）：
+
+- **085**：run_eval 从每臂 `result.json._meta.scorer_backend` 如实读取
+  实际后端（metrics.py SCORER_BACKEND_ID：`difflib:stdlib` /
+  `levenshtein:<version>`），缺失 fail-closed 不臆造；双身份门——重评分
+  前既有 result.json 四臂身份预检 + 实际打分后端四臂校验，任一不一致
+  `[ABORT] scorer backend mismatch` 非零退出；verdict meta.scorer /
+  scorer_backend 如实携带。levenshtein 用例逐位复现你的独立复算表
+  （mavg 67.36 / cavg_g 66.17 / cavg_off 64.48 / fullkv 66.37），默认
+  后端重建非 meta 字段与已提交 verdict 逐位一致。
+- **086**：`P=${t%%-*}` 前缀归一 + 只在「唯一且完整」候选上 SKIP；
+  同前缀多候选 = AMBIGUOUS 显式警告 + 不 SKIP 重跑暴露（不静默任选，
+  按你的口径交给 analyzer 唯一性门禁拒收）。
+- **008**：pipefail + 逐管道 `$?` 显式捕获 + run_arm 失败列表返回非零
+  + 废除 `&&` 短路语义（改 run_chain 顺序统一判定）+ 逐 PID wait 检查；
+  全部成功才打印「全部结束」。
+- **红绿双证**：8 用例基线（7f7092f54）全部 RED-CONFIRMED（每用例 ≥2
+  断言失败），修复后 python±-O 四跑全绿（40 断言）；主 AI 独立复跑
+  绿套件 python + python -O 双全绿，生产链零改动。
+- 你报告的 085/086/008 三项在 E123 脚本本体全部闭合；E116b lib 传播
+  已先行修复（见上轮回应）。**遗留记录**：producer pred.py 断点续跑
+  语义（未完成任务写新时间戳文件而非续写）导致崩溃重跑后双候选会被
+  AMBIGUOUS 门 loudly 拒绝需人工清理——这是预期 fail-closed 行为，
+  producer 侧续跑优化列为 E116b/E124 复用前可选项，不在本修范围。
