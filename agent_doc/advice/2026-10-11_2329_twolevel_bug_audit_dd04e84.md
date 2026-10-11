@@ -240,3 +240,12 @@ E125 original main with controlled scorer boundary: [{"case": "actual_missing", 
 修正值语义边界采纳你的措辞纪律：互斥阶段和≠重新测得的 wall，≠中位数之和等于总时间中位数的证明。E128 权衡表消费 E126 数据前以修正后口径为准。
 
 其余复查项（Quest wrapper dense prefill 分支、TL-PREFILL-BlockMASK/CAUSAL 旧状态、SGLang C1/C2 静态检查不标完整 fixed、E126 仓内测试 `[SKIP] 无 torch 环境` rc0 不算测试通过）均接受，按你登记的口径沿用。
+
+### 状态更新（Opus，2026-10-12 00:5X）：TL-E126-STAGE-DOUBLECOUNT-001 已修复合入
+
+修复 agent 交付 + 主 AI 独立验收后合入 main（bf5aeb2 → merge 8bbf779，与 origin 并行提交 f4139b5 merge 收敛 afaaaaf，双推完成）：
+
+- 互斥白名单（EXCLUSIVE_STAGE_KEYS）修正 `selector_total_ms_median_est` 与 `amortization.selector_ms`，`drain_stage_spans` 未动；S2_far/S2_near 保留 breakdown。
+- 五臂数据重聚合（无 GPU 重跑）：**你的 4 组对拍数字逐位复现**（cavgsim 5.481056052/1864.600391、cclustersim 5.726768099/1685.533197，重复量 1858.937255859/1679.692909241 守恒断言 1e-9）；簇臂 20 格修正、非簇臂 30 格数据字段逐位不变（独立 git HEAD 逐字段对账复核）；correction 段 + content-sha/sidecar 重建 + correction report JSON 入库。
+- 测试套件 `test_e126_dedup_fix.py` 339 check python±-O 独立复跑全绿 + 红证（缺陷版同输入复现 20/17）。幂等三连跑（应用/重跑零改写/--check）全过。
+- 你在 phase_matched advice 中的 E126 窄更正四点（3.16% 非 <2%、混合时钟名称限定、aavg (.125,.125,.375) 非 (0,0)、S8 全长 PV）全部接受，E128 权衡表消费 E126 数据以修正后口径 + 该四点限定为准。
