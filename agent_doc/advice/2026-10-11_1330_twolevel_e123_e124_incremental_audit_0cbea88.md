@@ -2,11 +2,11 @@
 
 ## 审查目标与结论
 
-- 审查代码 SHA：`0cbea88325223b13b7c6d4d082b59ece3a515849`
+- 审查代码 SHA：`f34c02de4eb60762117bc971a3e675df411e99d5`（提交报告前远端并发合入；已复核该 diff）
 - 上次已审代码基线：`4303fb9757e3bd0b2af74d5fce135b095411c5dd`
-- 本轮相关改动：E123 的 085/086/008 修复及新黑盒套件；E124a `dyn_controller.py`、dry-run 入口、测试和结果汇总。
+- 本轮相关改动：E123 的 085/086/008 修复及新黑盒套件；E124a `dyn_controller.py`、dry-run 入口、测试和结果汇总；并发合入的 E124a 几何一致性修复 `f34c02d`。
 - 已排除 `agent_doc/advice/` 等 advice-only 提交；没有修改实现、测试或实验数据。
-- 新增结论：3 个 confirmed 缺陷（`TL-E123-PORTABILITY-087`、`TL-E124-STRUCT-GUARD-088`、`TL-E124-SEQ-IDENTITY-089`）。均未证明改变已发布 E123 分数；089 会使 E124a 已发布的 72 条回放不满足其声明的逐序列身份/随机投影契约。该批 E124a 结果已因既有几何问题降格，本轮不重复该旧问题，但重跑时必须同时修正 089。
+- 新增结论：3 个 confirmed 缺陷（`TL-E123-PORTABILITY-087`、`TL-E124-STRUCT-GUARD-088`、`TL-E124-SEQ-IDENTITY-089`）。均未证明改变已发布 E123 分数；089 会使 E124a v1 已发布的 72 条回放不满足其声明的逐序列身份/随机投影契约。并发提交已修复旧几何问题并只重出单序列 9 层 v2，故 v2 内没有跨序列碰撞；未来恢复多序列批量前仍需关闭 089。
 
 ## 范围与未覆盖项
 
@@ -14,7 +14,7 @@
 |---|---|---|
 | E123 scorer 身份、resume 前缀、失败传播 | diff、语法检查、新黑盒套件 | dispatch 相关用例通过；scorer 两个正向用例在独立检出失败，见 087 |
 | E124a M1/M2/M3、dry-run、已发布 sample/summary | 静态调用链、标准库/torch-stub 最小 CPU 复现、产物核对 | 发现结构输入门禁和 seq 身份问题，见 088/089 |
-| 已知 `n_valid`/实际 K 长度错配与 SWA 泄漏 | 复核任务文档、去重 | 已由项目记录并有修复在飞，不重复编号/交付 |
+| 已知 `n_valid`/实际 K 长度错配与 SWA 泄漏 | 复核并发提交 `f34c02d`、去重 | 源码已加入同源几何门禁并重出单序列 v2；当前环境无 torch，未独立执行官方 18+几何套件，不重复编号 |
 | GPU、真实模型、完整 torch 测试 | 未覆盖 | 当前执行环境无 `torch`；未使用 GPU/真实数据，不把静态或 stub 结果称为 GPU 实测 |
 
 ## 新发现表
@@ -22,8 +22,8 @@
 | ID | 状态 | 严重度 | 位置 | 摘要 | 已产出数据影响 |
 |---|---|---:|---|---|---|
 | TL-E123-PORTABILITY-087 | confirmed | P2 | `two-level-attention/exp/trace/analyze_e123_trial_verdict.py:49,97`；`test_e123_dispatch_audit_fixes.py:38-40,114-120` | 新黑盒套件用当前检出定位测试资产，但被测 analyzer 仍把 subprocess cwd 固定为原机器绝对路径；独立检出下两个 scorer 正向用例在打分前崩溃 | 不改变既有分数；阻断第三方/干净 worktree 对 085 的正向复验 |
-| TL-E124-STRUCT-GUARD-088 | confirmed | P2 | `dyn_controller.py:398-410,413-477,480-523,526-544`；`run_e124a_dryrun.py:129-137` | 编译器/CLI 未拒绝负 K2、`n_protected > n_valid`、负 prefix/window 等不可能几何，反而返回 `ok=true`，甚至产生负 token 区间 | 当前入库默认参数为正，未发现既有结果由此触发；但显式错误参数可被冒充为合法预算/保护闭包 |
-| TL-E124-SEQ-IDENTITY-089 | confirmed | P2 | `dyn_controller.py:115-133`；`run_e124a_dryrun.py:95,102,137`；`e124a_dryrun_summary.json` | 契约要求每 seq×layer 固定 seed，入口却默认所有独立 trace 为 `seq_id=0`；已发布 8 目录×9 层汇总明确全部用 0，同层跨序列共享 seed，且 decision 身份无法唯一定位输入序列 | 已发布 72 条回放的 seq 身份/seed 契约不成立；档位/特征值需在几何修复后用稳定唯一 seq 身份一并重出 |
+| TL-E124-STRUCT-GUARD-088 | confirmed | P2 | `dyn_controller.py:398-410,413-477,480-523,526-544`；`run_e124a_dryrun.py:50-77,241-252` | 并发几何修复已堵住实跑长度错配，但编译器/dry-run 预览仍未拒绝负 K2、`n_protected > n_valid`、负 prefix/window 等不可能几何，反而返回 `ok=true`，甚至产生负 token 区间 | 当前入库默认参数为正，未发现既有结果由此触发；但 dry-run/直接编译可把错误参数冒充为合法预算/保护闭包 |
+| TL-E124-SEQ-IDENTITY-089 | confirmed | P2 | `dyn_controller.py:115-133`；`run_e124a_dryrun.py:211,218,252`；v1/v2 summary | 契约要求每 seq×layer 固定 seed，入口仍默认 `seq_id=0`；v1 的 8 目录×9 层汇总明确全部用 0，同层跨序列共享 seed，且 decision 身份无法唯一定位输入序列 | v1 72 条回放的 seq 身份/seed 契约不成立；`f34c02d` 只重出一个 HotpotQA 序列 9 层 v2，未重新验证多序列身份 |
 
 ## 复现证据
 
@@ -81,7 +81,8 @@ True
 
 - 实际：`max(0, ...)` 把结构错误静默压为零容量；`_attach_ranges` 只核 `n_prefix+n_swa == n_protected`，不核非负及范围关系。
 - 预期：结构层先 fail-closed，至少校验 `k2 >= 0`（若 K2=0 被协议允许则单列）、`0 <= n_protected <= n_valid`、`n_prefix/n_swa >= 0`、保护区间可由当前 U 合法构造；非法时所有档位返回 `reason=struct`，入口非零退出。
-- 输入 SHA256：`dyn_controller.py` `4dca3ad8be1dd79342dfe5d045c22d1f54706d3be3f7bfb8b77ab384812f9932`；`run_e124a_dryrun.py` `27f30828b38a54efe416d5d0ea0d9812da87196db2e4418ce53fb46bab2dfeab`。
+- 并发变更复查：`f34c02d` 的 `decide()` 新增 `k_mid == max(0, n_valid-n_protected)`，实跑入口也核 meta/K/qpos；这会拦截多数实跑异常，但 `max(0, ...)` 仍允许 `n_protected > n_valid` 配合空 middle，且 `_geo_budgets()` 继续直接调用缺门禁的编译器，所以本 finding 未被并发提交关闭。
+- 输入 SHA256（`f34c02d`）：`dyn_controller.py` `49e4d350fa17344abb69a21f2a553cc6d752a2dc875cde3d256907fe5eee9da7`；`run_e124a_dryrun.py` `d96123371d6b7daa8a9a31b45419889e4becbb88a4dd6892a2ad2031d37be7de`。
 
 ### TL-E124-SEQ-IDENTITY-089
 
@@ -101,14 +102,14 @@ layer1_seed_for_all_dirs=12562221824480599134
 sample_rows=9 sample_seq_ids=[0]
 ```
 
-- 实际：8 个逻辑序列同层共享一个随机投影 seed，decision 的 `{seq_id, layer_idx, phase, state_epoch}` 也发生跨输入碰撞；记录本身不含 trace 路径/hash 用于消歧。
+- 实际：v1 的 8 个逻辑序列同层共享一个随机投影 seed，decision 的 `{seq_id, layer_idx, phase, state_epoch}` 也发生跨输入碰撞；记录本身不含 trace 路径/hash 用于消歧。并发 `f34c02d` 的 v2 summary 只覆盖 `lb_hotpotqa_0` 单序列，仍记录 `seq_id=0`，因此它没有触发跨序列碰撞，但也没有复验批量身份问题。
 - 预期：由 manifest/trace 元数据提供稳定唯一 seq ID，或把 dataset/sample/input hash 纳入 identity 与 seed；拒绝批量汇总中的重复 `(seq identity, layer, phase, epoch)`。
-- 输入 SHA256：summary `5770d03f4c08df70ea528d2ca20862cfca791d96eefc67654d58ea4465b4e780`；sample JSONL `2806240ea9b6f82ee856eed95e5f360b3643ae558f47136ed9325df25f0b7ca6`。
+- 输入 SHA256：v1 summary `5770d03f4c08df70ea528d2ca20862cfca791d96eefc67654d58ea4465b4e780`；v1 sample JSONL `2806240ea9b6f82ee856eed95e5f360b3643ae558f47136ed9325df25f0b7ca6`；v2 summary（单序列）`2ef3984153e2343c6b11844f12adb0ff7a8d3e848f29d94e58e218a94eba4448`。
 
 ## 对已跑数据与论文结论的影响
 
 1. **E123**：087 是可复验性/执行路径缺陷，不是分数重算反例；本轮没有证据表明已提交 E123 verdict 数值变化。085 mismatch 拒绝、086 resume、008 失败传播的黑盒路径在本环境通过。
-2. **E124a**：089 表明 72 条回放没有实现声明的逐序列 seed/身份；不得用它们证明“按规范的 seq×layer controller”已经验收。项目已经因旧的 causal geometry/SWA 泄漏问题把这批结果降格，因此无需新增 GPU 作业；下一次 CPU trace 重出时同时修正身份即可。
+2. **E124a**：089 表明 v1 的 72 条回放没有实现声明的逐序列 seed/身份；不得用它们证明“按规范的 seq×layer controller”已经验收。`f34c02d` 已重出几何一致的单序列 9 层 v2，但不能替代多序列身份验收；下一次 CPU 多序列 trace 重出时修正即可，无需新增 GPU 作业。
 3. **088**：默认入库几何没有负值，故未发现污染现有结果；它是上线/扩参前必须关闭的 fail-open，尤其负 prefix/window 会破坏保护区间语义。
 
 ## 修复与最小重测建议
@@ -123,11 +124,11 @@ sample_rows=9 sample_seq_ids=[0]
 - `TL-E123-SCORER-IDENTITY-085`：mismatch fail-closed 用例通过；正向重建被 087 阻断，状态应记为 **fixed / recheck incomplete**，不能因原机器曾通过就宣称跨环境闭环。
 - `TL-E123-RESUME-PREFIX-086`：唯一完整候选、歧义候选、缺行候选三条黑盒路径本轮通过，记 **fixed/rechecked（CPU fake producer）**。
 - `TL-E2E-FAILMASK-008`：20 次 fake 失败传播与 20 次 fake 成功正例均通过，记 **fixed/rechecked（dispatch 层）**；未运行真实 GPU producer。
-- E124a 已知 causal geometry/SWA 泄漏：项目文档已确认且修复在飞，本报告不重复分配 ID；089 是不同的 seq 身份/seed 问题。
+- E124a 已知 causal geometry/SWA 泄漏：并发 `f34c02d` 已加入 fail-closed 同源门禁并重出单序列 v2；受当前环境缺 torch 限制，本轮状态记 **fixed / static rechecked，runtime recheck blocked**。089 是不同的 seq 身份/seed 问题。
 
 ## 实际测试、资源阻塞与下一检查点
 
 - 通过：`bash -n run_e123_trial_dispatch.sh`；相关 Python 文件 `py_compile`；E123 dispatch 的 086/008 五个黑盒用例与 085 mismatch 用例；E124 M3 torch-independent 最小复现。
 - 失败：E123 scorer 两个正向黑盒用例，原因是 087 的绝对 cwd；这不是依赖缺失假阳性。
 - 阻塞：当前环境没有 `torch`，故 E124 官方 18 例及 `python -O` 未执行；没有 GPU/模型/真实 trace 授权实测。
-- 下一检查点：只在远端合入新的相关代码后，核验几何修复是否覆盖 088、批量重出是否覆盖 089、087 是否能在 clean worktree 双跑通过。
+- 下一检查点：只在远端合入新的相关代码后，核验结构门禁是否覆盖 088、批量重出是否覆盖 089、087 是否能在 clean worktree 双跑通过。
