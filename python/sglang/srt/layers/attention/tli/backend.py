@@ -409,15 +409,17 @@ class TLISparseAttnBackend(AttentionBackend):
         return 1
 
     def veto_cuda_graph(self, forward_batch) -> bool:
-        """M5：批内含真实短序列行（token_budget < S ≤ dense_threshold）
-        → veto CUDA graph，整批回退 eager。
+        """M5：批内含真实短序列行 → veto CUDA graph，整批回退 eager。
 
-        图内路径统一稀疏：S ≤ token_budget 的行 far 池空 + near/forced
-        配额 ≥ S → 选择集 = 全体位置，数学等价 dense（m5 单测 S=600
-        mass coverage = 1.00000）；超过预算的短行会以 4bit 近端排序淘汰
-        位置（S=1500 实测 mass 0.835）——此类行必须走 eager 的 dense
-        分支。pad 行（seq_len ≤ 1）不触发 veto（哨兵行语义安全）。
-        读 seq_lens_cpu（cpu 镜像，无 GPU 同步）。
+        旧 B' / taskmd 单池路径：token_budget < S ≤ dense_threshold 的行
+        veto；S ≤ token_budget 的行豁免（far 池空 + near/forced 配额 ≥ S
+        → 选择集 = 全体位置，数学等价 dense，m5 单测 S=600 mass
+        coverage = 1.00000）；超过预算的短行会以 4bit 近端排序淘汰位置
+        （S=1500 实测 mass 0.835）——此类行必须走 eager 的 dense 分支。
+        taskmd e64 分区路径（C2 关联重推导，E118）：「S ≤ token_budget
+        等价 dense」前提被 γ 预算切分破坏（见下方注释），短真实行
+        （1 < S ≤ dense_threshold）全部 veto。pad 行（seq_len ≤ 1）不触发
+        veto（哨兵行语义安全）。读 seq_lens_cpu（cpu 镜像，无 GPU 同步）。
         """
         slc = getattr(forward_batch, "seq_lens_cpu", None)
         if slc is not None:
@@ -425,6 +427,26 @@ class TLISparseAttnBackend(AttentionBackend):
         else:
             lens = forward_batch.seq_lens.tolist()  # 兜底一次同步
         lo = self.profile.token_budget
+        # C2 关联重推导（E118，GPT 审计 sglang_twolevel_audit）：
+        # 「S ≤ token_budget 的行数学等价 dense」的豁免前提只在
+        # 旧 B' 路径成立（far 池空 → near+forced 配额 ≥ S 覆盖全体）。
+        # TASK.md e64 分区（α>0 且 β>0）下该前提不成立：γ 预算切分使
+        # 配额可小于 mid 实际跨度（反例 S=1024=token_budget，sink/swa
+        # 各 128：nt_near_cap=384 + far_budget=384 < far span 640 +
+        # near span 128，mid 768 token 仅选 512）→ 图内 γ 稀疏 ≠ eager
+        # dense（eager 该区间 S ≤ dense_threshold 走 _dense_attn）。
+        # C2 identity 修复只保证「唯一性」（无重复计权），不补足配额
+        # 覆盖 → e64 短真实行必须整体 veto 回 eager，图内仅留
+        # S > dense_threshold 的长行（稀疏属既知偏差，与 eager 口径
+        # 一致）。单池 taskmd（α=0 或 β=0）保持旧豁免（整行 topk
+        # k=min(budget,Tc) ≥ S，dense 等价同旧 B'）。pad 行（seq_len=1）
+        # 不受影响（1 < lo 恒 False）。
+        if (
+            getattr(self.profile, "taskmd", False)
+            and self.profile.alpha > 0
+            and self.profile.beta > 0
+        ):
+            lo = 1
         return any(lo < int(L) <= self.dense_threshold for L in lens)
 
     def init_forward_metadata(self, forward_batch):

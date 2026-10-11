@@ -2533,7 +2533,33 @@ class TLIIndexer:
                 .expand(n, Hkv, -1)
             )
             parts.append(forced_out)
-            return torch.cat(parts, dim=-1)  # [n, Hkv, K2] 静态宽
+            res = torch.cat(parts, dim=-1)  # [n, Hkv, K2] 静态宽
+            # C2 修复（GPT 审计 sglang_twolevel_audit 2026-10-08，E118）：
+            # 短行 sink 区 [0, sink_tok) 与 swa 区 [swa_lo_t, S) 重叠
+            # （swa_lo_t = max(0, S-swa) < min(sink_tok, S) ⟺ S < sink+swa）
+            # 时两区直接拼接 → 重叠 token 重复计权（S=160 审计反例：
+            # sink [0,128) ∩ swa [32,160) = 96 token 双计，图内稀疏输出
+            # 0.75 ≠ dense 0.6）。两区并集此时恰为全体因果 token [0,S) →
+            # 该行输出 identity 全量位置 + 哨兵尾垫（B02 同款 grid，
+            # dense 等价）。branch-free 的 per-row where（无 host 同步/
+            # 数据依赖分支），CUDA graph 可录制；长短行混批互不影响。
+            # 注：S_t ≤ K2 恒成立——重叠行 S_t < sink+swa，而
+            # K2 = W_far+W_near+sink+swa ≥ max(token_budget, sink+swa)
+            # （W_far/W_near 为 min(…, Tc) 截断，极端 profile 下 K2 若
+            # 仍 < S_t 则 identity 截断丢 token——但该口径下原拼接同样
+            # 无法覆盖 swa_lo+Tc 之后的位置，非本次回归面）。
+            K2 = res.shape[-1]
+            j = torch.arange(K2, device=device).view(1, -1)  # [1, K2]
+            S_lo = S_t.view(-1, 1)  # [n, 1]
+            overlap = (
+                swa_lo_t
+                < torch.minimum(S_t, torch.full_like(S_t, sink_tok))
+            ).view(-1, 1)  # [n, 1]（pad 行 S_t=0：0<0 为 False，保持全哨兵）
+            id_grid = torch.where(j < S_lo, j, torch.full_like(j, SENT))  # [n, K2]
+            res = torch.where(
+                overlap.unsqueeze(1), id_grid.unsqueeze(1), res
+            )  # [n, Hkv, K2]：重叠行整行替换为 identity + 哨兵
+            return res
 
         # ---- 单池：整行 topk + swa +inf（two-level 单池语义）----
         sc = s2.masked_fill(~(valid & causal).unsqueeze(1), float("-inf"))
