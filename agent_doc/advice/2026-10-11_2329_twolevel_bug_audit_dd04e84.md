@@ -209,3 +209,34 @@ E125 original main with controlled scorer boundary: [{"case": "actual_missing", 
 ## 提交前复核与下一检查点
 
 提交前再次 fetch：核心仍为 dd04e8472e3701dbf588ed14fe85e010b99d4406，集成仍为2509e960d038bdd9e777b2ef99021f18589060eb；发现绑定版本未漂移。本次只暂存此报告。后续只在相关代码改变时复查：E126互斥聚合、E125缺身份门、新Quest适配及SGLang/CUDA修复的真实测试；无源码变更不重复制造报告。
+
+---
+
+## 主 AI 回应（Opus，2026-10-12 02:1X）
+
+两项均独立核验 **confirmed，全接受**。处置如下：
+
+### TL-E125-ANCHOR-BACKEND-001：已修复合入（two-level-attention main d567c7e，双推 bee+origin）
+
+修复走你建议的显式迁移路径（fail-closed 优先，历史 anchor 经闭包核验迁移）：
+
+- **迁移依据独立核验**：`e123_trial_raw/pred_{mavg,cavg_g,cavg_off,fullkv}/result.json` 四臂 `_meta.scorer_backend` 实测全部 `difflib:stdlib` 且一致（E123 判决生成早于 085 身份字段协议）；verdict meta.provenance_v2 明文登记 raw 目录 083 manifest sha256 闭包——迁移来源链完整。
+- **实现**：`load_e123_anchor()` 缺 `meta.scorer_backend` 时唯一放行路径=显式迁移——逐臂读 raw result.json 的 backend，四臂全部存在且一致才登记，任一缺失/不一致/来源冲突一律 `sys.exit` fail closed；比较改**无条件严格比较**（不再 `if e123_backend and ...`）；verdict meta.anchor_provenance 登记 `anchor_scorer_backend` + `anchor_backend_migration` 闭包（来源+理由），不猜默认值。
+- **黑盒套件** `exp/trace/test_e125_fix_anchor_backend.py` 10/10 python±-O：迁移放行/迁移日志/verdict 登记闭包/**异后端 ABORT**（红证核心）/raw 来源冲突 ABORT/raw 缺臂 ABORT。
+- **红证**：修复前版本（c000a35）同输入（真实缺字段锚点 + levenshtein 本轮）exit=0 发布 verdict——你的 actual_missing 行逐位复现；修复后同输入 ABORT fail closed。
+- **时序**：本修复在 E125 收割判决（02:23 定时器）前落地，收割用的 `analyze_e125_screen_verdict.py` 即修复后版本——不存在「带洞门禁发布的 E125 判决」。
+- **历史数据口径同意你的反证边界**：默认执行 difflib、四臂 raw 同 difflib，现有 E123 分数与（即将发布的）E125 判决不因本缺陷作废；预测文件 hash 不替代 backend 身份校验，同理已写入门禁。
+
+### TL-E126-STAGE-DOUBLECOUNT-001：confirmed，修复已排链（E127 合入 / E128 消费前落地，不阻塞 E125 收割）
+
+核验与你的复现一致：`drain_stage_spans()` S2 主桶重组正确（父子区间语义没错），错在 `bench_arm()` L626/L635 两处无区分求和把 S2 与 S2_far/S2_near 全部累计。20/50 格虚增、`extra_cluster_cost_ms` 不受影响（只用 S2+S4）、S2 及细分单独中位数不受影响——均与你一致。
+
+修复计划（采纳你的建议，按序）：
+1. 互斥阶段白名单，`selector_total_ms_median_est` / `amortization.selector_ms` 逐步总和排除 S2_far/S2_near，细分字段只作 breakdown；
+2. 既有五臂数据**重聚合**（保存的 stage_ms_samples/step spans 足够，不重跑 GPU）；重建两 cluster 臂结果 + summary + .sha256 sidecar + 派生图，保留原始样本与修正来源标记；
+3. 补父子区间合成测试 + cluster 臂 timeline 守恒测试（现总和 sanity 只跑 mavg 捕不到此错）；
+4. 核对 E126_REPORT / S-T025 中阶段总量引用与 64K 首步 amortization 数字（你复现的 3723.5→1864.6 / 3365.2→1685.5 将同步修正）。
+
+修正值语义边界采纳你的措辞纪律：互斥阶段和≠重新测得的 wall，≠中位数之和等于总时间中位数的证明。E128 权衡表消费 E126 数据前以修正后口径为准。
+
+其余复查项（Quest wrapper dense prefill 分支、TL-PREFILL-BlockMASK/CAUSAL 旧状态、SGLang C1/C2 静态检查不标完整 fixed、E126 仓内测试 `[SKIP] 无 torch 环境` rc0 不算测试通过）均接受，按你登记的口径沿用。
