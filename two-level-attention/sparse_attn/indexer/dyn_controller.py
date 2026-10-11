@@ -353,6 +353,70 @@ def classify_profile(s):
 
 # ================================================================ M3 预算编译器
 
+def validate_geometry(*, k1, k2, bs, n_valid, n_protected,
+                      n_prefix=None, n_swa=None):
+    """集中结构几何 validator（TL-E124-STRUCT-GUARD-088，2026-10-11 审计
+    修复）——compile_tier / compile_fixed / dry-run CLI 实跑入口共用。
+
+    结构性非法参数在进入预算公式**之前**拒绝（不得用 max(0,...) 静默压零
+    冒充合法容量）。校验项（GPT 088 修复口径）：
+      - k1 > 0、bs > 0；
+      - k2 >= 0（负 K2 → struct；K2=0 是协议允许值——mid L2 预算恰为零
+        ——单列 k2_zero=True 如实记录，不与负值混同为 struct）；
+      - 0 <= n_protected <= n_valid（n_valid=None 表示调用时尚不可知，
+        如实跳过依赖 n_valid 的两项，只查非负）；
+      - n_prefix >= 0、n_swa >= 0（显式给值时）；
+      - 保护区间可由当前 U 合法构造：n_prefix/n_swa 同时给值时必须满足
+        n_prefix + n_swa == n_protected（prefix 头部 + SWA 尾部无重叠
+        闭合分解，f34c02de4 同源绑定契约；只给其一 = 分解不完整，同样
+        struct）。两者均缺省 = 合法（区间摘要记 None，计数仍准确）。
+
+    返回 dict：{"ok": bool, "reason": None|"struct", "detail": str,
+    "k2_zero": bool}。合法时 reason=None、k2_zero 如实单列。
+    """
+    out = {"ok": True, "reason": None, "detail": "", "k2_zero": (k2 == 0)}
+
+    def _reject(detail):
+        out["ok"] = False
+        out["reason"] = "struct"
+        out["detail"] = detail
+        return out
+
+    if not isinstance(k1, int) or k1 <= 0:
+        return _reject(f"k1={k1!r} 必须为正整数（L1 页预算）")
+    if not isinstance(bs, int) or bs <= 0:
+        return _reject(f"bs={bs!r} 必须为正整数（页大小）")
+    if not isinstance(k2, int) or k2 < 0:
+        # 负 K2 是结构性非法（不是「容量为零」）；K2=0 合法、由 k2_zero 单列
+        return _reject(f"k2={k2!r} 必须为非负整数（负值是结构非法，"
+                       f"不得被 max(0,...) 静默压零冒充合法预算）")
+    if not isinstance(n_protected, int) or n_protected < 0:
+        return _reject(f"n_protected={n_protected!r} 必须为非负整数")
+    if n_valid is not None:
+        if not isinstance(n_valid, int) or n_valid < 0:
+            return _reject(f"n_valid={n_valid!r} 必须为非负整数（U：因果可见 keys）")
+        if n_protected > n_valid:
+            return _reject(f"n_protected({n_protected}) > n_valid({n_valid})："
+                           f"保护集不可能由当前 U 合法构造（保护数超过 U）")
+    if n_prefix is not None or n_swa is not None:
+        # 显式给分解分量：必须成对且闭合（prefix 头部 + SWA 尾部无重叠）
+        if n_prefix is None or n_swa is None:
+            return _reject(f"n_prefix={n_prefix!r} / n_swa={n_swa!r} 必须成对"
+                           f"给出（只给其一 = 保护集分解不完整）")
+        if not isinstance(n_prefix, int) or n_prefix < 0:
+            return _reject(f"n_prefix={n_prefix!r} 必须为非负整数"
+                           f"（负 prefix 会使 mid 切片起点为负、"
+                           f"far_range 落负 token 位置）")
+        if not isinstance(n_swa, int) or n_swa < 0:
+            return _reject(f"n_swa={n_swa!r} 必须为非负整数（负 window "
+                           f"不是合法保护几何）")
+        if n_prefix + n_swa != n_protected:
+            return _reject(f"n_prefix({n_prefix})+n_swa({n_swa}) != "
+                           f"n_protected({n_protected})：保护集两分量不闭合，"
+                           f"保护区间不可由当前 U 合法构造")
+    return out
+
+
 def derive_gamma(denom, target):
     """γ 反算 + 浮点 floor 回译验证（§2.1 条 5）。
 
@@ -420,6 +484,12 @@ def compile_tier(tier, *, k1, k2, bs, n_valid, n_protected,
     ok=True 时 info 含整数预算 Bn/Bf/Kmid/Tn/Tf、γ（浮点表示）、
     gamma_bumped、区域与容量（候选 IDs 摘要=token 区间）。
 
+    结构几何门禁（TL-E124-STRUCT-GUARD-088）：进入公式前先过集中
+    validate_geometry——负 K2、保护数超过 U、负 prefix/window、保护
+    分量不闭合等结构性非法输入一律 reason=struct 拒绝，不再被
+    max(0,...) 静默压零冒充合法容量。K2=0 是协议允许值（mid L2 预算
+    恰为零），单列 k2_zero=True 如实记录，不与负值混同。
+
     容量语义（「实际候选容量不足 → profile 不可用」）：
       near 承诺配额 Tn_target 必须 ≤ Cn=min(Bn·b, |N|)（L1 near 块
       预算与 α 切出的 near 区宽的交集——选中页的实际有效唯一容量）；
@@ -429,8 +499,11 @@ def compile_tier(tier, *, k1, k2, bs, n_valid, n_protected,
     if tier not in TIER_PARAMS:
         return False, {"reason": "struct", "detail": f"unknown tier {tier}"}
     tp = TIER_PARAMS[tier]
-    if k1 <= 0 or bs <= 0 or n_valid < 0 or n_protected < 0:
-        return False, {"reason": "struct"}
+    gv = validate_geometry(k1=k1, k2=k2, bs=bs, n_valid=n_valid,
+                           n_protected=n_protected,
+                           n_prefix=n_prefix, n_swa=n_swa)
+    if not gv["ok"]:
+        return False, {"reason": "struct", "detail": gv["detail"]}
 
     Bn, Bf, Kmid, m_len, ge_k2, ops = _compile_common(
         tp["alpha"], tp["beta"], k1, k2, bs, n_valid, n_protected)
@@ -472,6 +545,12 @@ def compile_tier(tier, *, k1, k2, bs, n_valid, n_protected,
         "protected_ge_k2": ge_k2,
         "ops": ops,
     })
+    if gv["k2_zero"]:
+        # K2=0 协议允许值单列（088）：mid L2 预算恰为零 → Kmid=0，
+        # 与负 K2 的 struct 拒绝不混同
+        info["k2_zero"] = True
+        info["k2_zero_note"] = ("K2=0 为协议允许值（mid L2 预算为零），"
+                                "单列如实记录，非 struct 拒绝")
     _attach_ranges(info, n_prefix, n_swa, n_valid, n_protected,
                    m_len, n_len, f_len)
     return True, info
@@ -486,6 +565,10 @@ def compile_fixed(method, *, k1, k2, bs, n_valid, n_protected,
     即可用；容量截断如实记录（Tn_effective/Tf_effective < 配额时即
     截断证据，不蒙混）。method 未通过正确性验证（不在 registry）→
     不可用（reason=method_not_registered）。
+
+    结构几何门禁（TL-E124-STRUCT-GUARD-088）：与 compile_tier 同源的
+    validate_geometry 前置——负 K2、保护数超过 U、负 prefix/window、
+    分量不闭合一律 reason=struct；K2=0 合法单列 k2_zero。
     """
     m = canonical_method(method)
     if m not in METHOD_FIXED_TIER:
@@ -493,8 +576,11 @@ def compile_fixed(method, *, k1, k2, bs, n_valid, n_protected,
     alpha, beta, gamma = METHOD_FIXED_TIER[m]["params"]
     if not (gamma is not None and 0 < gamma <= 1):
         return False, {"reason": "struct", "detail": f"gamma={gamma!r}"}
-    if k1 <= 0 or bs <= 0 or n_valid < 0 or n_protected < 0:
-        return False, {"reason": "struct"}
+    gv = validate_geometry(k1=k1, k2=k2, bs=bs, n_valid=n_valid,
+                           n_protected=n_protected,
+                           n_prefix=n_prefix, n_swa=n_swa)
+    if not gv["ok"]:
+        return False, {"reason": "struct", "detail": gv["detail"]}
 
     Bn, Bf, Kmid, m_len, ge_k2, ops = _compile_common(
         alpha, beta, k1, k2, bs, n_valid, n_protected)
@@ -518,6 +604,10 @@ def compile_fixed(method, *, k1, k2, bs, n_valid, n_protected,
         "method": m, "verification": METHOD_FIXED_TIER[m]["verification"],
         "ops": ops,
     }
+    if gv["k2_zero"]:
+        info["k2_zero"] = True
+        info["k2_zero_note"] = ("K2=0 为协议允许值（mid L2 预算为零），"
+                                "单列如实记录，非 struct 拒绝")
     _attach_ranges(info, n_prefix, n_swa, n_valid, n_protected,
                    m_len, n_len, f_len)
     return True, info
@@ -527,8 +617,12 @@ def _attach_ranges(info, n_prefix, n_swa, n_valid, n_protected,
                    m_len, n_len, f_len):
     """候选 IDs 摘要（§6 decision schema 的「保护与候选IDs摘要」）：
     near/far 的 token 区间（0 基全序列坐标）。mid 区间按 [n_prefix,
-    U−n_swa) 推导；prefix∪SWA 有去重叠（n_prefix+n_swa≠|P|）或
-    区间参数缺失时区间记 None（计数仍准确，不臆造区间）。"""
+    U−n_swa) 推导；区间参数缺失时区间记 None（计数仍准确，不臆造区间）。
+    088 后非闭合分解（n_prefix+n_swa≠|P|）已在 validate_geometry 前置
+    拒绝（f34c02de4 同源绑定契约：保护 = prefix 头部 + SWA 尾部无重叠
+    闭合分解）；此处闭合校验防御性保留（直接调用绕过 validator 时兜底
+    记 None，绝不落负起点/越界区间——旧缺陷 n_prefix=-1 曾落
+    far_range=[-1,...]，负值现已被 validator 拒于门外）。"""
     if (n_prefix is None or n_swa is None
             or n_prefix + n_swa != n_protected):
         info["near_range"] = None
@@ -693,6 +787,13 @@ def controller_spec():
         "ref_boundary": "middle最后1/4=N_ref，其余F_ref（先于α定义）",
         "seed_scheme": "sha256('e124a|{seq_id}|{layer_idx}')前8字节"
                        "→torch.Generator；R∈{±1/√8}^{D×8}",
+        "seq_identity_contract": "seq_id 必须对每个逻辑输入序列唯一"
+                                 "（TL-E124-SEQ-IDENTITY-089：dry-run 批量"
+                                 "入口 --seq-id auto 从 trace 目录派生稳定"
+                                 "唯一 ID；多序列共用同一 seq_id 会使同层"
+                                 "随机投影 seed 跨输入碰撞，违反逐 seq×"
+                                 "layer 身份契约）；DecisionLog 追加模式对"
+                                 "重复 identity fail-closed 拒绝",
         "geometry_contract": "decide(): k_mid行数必须==max(0,n_valid-"
                              "n_protected)，不一致抛 ValueError"
                              "（特征与预算同源绑定，GPT A1 验收 2026-10-11）",
@@ -726,16 +827,88 @@ def write_controller_spec(path):
 
 
 class DecisionLog:
-    """per_seq_layer_decisions.jsonl 追加式落盘（每行一条 decision）。"""
+    """per_seq_layer_decisions.jsonl 追加式落盘（每行一条 decision）。
+
+    重复 identity 门禁（TL-E124-SEQ-IDENTITY-089，2026-10-11 审计修复，
+    GPT 维护性建议一并实现）：identity = (seq_id, layer_idx, phase,
+    state_epoch) 是决策的声明唯一键（seed 契约 sha256('e124a|{seq_id}|
+    {layer_idx}') 即由它派生）。追加时若文件中已存在**相同 identity**
+    的记录 → fail-closed 拒绝（ValueError）：
+      - trace 来源不同（decision["trace_source"] 不一致）→ identity
+        clash：两个不同输入序列冒用同一决策身份，跨输入 seed/身份碰撞
+        正是 089 缺陷本体，绝不静默混入同一 --out；
+      - trace 来源相同 → 同目录重跑同 --out 的重复追加同样拒绝
+        （重复行会使聚合消费端双计）；续跑/重跑请换新 --out 或清理
+        旧文件。来源字段缺失（直接库用、无 trace 语境）时视为同一
+        匿名来源，仅对完全相同 identity 拒绝。
+    """
 
     def __init__(self, path):
         self.path = path
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+        # 已有记录的 identity → 来源索引（启动时一次性扫描；文件为空/新文件
+        # 则索引为空）
+        self._seen = {}
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            with open(path, encoding="utf-8") as f:
+                for ln, line in enumerate(f, 1):
+                    if not line.strip():
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError as e:
+                        raise ValueError(
+                            f"[E124A-IDENTITY-GATE] {path}:{ln} 既有记录不是"
+                            f"合法 JSON（{e}）——追加模式拒绝在损坏文件上"
+                            f"继续混写") from e
+                    ident = self._identity_of(rec)
+                    if ident is not None and ident not in self._seen:
+                        self._seen[ident] = self._source_of(rec)
         self._f = open(path, "a")
 
+    @staticmethod
+    def _identity_of(decision):
+        try:
+            return (decision["seq_id"], int(decision["layer_idx"]),
+                    decision["phase"], int(decision["state_epoch"]))
+        except (KeyError, TypeError, ValueError):
+            return None   # 无完整身份的记录不参与门禁（如实放行）
+
+    @staticmethod
+    def _source_of(decision):
+        """trace 来源标识（089）：优先顶层 trace_source，回落 geometry 段
+        （入口脚本写入 geometry.trace_source）；均缺省 = 匿名来源 None。"""
+        src = decision.get("trace_source")
+        if src is None:
+            geo = decision.get("geometry")
+            if isinstance(geo, dict):
+                src = geo.get("trace_source")
+        return src
+
     def append(self, decision):
+        ident = self._identity_of(decision)
+        if ident is not None and ident in self._seen:
+            prev_src = self._seen[ident]
+            cur_src = self._source_of(decision)
+            if prev_src != cur_src:
+                raise ValueError(
+                    f"[E124A-IDENTITY-CLASH] identity (seq_id={ident[0]}, "
+                    f"layer_idx={ident[1]}, phase={ident[2]!r}, "
+                    f"state_epoch={ident[3]}) 已存在于 {self.path}，且 trace "
+                    f"来源不同（既有 {prev_src!r} vs 追加 {cur_src!r}）——"
+                    f"不同输入序列不得冒用同一决策身份（seed 契约 "
+                    f"sha256('e124a|{{seq_id}}|{{layer}}') 将跨输入碰撞），"
+                    f"fail-closed 拒绝混入同一 --out")
+            raise ValueError(
+                f"[E124A-IDENTITY-DUP] identity (seq_id={ident[0]}, "
+                f"layer_idx={ident[1]}, phase={ident[2]!r}, "
+                f"state_epoch={ident[3]}) 已存在于 {self.path}（同 trace 来源"
+                f" {cur_src!r} 的重复追加）——重复行会使聚合消费端双计，"
+                f"续跑/重跑请换新 --out 或清理既有文件，fail-closed")
         self._f.write(json.dumps(decision, ensure_ascii=False) + "\n")
         self._f.flush()
+        if ident is not None:
+            self._seen[ident] = self._source_of(decision)
 
     def close(self):
         self._f.close()

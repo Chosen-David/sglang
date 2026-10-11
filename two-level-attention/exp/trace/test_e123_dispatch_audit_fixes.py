@@ -3,6 +3,9 @@
 
 覆盖三项 confirmed 缺陷的黑盒验证：
   - TL-E123-SCORER-IDENTITY-085：scorer 身份脱节（analyze_e123_trial_verdict.py）
+  - TL-E123-PORTABILITY-087：analyze REPO 机器绝对路径硬编码 → 独立干净检出
+    下 eval 子进程 cwd 指向不存在路径、085 正向用例打分前崩溃（2026-10-11
+    第二轮审计补入；修复 = REPO 相对 __file__ + E123_REPO_ROOT 覆盖）
   - TL-E123-RESUME-PREFIX-086：SKIP 前缀 mismatch（run_e123_trial_dispatch.sh）
   - TL-E2E-FAILMASK-008 新入口：失败仍报告完成（同 dispatch 脚本）
 
@@ -294,6 +297,73 @@ def case_085_levenshtein(ctb):
 
 
 # ----------------------------------------------------------------------------
+# 087：REPO 可移植性（analyze_e123_trial_verdict.py）
+# ----------------------------------------------------------------------------
+
+def _probe_repo(script_path, env_extra):
+    """子进程导入 analyze 模块并返回其解析出的 REPO（即 run_eval 里
+    subprocess.run(..., cwd=REPO) 将使用的 cwd——模块级常量，探针不执行
+    main()）。黑盒：不 import 被测代码进本进程。"""
+    code = (
+        "import importlib.util, sys, os\n"
+        "spec = importlib.util.spec_from_file_location('az_probe', sys.argv[1])\n"
+        "m = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(m)\n"
+        "print(m.REPO)\n")
+    env = {k: v for k, v in os.environ.items() if k != "E123_REPO_ROOT"}
+    env.update(env_extra)
+    r = subprocess.run([sys.executable, "-c", code, script_path],
+                       env=env, capture_output=True, text=True, timeout=120)
+    return r
+
+
+def case_087_repo_portability(ctb):
+    name = "087-1 REPO 相对 __file__ 解析（不依赖机器绝对路径）+ E123_REPO_ROOT 覆盖"
+    res = []
+    script = os.path.join(TESTED_DIR, "analyze_e123_trial_verdict.py")
+    _check(os.path.exists(script), f"被测 analyze 存在: {script}", res)
+    # 1) 原位解析：analyzer 的 REPO 必须 == 当前检出根 TLA_ROOT
+    #    （run_eval 的 subprocess cwd 指向当前检出，而非任何机器绝对路径）
+    r = _probe_repo(script, {})
+    _check(r.returncode == 0,
+           f"探针导入 analyze 成功（实际 {r.returncode}）: {r.stderr[-300:]}", res)
+    if r.returncode == 0:
+        _check(os.path.realpath(r.stdout.strip()) == os.path.realpath(TLA_ROOT),
+               f"analyze REPO 应解析为当前检出根 {TLA_ROOT}（即 eval 子进程 "
+               f"cwd），得 {r.stdout.strip()!r}", res)
+    # 2) 假检出探针（机器无关红证核心）：把 analyze 复制到另一个绝对路径的
+    #    exp/trace/ 布局下，REPO 必须跟随脚本位置解析到该假检出根——
+    #    旧版硬编码机器绝对路径时此断言在任何机器上都失败
+    fake_root = os.path.join(ctb, "fake_checkout", "two-level-attention")
+    os.makedirs(os.path.join(fake_root, "exp", "trace"), exist_ok=True)
+    fake_script = os.path.join(fake_root, "exp", "trace",
+                               "analyze_e123_trial_verdict.py")
+    shutil.copyfile(script, fake_script)
+    r2 = _probe_repo(fake_script, {})
+    _check(r2.returncode == 0,
+           f"假检出探针导入成功（实际 {r2.returncode}）", res)
+    if r2.returncode == 0:
+        _check(os.path.realpath(r2.stdout.strip()) == os.path.realpath(fake_root),
+               f"复制到独立绝对路径后 REPO 应跟随脚本位置解析为 {fake_root}"
+               f"（不依赖机器绝对路径），得 {r2.stdout.strip()!r}", res)
+    # 3) 显式 E123_REPO_ROOT 覆盖：优先于 __file__ 解析
+    override_root = os.path.join(ctb, "override_root")
+    os.makedirs(override_root, exist_ok=True)
+    r3 = _probe_repo(script, {"E123_REPO_ROOT": override_root})
+    _check(r3.returncode == 0, f"覆盖探针导入成功（实际 {r3.returncode}）", res)
+    if r3.returncode == 0:
+        _check(os.path.realpath(r3.stdout.strip())
+               == os.path.realpath(override_root),
+               f"E123_REPO_ROOT 显式覆盖应生效，得 {r3.stdout.strip()!r}", res)
+    # 4) 源文本不得再含原机器绝对路径硬编码（可移植性静态断言）
+    with open(script, encoding="utf-8") as f:
+        src = f.read()
+    _check("/home/wangyuanshuo02/sglang/two-level-attention" not in src,
+           "analyze 源码不得再硬编码原机器绝对路径（087 缺陷本体）", res)
+    return name, res, False
+
+
+# ----------------------------------------------------------------------------
 # 086 / 008：dispatch 脚本（run_e123_trial_dispatch.sh）
 # ----------------------------------------------------------------------------
 
@@ -453,7 +523,7 @@ def main():
     tb = tempfile.mkdtemp(prefix="e123_audit_suite_")
     TESTED_DIR = prepare_tested_dir(tb)
     print("=" * 78)
-    print("E123 审计修复红绿套件（085/086/008）")
+    print("E123 审计修复红绿套件（085/086/087/008）")
     print(f"two-level-attention root: {TLA_ROOT}")
     print(f"被测脚本目录: {TESTED_DIR}"
           + (f"（红证模式，基线 SHA {BASELINE_SHA}）" if BASELINE_MODE
@@ -467,6 +537,7 @@ def main():
         (case_085_default, False),
         (case_085_mismatch, False),
         (case_085_levenshtein, False),
+        (case_087_repo_portability, False),
         (case_086_all_skip, False),
         (case_086_ambiguous, False),
         (case_086_incomplete, False),

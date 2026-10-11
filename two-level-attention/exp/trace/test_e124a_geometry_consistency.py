@@ -41,6 +41,10 @@
                   切片与预算将两套口径）。
   G11 dry-run     不给 --n-valid 的 dry-run 预览 → run_config.n_valid=None
      预览诚实      + 各档 reason=n_valid_unspecified（不再静默默认 32768）。
+  G12 v3 双修复   已入库 v3 sample（几何 f34c02de4 + 089 auto seq_id/trace_
+     闭包         source）逐条同源断言 + v2/v3 档位对比如实记录
+                  （TL-E124-SEQ-IDENTITY-089 口径；几何相同、seed 是
+                  seq_id 的函数，s 重算 → 档位变化属契约正确实现）。
 
 trace 依赖：G01-G03 优先用真实 /tmp/trace/qwen3-8b-v/lb_hotpotqa_0；
 若已清理则用合成 fixture（S=16957 + meta.json 同构，D/H 缩减版）并
@@ -448,6 +452,70 @@ def test_G10_prefix_swa_not_closing():
         shutil.rmtree(base, ignore_errors=True)
 
 
+# ---------------- G12 已入库 v3 正例记录 = 双修复闭包（089 身份口径） ----------------
+
+V3_JSONL = os.path.join(RESULTS, "e124a_dryrun_v3_sample",
+                        "per_seq_layer_decisions_lb_hotpotqa_0.jsonl")
+V3_SUMMARY = os.path.join(RESULTS, "e124a_dryrun_v3_summary.json")
+
+
+def test_G12_v3_records_identity_closure():
+    """v3 = 几何（f34c02de4）+ seq 身份（TL-E124-SEQ-IDENTITY-089）双修复
+    口径的 hotpotqa 同源重跑：逐条同源断言 + auto seq_id/trace_source
+    字段闭包 + v2/v3 档位对比如实记录（几何相同、seed 是 seq_id 的函数，
+    s 重算导致档位变化属契约正确实现，断言只锁一致性不锁档位）。"""
+    _check(os.path.exists(V3_JSONL), f"v3 正例记录应已入库: {V3_JSONL}")
+    v3 = _load_jsonl(V3_JSONL)
+    _check(len(v3) == 9, f"v3 应恰 9 层决策，得 {len(v3)}")
+    seq_ids = set()
+    for i, d in enumerate(v3):
+        _assert_record_consistent(d, f"v3[{i}]")
+        geo = d["geometry"]
+        # 089 身份闭包：auto seq_id（逐序列唯一，≠ 旧默认 0）+ 派生来源 +
+        # trace 来源（目录名 + meta 输入 sha256）
+        _check(geo["seq_id"] == d["seq_id"] and geo["seq_id"] != 0,
+               f"v3[{i}] seq_id 应为 auto 派生唯一 ID（旧默认 0 即 089 缺陷），"
+               f"得 {geo.get('seq_id')}")
+        _check(str(geo.get("seq_id_source", "")).startswith("auto:"),
+               f"v3[{i}] seq_id_source 应如实记 auto 派生，得 "
+               f"{geo.get('seq_id_source')}")
+        src = geo.get("trace_source")
+        _check(isinstance(src, dict)
+               and src.get("trace_dir_name") == "lb_hotpotqa_0"
+               and isinstance(src.get("trace_meta_sha256"), str)
+               and len(src["trace_meta_sha256"]) == 64,
+               f"v3[{i}] trace_source 应含目录名与 meta 输入 sha256，得 {src}")
+        seq_ids.add(geo["seq_id"])
+    _check(len(seq_ids) == 1 and 0 not in seq_ids,
+           f"单目录 9 层应共享同一 auto seq_id（且非 0），得 {seq_ids}")
+    # v2/v3 对比闭包：summary 与 jsonl 实测一致
+    _check(os.path.exists(V3_SUMMARY), f"v3 summary 应已入库: {V3_SUMMARY}")
+    summ = json.load(open(V3_SUMMARY))
+    v2 = _load_jsonl(V2_JSONL)
+
+    def _dist(recs):
+        dd = {}
+        for r in recs:
+            dd[r["profile"]["applied"]] = dd.get(r["profile"]["applied"], 0) + 1
+        return dd
+
+    _check(summ["tiers_v3"] == _dist(v3) and summ["tiers_v2"] == _dist(v2),
+           "v3 summary 档位分布应与两版 jsonl 实测一致")
+    _check(len(summ.get("per_layer_v2_vs_v3", [])) == 9,
+           "v3 summary 应记录 9 层 v2/v3 对比")
+    for row, (a, b) in zip(summ["per_layer_v2_vs_v3"], zip(v2, v3)):
+        _check(row["v2_applied"] == a["profile"]["applied"]
+               and row["v3_applied"] == b["profile"]["applied"]
+               and row["tier_changed"] == (a["profile"]["applied"]
+                                           != b["profile"]["applied"]),
+               f"layer {row['layer_idx']} 对比记录与 jsonl 实测不符")
+    changed = sum(1 for row in summ["per_layer_v2_vs_v3"] if row["tier_changed"])
+    print(f"[G12] v2(seq_id=0, 089 降格)档位 {json.dumps(summ['tiers_v2'], ensure_ascii=False)}"
+          f" -> v3(auto 唯一 ID)档位 {json.dumps(summ['tiers_v3'], ensure_ascii=False)}；"
+          f"档位变化 {changed}/9 层（seed 是 seq_id 的函数，s 重算属契约正确实现，"
+          f"如实记录）", flush=True)
+
+
 # ---------------- G11 dry-run 预览：缺省不再静默 32768 ----------------
 
 def test_G11_dryrun_preview_honest():
@@ -489,6 +557,7 @@ PLAN = [
     ("G09", test_G09_v2_records_consistent_closure),
     ("G10", test_G10_prefix_swa_not_closing),
     ("G11", test_G11_dryrun_preview_honest),
+    ("G12", test_G12_v3_records_identity_closure),
 ]
 
 

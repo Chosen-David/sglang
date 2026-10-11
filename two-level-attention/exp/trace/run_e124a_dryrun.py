@@ -31,12 +31,33 @@
   5. query 因果位置：q_all[-1] 的 qpos（blob["qpos"] 末位）+1 必须等于
      n_valid，不一致拒绝；qpos 与来源如实记入每条决策的 geometry 段。
 
+结构几何门禁（TL-E124-STRUCT-GUARD-088，2026-10-11 审计修复）：
+  6. 负 K2、保护数超过 U、负 prefix/window、保护分量不闭合等结构性
+     非法参数在进入预算公式前拒绝（共用 dyn_controller.validate_geometry
+     集中实现）；dry-run 预览对 reason=struct 的输入非零退出（其余
+     reason——gamma_gt_1/near_capacity/n_valid_unspecified/method_not_
+     registered——是诚实预览，不触发退出）；实跑入口同样非零退出
+     （[E124A-ABORT][STRUCT]）。
+
+seq 身份/seed 契约（TL-E124-SEQ-IDENTITY-089，2026-10-11 审计修复）：
+  7. --seq-id 缺省 auto：seq_id = int(sha256(realpath(trace_dir))[:8])
+     ——每个 trace 目录（逻辑输入序列）派生稳定唯一 ID，同层随机投影
+     seed（sha256('e124a|{seq_id}|{layer}')）不再跨序列碰撞；显式
+     --seq-id N 保留（单目录单序列场景合法），实际模式与派生来源如实
+     记入每条决策 geometry 段（seq_id/seq_id_source）。
+  8. 每条决策记录 trace 来源标识（geometry.trace_source = 目录名 +
+     meta.json 输入 sha256），批量汇总可回链每条 JSONL 的输入序列。
+  9. DecisionLog 追加模式重复 identity 门禁（dyn_controller 内实现）：
+     同一 --out 下相同 (seq_id, layer_idx, phase, state_epoch) 的追加
+     fail-closed 拒绝——续跑/重跑换新 --out。
+
 边界（任务书约束）：不注册任何 CLI 参数进 sparse_attn/arguments.py；
 不改生产 tli_indexer.py；不实现 M5 D′ gate；不跑 GPU；--dynamic 类
 参数一律不伪造——本脚本的 argparse 参数只是控制器输入几何，不是
 生产 CLI 扩展。
 """
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -85,6 +106,9 @@ def _resolved_config(args):
             "k1": args.k1, "k2": args.k2, "bs": args.bs,
             "n_valid": args.n_valid, "n_protected": args.n_protected,
             "n_prefix": args.n_prefix, "n_swa": args.n_swa,
+            # 089：dry-run 也如实记录 seq ID 模式（auto=按 trace 目录派生
+            # 唯一 ID；explicit=显式整数）
+            "seq_id": str(args.seq_id),
             "phase": "prefill", "state_epoch": 0,
         },
         "compiled_preview": _geo_budgets(args),
@@ -102,6 +126,56 @@ def _abort(msg):
 def _check(cond, msg):
     if not cond:
         raise SystemExit(f"[E124A-DRYRUN-FAIL] {msg}")
+
+
+def _struct_abort(msg):
+    """088：结构性非法几何参数 fail-closed 出口（非零退出 + 可检索标记）。
+    与 _abort（几何不一致）区分：这里是「参数本身结构非法」（负 K2、保护
+    超过 U、负 prefix/window、分量不闭合），在进入预算公式之前拒绝。"""
+    raise SystemExit(f"[E124A-ABORT][STRUCT] {msg}")
+
+
+def _validate_entry_geometry(args, n_valid):
+    """088：入口级结构几何前置校验——共用 dyn_controller.validate_geometry
+    集中实现（compile_tier/compile_fixed 同源）。n_valid=None 表示调用点
+    尚不可知（main 前置 / dry-run 无 --n-valid），只查不依赖 U 的项；
+    失败非零退出。合法时原样放行（K2=0 是协议允许值，单列记录不在这里
+    拒绝）。"""
+    gv = dc.validate_geometry(k1=args.k1, k2=args.k2, bs=args.bs,
+                              n_valid=n_valid, n_protected=args.n_protected,
+                              n_prefix=args.n_prefix, n_swa=args.n_swa)
+    if not gv["ok"]:
+        _struct_abort(f"结构性非法几何参数被拒绝（进入预算公式之前"
+                      f"fail-closed）：{gv['detail']}"
+                      f"（run_config: k1={args.k1} k2={args.k2} bs={args.bs}"
+                      f" n_valid={n_valid} n_protected={args.n_protected}"
+                      f" n_prefix={args.n_prefix} n_swa={args.n_swa}）")
+    return gv
+
+
+def _resolve_seq_id(args, trace_dir):
+    """089：seq ID 解析。
+
+    auto（缺省）：seq_id = int(sha256(realpath(trace_dir))[:8], big)——
+    每个 trace 目录（= 逻辑输入序列）派生稳定唯一 ID；同层随机投影
+    seed（sha256('e124a|{seq_id}|{layer_idx}')）不再跨序列碰撞。
+    显式整数：单目录单序列场景合法保留。返回 (seq_id, source)。"""
+    raw = str(args.seq_id).strip()
+    if raw == "auto":
+        rp = os.path.realpath(trace_dir)
+        h = hashlib.sha256(rp.encode()).digest()
+        sid = int.from_bytes(h[:8], "big")
+        return sid, (f"auto:int(sha256(realpath(trace_dir))[:8]) "
+                     f"derived from {rp}")
+    try:
+        sid = int(raw)
+    except ValueError:
+        raise SystemExit(f"[E124A-DRYRUN-FAIL] --seq-id 只接受 'auto' 或"
+                         f"非负整数，得 {raw!r}")
+    if sid < 0:
+        raise SystemExit(f"[E124A-DRYRUN-FAIL] --seq-id 显式值必须非负，"
+                         f"得 {sid}")
+    return sid, "explicit"
 
 
 def _run_trace(args):
@@ -138,6 +212,19 @@ def _run_trace(args):
                f"mid 切片 [n_prefix, n_valid-n_swa) 的行数"
                f"(n_valid-n_prefix-n_swa) 将与预算几何 (n_valid-n_protected) "
                f"两套口径——拒绝")
+
+    # ---- 088：n_valid 已知后的完整结构几何校验（含 n_protected<=n_valid） ----
+    _validate_entry_geometry(args, n_valid)
+
+    # ---- 089：seq ID 解析（auto=按 trace 目录派生稳定唯一 ID）+ trace 来源 ----
+    seq_id, seq_id_source = _resolve_seq_id(args, args.trace_dir)
+    meta_path = os.path.join(args.trace_dir, "meta.json")
+    with open(meta_path, "rb") as f:
+        meta_sha = hashlib.sha256(f.read()).hexdigest()
+    trace_source = {
+        "trace_dir_name": os.path.basename(os.path.realpath(args.trace_dir)),
+        "trace_meta_sha256": meta_sha,
+    }
 
     spec_path = args.spec_out or os.path.join(
         os.path.dirname(os.path.abspath(args.out)), "controller_spec.json")
@@ -199,12 +286,14 @@ def _run_trace(args):
                    f"n_valid-n_protected={n_valid - args.n_protected}"
                    f"（特征与预算两套几何，拒绝）")
 
-        dec = dc.decide(q, k_mid, seq_id=args.seq_id, layer_idx=int(layer),
+        dec = dc.decide(q, k_mid, seq_id=seq_id, layer_idx=int(layer),
                         method=args.method, k1=args.k1, k2=args.k2,
                         bs=args.bs, n_valid=n_valid,
                         n_protected=args.n_protected,
                         n_prefix=args.n_prefix, n_swa=args.n_swa)
         # ---- 决策记录如实记录本次实跑的几何来源与 query 因果位置 ----
+        # 089：seq_id 实际值与派生来源 + trace 来源标识（目录名 + meta
+        # 输入 sha256）一并入 geometry 段，批量汇总可回链每条 JSONL
         dec["geometry"] = {
             "S": int(S), "k_rows": k_rows,
             "n_valid": n_valid, "n_valid_source": n_valid_source,
@@ -213,10 +302,12 @@ def _run_trace(args):
             "n_mid": int(k_mid.shape[0]),
             "qpos": qpos, "qpos_source": qpos_source,
             "causal_visible_keys": qpos + 1,
+            "seq_id": seq_id, "seq_id_source": seq_id_source,
+            "trace_source": trace_source,
         }
         log.append(dec)
         n += 1
-        print(f"[e124a] seq={args.seq_id} layer={layer} "
+        print(f"[e124a] seq={seq_id} layer={layer} "
               f"s={dec['features']['s'] if dec['features']['s'] is not None else 'NA'} "
               f"requested={dec['profile']['requested']} "
               f"applied={dec['profile']['applied']} "
@@ -249,7 +340,14 @@ def main():
     ap.add_argument("--n-protected", type=int, default=256)
     ap.add_argument("--n-prefix", type=int, default=128)
     ap.add_argument("--n-swa", type=int, default=128)
-    ap.add_argument("--seq-id", type=int, default=0)
+    ap.add_argument("--seq-id", default="auto",
+                    help="seq ID（089）：'auto'（缺省）= int(sha256(realpath"
+                         "(trace_dir))[:8])——每个 trace 目录（逻辑输入"
+                         "序列）派生稳定唯一 ID，同层随机投影 seed 不跨序"
+                         "列碰撞；显式非负整数保留（单目录单序列场景合法），"
+                         "实际模式如实记入 geometry.seq_id_source。旧版默认"
+                         " 0 使 8 目录共享 seq_id=0，违反逐 seq×layer 身份"
+                         "契约，已修。")
     ap.add_argument("--out", default="/tmp/e124a_dryrun/per_seq_layer_decisions.jsonl")
     ap.add_argument("--spec-out", default=None)
     args = ap.parse_args()
@@ -257,8 +355,22 @@ def main():
     if args.layers:
         args.layers = [int(x) for x in str(args.layers).split(",") if x.strip()]
 
+    # ---- 088：结构几何前置校验（n_valid 已知则完整校验，未知则先查
+    #      不依赖 U 的项；n_protected<=n_valid 由实跑路径在 n_valid 解析
+    #      后二次校验兜底）——结构性非法参数非零退出，dry-run/实跑同口径 ----
+    _validate_entry_geometry(args, args.n_valid)
+
     if args.dry_run:
-        print(json.dumps(_resolved_config(args), ensure_ascii=False, indent=2))
+        cfg = _resolved_config(args)
+        print(json.dumps(cfg, ensure_ascii=False, indent=2))
+        # 088：dry-run 预览对 reason=struct 的输入非零退出（其余 reason
+        # 是诚实预览，不触发退出）
+        struct_tiers = [t for t, v in cfg["compiled_preview"].items()
+                        if isinstance(v, dict) and v.get("reason") == "struct"]
+        if struct_tiers:
+            _struct_abort(f"dry-run 预览检出结构性非法几何（档位 {struct_tiers}"
+                          f" 返回 reason=struct）："
+                          f"{json.dumps({t: cfg['compiled_preview'][t] for t in struct_tiers}, ensure_ascii=False)}")
         return 0
     return _run_trace(args)
 

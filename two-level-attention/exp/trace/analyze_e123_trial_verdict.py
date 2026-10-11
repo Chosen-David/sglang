@@ -29,6 +29,14 @@ v3（TL-E123-SCORER-IDENTITY-085，2026-10-11 审计修复）：
   - eval 子进程 PYTHONPATH 保留调用方路径（重评分注入 jieba/rouge 的通道），
     /tmp/e117_extra_pkgs（本机 fluentllmenv 不可写的既有解法）追加在后。
 
+v4（TL-E123-PORTABILITY-087，2026-10-11 审计修复）：
+  - REPO 不再硬编码原机器绝对路径（独立干净检出下 subprocess cwd 指向
+    不存在路径，085 两个正向 scorer 用例在打分前 FileNotFoundError）——
+    改为相对本脚本 __file__ 解析（exp/trace 上两级 = two-level-attention
+    检出根），允许显式环境变量 E123_REPO_ROOT 覆盖；
+  - OUT_ROOT 默认值同口径改为 REPO 下相对路径（原机器上解析结果与旧
+    硬编码逐位相同，行为零变化；E123_RAW_DIR 覆盖通道不变）。
+
 Caveat（如实记录）：
   - cavg_off 臂未归一化混池（far GQA group-sum 点积 vs near softmax
     概率，GPT 7c31909 量纲更正）：其结果按「未归一化混池实测」口径报告。
@@ -46,12 +54,19 @@ import random
 import subprocess
 import sys
 
-REPO = "/home/wangyuanshuo02/sglang/two-level-attention"
+# 087：repo 根相对本脚本位置解析（exp/trace 上两级），不再硬编码机器绝对
+# 路径——独立干净检出下 subprocess cwd 必须指向当前检出根；显式
+# E123_REPO_ROOT 环境变量可覆盖（测试/异构布局场景）。
+REPO = os.environ.get(
+    "E123_REPO_ROOT",
+    os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "..", "..")))
 PY = sys.executable
-# 原始数据默认用入库副本（083 可复验链）；E123_RAW_DIR 可覆盖指回 /tmp 原跑目录
+# 原始数据默认用入库副本（083 可复验链）；E123_RAW_DIR 可覆盖指回 /tmp 原跑目录。
+# 087：默认值同口径相对 REPO 解析（原机器上与旧硬编码逐位相同）。
 OUT_ROOT = os.environ.get(
     "E123_RAW_DIR",
-    "/home/wangyuanshuo02/sglang/two-level-attention/exp/trace/results/e123_trial_raw")
+    os.path.join(REPO, "exp", "trace", "results", "e123_trial_raw"))
 # 注意：run_eval 会把 result.json 写回 OUT_ROOT/pred_{arm}/——对入库副本
 # 重跑时会原地刷新 result.json（同输入同输出，git diff 应为零）。
 ARMS = ["mavg", "cavg_g", "cavg_off", "fullkv"]
