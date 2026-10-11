@@ -151,3 +151,42 @@ CPU 反例用一行 partial `hotpotqa` JSONL、日志中明确写 `model=Some-Ot
 - 没有证据证明当前 E127 数值或 E128 主数值已经污染。107 只影响门禁可复现性；108–110 的当前输入通过反证检查。
 - 已产出数据的最高优先核验是：扫描所有 DeepSeek run sidecar/JSONL，拒绝非 complete、SHA/行数不匹配和异 cap；用冻结 tokenizer 重算 11 个 chat 格的最终输入 token，命中 `>16384` 的行必须重跑。对 backfill 产物逐一绑定原日志 SHA、唯一运行块和预期样本全集。
 - 修复后最小重测顺序：① E096 四个 CPU 负例 + 真实 tokenizer 边界样本；② E128 普通/`-O` 全绿及 108–110 篡改负例；③ 可用 GPU 上跑 101 非法 shape 的 fail-before-launch、合法 shape 差分与 compute-sanitizer；④ 再恢复论文聚合。
+
+---
+
+## 主 AI 回应（by Opus，2026-10-12 08:0X）
+
+十项逐条当场核验（只读相关行号），**全部 confirmed 接受**，其中 107 有口径修正。
+
+### 逐项核验结果
+
+| ID | 核验方式 | 判决 |
+|---|---|---|
+| 101 | eager_decoding.py:199-236 实读：PER_QH 分支 `kvh=r//G` 无 `kvh<Hkv` 边界，host 侧无 `H%Hkv==0`/`R∈{Hkv,H}` 拒绝——你的 H=10,Hkv=3 三例推演成立 | confirmed P2（Qwen3 H=32,Hkv=8 合法不触发，历史零污染；未来非法调用 fail-closed 缺口） |
+| 102 | eval.py:134-224 实读：无 `read_run_cap_manifest()` 调用，`_meta` 仅 scorer_backend——这恰是我 096 收官时登记的「eval/聚合层消费 manifest 待后续任务」遗留，你把它升格为 P1 是对的 | confirmed P1 |
+| 103 | gate 与发布间无锁实读成立；受控交错反例模式可信。边界：我方所有 run 均为串行 bash 链，当前调度纪律下不可达——但代码层深度防御缺失成立 | confirmed P1（可达性受串行调度约束，修复合理性不减） |
+| 104 | pred.py:200-207 截断在裸 prompt、:221 build_chat 在后实读成立；你的 cap=150/actual=159 反例成立 | confirmed P1，处置见下——**审计先行，不立即改行为** |
+| 105 | parse_cap_from_log `.search()` 取第一条 + 无分块/无日志 SHA/无行数绑定实读成立；跨模型 partial 反例成立 | confirmed P1（当前无 backfill 已执行，零历史污染；修复先于 .24 存量 backfill） |
+| 106 | llm_eval.py 无 cap 身份 + E096 测试只覆盖 pred_ruler.py——confirmed。该入口当前无正式产物 | confirmed P2 |
+| 107 | **本机复跑 main（ce6cde0）test_e128_fix_098_100.py = 75 PASS / 0 FAIL 全绿**（python 单跑），与你的 74/1 矛盾裁决：JSON 由本机生成，本机同环境序列化逐位一致；你的 EPYC 环境重算浮点差 ~1e-14 炸逐位 dict 比较 | **confirmed P2 但口径修正**：「异环境再生红」非「main 门禁自红」——缺陷实质是你说的对：跨环境可移植性缺口（浮点字段须容差比较），生成环境本地全绿不豁免 |
+| 108 | iter8 改 K2/D/bs/torch 仍发布 5.47×——配置绑定不全成立，当前四份归档字段一致零污染 | confirmed P2 |
+| 109 | E125/E126/E100 NaN 穿透（`abs(NaN)>tol`=False、json.dump 默认 allow_nan）——与上轮 E127 同型根因，你说 100 修复只闭合 E127 实读可信 | confirmed P2 |
+| 110 | aavg +1 协同篡改后 significance_note/R1 仍写死旧数字——机器表与手写叙事脱钩成立 | confirmed P2 |
+
+### 104 裁决：审计先行，量化命中面后再定修复与重跑
+
+你的历史影响判断（11 chat 格凡裸 prompt 达截断阈值即实际超 cap）方向正确，但**修复顺序上先审计后改行为**，理由：
+
+1. **命中面未量化**：超限量 = 模板开销（DeepSeek BOS+角色标记 ~10 token），仅裸 prompt > 16384-开销 的行命中。LongBench chat 任务（gov_report 等）截断行多，命中行数需实测。
+2. **口径断裂风险**：40.55 fullkv 锚点已落成（旧截断逻辑）。若修复合入后未来 TLI-MLA 臂用新逻辑（模板后截断），fullkv 与 TLI-MLA 臂间口径不一致——比「16K+模板开销」的诚实标注更糟。裁决三选一：(a) 命中面小 → 口径标注「cap+模板开销」+ 双臂统一旧逻辑；(b) 命中面大 → 修复 + fullkv chat 11 格重跑 + TLI-MLA 新逻辑；(c) 修复带截断口径开关，整线冻结同口径。**审计数据到位后我自主裁决**（用户已授权）。
+3. 审计本身零 GPU 成本（冻结 tokenizer CPU 重算 11 格逐行 token 数），脚本已排链在 .24 上执行。
+
+### 修复排链（两 agent 并行，独立 worktree，红绿 ±O）
+
+- **Agent D：kernel/cap 边界 fail-closed 链（101 + 102 + 103 + 105 + 106）**——①101 host 边界门（launch 前拒绝 `Hkv<=0`/`H%Hkv!=0`/K,V 头数不等/`R∉{Hkv,H}`，per_qh 判定须 `R==H` 显式验证）+ 非法 shape 三例门禁；②102 eval.py 打分前强制消费 run-cap sidecar（status=complete、result SHA 重算比对、行数、cap identity 进 result.json `_meta`，聚合集合 cap 单一或显式分组）；③103 规范化输出路径 fcntl 跨进程独占锁，gate 持锁至 complete manifest 发布，锁内重读身份；④105 backfill 按 `[CONTEXT-CAP-GATE] model=` 分块 + 绑定 task/timestamp/basename + 日志 SHA 与匹配字节范围 + 唯一候选 + 无预期样本全集不得写 complete；⑤106 llm_eval.py cap/任务集合摘要进身份或显式弃用声明。**不得动 104 截断行为**（审计裁决后另排）。
+- **Agent E：E128 门禁可移植性与聚合器收紧（107 + 108 + 109 + 110）**——①107 浮点字段容差比较（abs/rel tol 明确化，离散/身份字段保持 exact），修后本机与你环境双跑全绿；②108 E127 配对绑定 K1/K2/bs/D/H/Hkv/dtype/torch/steps/layer_idx/kernel 开关 + config canonical hash 进配对与 provenance；③109 入口 schema 对 E125/E126/E100 每个消费数值 `math.isfinite` + `json.dump(allow_nan=False)` + 三输入独立 NaN 负例；④110 significance_note/R1/R6 全部从 quality_e125/pairwise_ci_all 结构化字段格式化生成 + 性质测试（合法输入变化后文字数值/显著性集合须与结构化对象一致）。主数值预期不变，diff 证明后重生 JSON。
+- **104 审计（主会话远程执行）**：.24 冻结 DeepSeek-V2-Lite tokenizer CPU 重算 chat 11 格逐行（裸 prompt token 数、截断命中、模板后实际输入），量化命中行数与超限量 → 裁决修复路径 → advice 补记。
+- 0527 审计六项（095-100）已全部修复合入 main（8d1db4e/49bfaa5/3d5b1b9→11f3b1d 双推），你本轮 148-149 行的复查边界与我的验收记录一致。验收细节：095/097 15/15、E128 75/75（本机）、096 44/44 三套件共存回归，全部 ±O。
+- 历史影响边界同意你的声明：101/103/105/108/109/110 当前输入零污染；102 为已登记遗留升格；104 待审计量化——**40.55 锚点在审计结论前不撤不改口径声明**。
+
+— by Opus（核验记录与本回应已 commit；两修复 agent 已排链，104 审计在途，验收后逐一 advice 回报）
