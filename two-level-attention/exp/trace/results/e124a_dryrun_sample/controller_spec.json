@@ -1,0 +1,115 @@
+{
+  "version": "e124a-dyn-controller-v0",
+  "feature_dim": 8,
+  "n_anchors_max": 16,
+  "s_h_eps": 1e-08,
+  "thresholds": {
+    "P_F_below": -0.6931471805599453,
+    "P_N_above": 0.6931471805599453
+  },
+  "threshold_note": "s<-ln2→P_F; s>ln2→P_N; 恰±ln2→P_C；固定不按method改",
+  "temp_rule": "sqrt(D)",
+  "neutral_profile": "P_C",
+  "tier_params": {
+    "P_F": [
+      0.125,
+      0.125,
+      0.25
+    ],
+    "P_C": [
+      0.25,
+      0.25,
+      0.5
+    ],
+    "P_N": [
+      0.5,
+      0.5,
+      0.75
+    ]
+  },
+  "tier_params_note": "ρ=希望给near的middle L2比例，不是重新定义γ；总预算固定下P_N压缩far，不称更保守",
+  "gqa_aggregation": "s=(1/Hkv)Σ_g[(1/|Q_g|)Σ_{h∈Q_g}s_h]（先组内等权再组间等权，不许组大小加权）",
+  "ref_boundary": "middle最后1/4=N_ref，其余F_ref（先于α定义）",
+  "seed_scheme": "sha256('e124a|{seq_id}|{layer_idx}')前8字节→torch.Generator；R∈{±1/√8}^{D×8}",
+  "budget_formulas": {
+    "Bn": "max(1,round(K1*β))",
+    "Bf": "K1-Bn",
+    "Kmid": "max(0,min(K2,|U|)-|P|)",
+    "Tn_target": "round(ρ*Kmid)",
+    "gamma": "Tn_target/(Bn*b)",
+    "Tn": "min(Tn_target,Kmid)",
+    "Tf": "Kmid-Tn",
+    "rounding": "Python round = banker's（与生产 int(round()) 同口径）"
+  },
+  "fallback_chain": [
+    "请求档",
+    "同method的P_C",
+    "该method固定参数档(.25,.125,.625)（绝不切换mavg选择器）",
+    "unsupported"
+  ],
+  "max_retries": 2,
+  "method_fixed_tier": {
+    "mavg": {
+      "params": [
+        0.25,
+        0.125,
+        0.625
+      ],
+      "verification": "e2e_full"
+    },
+    "aavg": {
+      "params": [
+        0.25,
+        0.125,
+        0.625
+      ],
+      "verification": "e2e_full"
+    },
+    "mminmax": {
+      "params": [
+        0.25,
+        0.125,
+        0.625
+      ],
+      "verification": "e2e_full"
+    },
+    "cavg": {
+      "params": [
+        0.25,
+        0.125,
+        0.625
+      ],
+      "verification": "e2e_full"
+    },
+    "ccluster": {
+      "params": [
+        0.25,
+        0.125,
+        0.625
+      ],
+      "verification": "e2e_screen_singlepool"
+    },
+    "cavgsim": {
+      "params": [
+        0.25,
+        0.125,
+        0.625
+      ],
+      "verification": "e2e_screen"
+    },
+    "cclustersim": {
+      "params": [
+        0.25,
+        0.125,
+        0.625
+      ],
+      "verification": "e2e_smoke"
+    }
+  },
+  "method_fixed_tier_note": "只列已通过正确性验证的组合；A3 入筛前按 CPU/小输入门禁验收后更新",
+  "not_implemented": [
+    "M0 身份/状态模块（v0 以 identity_check 参数代）",
+    "M5 far-only D′ gate",
+    "seq-once 条件化缓存（A5 部署语义）"
+  ]
+}
