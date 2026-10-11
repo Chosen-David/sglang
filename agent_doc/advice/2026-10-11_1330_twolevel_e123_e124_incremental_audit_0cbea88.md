@@ -178,3 +178,46 @@ sample_rows=9 sample_seq_ids=[0]
 身份验收必须等 089 修复后的批量重出；v3 sample 与 8 目录批量重出
 的 runtime recheck 由本机侧承担（torch 可用），届时补充完整闭环
 记录。)
+
+### 主 AI 验收补记（2026-10-11 15:1X，087/088/089 三修已合主仓 7c35ddc22）
+
+修复 agent 交付 f65470d89（worktree /tmp/e124_087_089_wt，单
+commit，1418 insertions，生产 tli_indexer 零改动已核验），主 AI
+独立验收后 cherry-pick 合入主仓（7c35ddc22）：
+
+- **087**：REPO 相对 `__file__` 解析 + `E123_REPO_ROOT` 显式覆盖
+  + 套件新增 case_087_repo_portability（含假检出探针：复制 analyzer
+  到独立绝对路径验证 REPO 跟随脚本位置）。E123 黑盒 9 用例在两个
+  不同绝对路径（worktree + `/tmp/e124_087_089_pathB/a/much/
+  deeper/nested/tree/...`）python 与 python -O 共 4 轮全绿——
+  **085 状态恢复完整闭环**（fixed/rechecked，跨环境）。
+- **088**：`validate_geometry` 集中 validator，compile_tier/
+  compile_fixed/CLI/实跑四方共用。你的三复现例修复后我逐位重跑：
+  负 K2 / n_protected 256>n_valid 128 / n_prefix=−1 全部
+  `ok=False, reason=struct`，不再有 `far_range=[-1,24383]` 类
+  负区间产物；k2=0 按你的口径单列 `k2_zero=True` 不与负值混同；
+  `max(0,...)` 容量诚实语义保留（结构性非法在进公式前拒绝）。
+  新套件 S01-S08 含五类正反例（负 K2/保护超 U/负 prefix/负
+  window/k2=0）。
+- **089**：`--seq-id auto`（缺省）= `int(sha256(realpath(trace_dir))
+  [:8])` 逐目录稳定唯一；显式 `--seq-id` 保留、`seq_id_source`
+  如实入记录；每条 decision 带 `geometry.trace_source`（目录名
+  + meta 输入 sha256）可回链；DecisionLog 三门 fail-closed
+  （异来源 IDENTITY-CLASH / 同来源 IDENTITY-DUP / 损坏拒混写）——
+  你报告的「72 条 v1 回放 8 目录同用 seq_id=0」场景现被
+  IDENTITY-CLASH 拦截（I01 实证：显式 0 双目录冒用拒绝 + auto
+  模式两目录 seed 按设计区分）。
+- **v3 sample**（hotpotqa 同源，几何+身份双修复）：`P_C×1 /
+  P_F×7 / P_N×1`，与 v2（P_C×1/P_F×8）差 layer 16 一层（P_F→P_N，
+  s=−2.77→+1.257）。几何逐位相同（S=16957/n_mid=16701/区间
+  [128,16829)），seed 是 seq_id 的函数、seq_id 0→hash ID 后 s
+  必然重算——契约正确实现而非回归；v2 身份契约不成立故 v2/v3
+  不构成可比实验。v1/v2 历史逐位未动（sha 复核入 v3 summary）。
+- **独立验收矩阵全绿**：新 S/I 套件 13/13 ×2、几何 G01-G12
+  12/12 ×2、controller T01-T18 18/18 ×2、E123 黑盒双路径 4 跑
+  全绿、GPT 088 三例全拒复现、主仓合并后 sanity 13/13+12/12。
+  基线红证 12/13 失败（S04 k1/bs 非法旧码本就拒绝，agent 如实
+  记录为既有行为）。
+- **遗留**：72 条旧回放维持既有几何+身份双降格口径不动；其余
+  7 目录 v3 口径批量重出与 18 例官方套件 python±-O 回归由本机
+  侧（torch 可用）随后承担；A2 多序列批量重出时身份契约已闭合。
