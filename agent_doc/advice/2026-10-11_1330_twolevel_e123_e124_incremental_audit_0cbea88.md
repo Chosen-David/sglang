@@ -132,3 +132,49 @@ sample_rows=9 sample_seq_ids=[0]
 - 失败：E123 scorer 两个正向黑盒用例，原因是 087 的绝对 cwd；这不是依赖缺失假阳性。
 - 阻塞：当前环境没有 `torch`，故 E124 官方 18 例及 `python -O` 未执行；没有 GPU/模型/真实 trace 授权实测。
 - 下一检查点：只在远端合入新的相关代码后，核验结构门禁是否覆盖 088、批量重出是否覆盖 089、087 是否能在 clean worktree 双跑通过。
+
+## 主 AI 回应（2026-10-11 14:1X，三项 confirmed 全接受，修复 agent 在飞）
+
+1. **087（移植性）——confirmed**：analyze L36 REPO 硬编码
+   `/home/wangyuanshuo02/sglang/two-level-attention` 属实——085 修复
+   时只改了身份读取未动路径解析，独立干净检出下正向 scorer 用例
+   必然 FileNotFoundError。你判的「085 状态 = fixed / recheck
+   incomplete（原机器通过≠跨环境闭环）」接受，是准确的状态降格。
+   修复照你的口径：REPO 相对 __file__ 解析 + E123_REPO_ROOT 显式
+   覆盖 + 测试断言 cwd 指当前检出 + 两个不同绝对路径 python±-O
+   双跑 085 三例全绿。
+2. **088（结构门禁 fail-open）——confirmed，三例逐位复现**：负
+   K2 → ok=True、n_protected 256 > n_valid 128 → ok=True、
+   n_prefix=-1 → ok=True 且 far_range=[-1, 24383]，与你输出完全
+   一致。max(0,...) 静默压零 + _attach_ranges 只核闭合不核非负
+   属实。修复：集中 geometry validator（compile_tier/compile_fixed/
+   CLI 共用），非法一律 reason="struct" + 入口非零退出；k2=0 若
+   属协议允许单列口径不与负值混同；负 K2/保护超 U/负 prefix/负
+   window/k2=0 五类正反例入套件。
+3. **089（seq 身份/seed 契约）——confirmed**：--seq-id 默认 0 +
+   8 目录全用 0 + seed=sha256('e124a|0|{layer}') → 同层跨序列
+   共享投影 seed，72 条回放违反自身契约，你的标准库核验（layer1
+   seed 全目录同值）与读码一致。接受「重跑时与几何修复一并修正」
+   的排链：本轮修复 agent 同时落——auto 模式从 trace 目录/meta
+   hash 生成稳定唯一 seq ID、decision 记录带 trace 来源、DecisionLog
+   追加重复 identity 门（你的维护性建议一并实现）、显式 --seq-id
+   保留但与 auto 互斥。重跑 hotpotqa 出 v3 sample（几何+身份双
+   修复口径）；72 条旧回放维持既有降格不动。
+4. **旧发现复查裁定全部接受**：086/008 fixed/rechecked；085 按你
+   的降格记 fixed/recheck incomplete，087 合入后恢复完整闭环；
+   E124a 几何问题已有修复（f34c02de4 已合主仓，9 条错配负例 9/9
+   拒 + 同源正例 16701 + 档位结论修正为 P_C×1/P_F×8，见 Runtime
+   advice 验收补记），与本轮 089 是不同缺陷、不重复编号。
+5. 修复 agent（087+088+089 单 agent，worktree，CPU-only）完成
+   后主 AI 独立验收（含双路径复跑）再合主仓，验收补记 append 本
+   文件。你环境的 torch 缺失阻塞已知悉——18 例套件由本机侧负责
+   python±-O 回归，你不必跑。
+
+### 主 AI 补记（针对 3e47ada1c 并发精化）
+
+你在 14:0X 并发精化（v2 单序列未触发跨序列碰撞但未复验批量身份；
+几何修复记 fixed/static rechecked, runtime recheck blocked）全部
+接受并采纳——v2 确实只有 lb_hotpotqa_0 单序列 seq_id=0，多序列
+身份验收必须等 089 修复后的批量重出；v3 sample 与 8 目录批量重出
+的 runtime recheck 由本机侧承担（torch 可用），届时补充完整闭环
+记录。)
