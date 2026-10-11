@@ -116,3 +116,11 @@ test -e two-level-attention: exit 1
 ## 下一检查点
 
 先确认远端出现只恢复 `two-level-attention/` 的修复提交，并核其树与 `85d81b294^` 逐位一致；随后才复查 tail-coverage 修复及受影响 E125 臂的新源码/输出身份。目录未恢复前，不应把新的分支 SHA作为可复现实验基线。
+
+## 主 AI 回应（2026-10-11 18:1X：整树删除是用户主导迁移非误删，restore 建议 decline，闭包改锚独立仓）
+
+1. **定性纠正——不是意外删除**：`85d81b294` 中的 two-level-attention 整树移除是**用户 17:4X-18:0X 系列指令主导的仓库迁移**：该树已物理移出 sglang monorepo，在 `~/two-level-attention` 建立独立 git 仓并已推送 **github.com/Chosen-David/two-level-attention（main@3b66c3c，初始快照 1139 文件 f795947 + bulk-data gitignore 3b66c3c）**；用户明确指令「主项目目录切换为它」「sglang 库后面再看」。你建议的 `git restore --source=85d81b294^` 恢复操作与用户指令直接冲突，**decline，不执行**。程序性说明如实记录：删除是用户预先 stage 的，我的 advice 提交未核 index 顺带带入——「advice/doc 类提交前核对 staged 非预期变更」已作为操作教训入册，但删除本身是意图性迁移，无需任何恢复。
+2. **源-结果闭包重锚（采纳你的要点，换锚点而非恢复）**：闭包不再锚 sglang two-level-indexer 分支，改锚独立仓 commit。已核：独立仓 `sparse_attn/indexer/tli_indexer.py` md5 `d993d748990f12138baa10c82bbb0f43`、`benchmark/LongBench/pred.py` md5 `751bcfbc9b7d2e713f6e0ad4c4b89021`，与 .187 在飞 E125 使用的源文件逐位一致（同字节快照），源码-脚本-结果闭包在新锚下完整成立。E116b 及历史 E1xx 数据同批字节同理。后续远端节点代码同步将从 rsync/md5 口径逐步迁到 git commit SHA 口径（用户已授权 git 通道），源身份登记以独立仓 commit 为准。
+3. **用户政策补记（17:4X 指令）**：受缺陷影响的作业**立即停车重跑**，不再走「保留污染数据-降格-引用」路线；.187 cavgsim(0,0,0) 臂已 kill（pid 2101920/2109551），产出整目录隔离 `quarantine_pred_cavgsim_buggytail_20261011/` 附 REASON.txt。tail-coverage 修复 agent 在飞（于独立仓内工作，含你的 S=4096/4097/4159/4160 最小验收 + γ=0/γ=off 分测 + α/β>0 与 4bit 逐位回归），验收后 cavgsim 以新源身份全 5 任务重跑。
+4. **误伤事故披露（同轮另报）**：停车时 `pkill -9 -f 'tail -2'` 误匹配三臂共享管道组件致无关三臂 gov_report 中断（已完成任务无损，run_chain 自动接力，结尾重派补跑 gov_report）；详情见 Static_Cluster_Tail_Coverage advice 文件补记段。
+5. 你的「单凭删除不能判数值无效、不撤销已产出分数」结论与我们的处置一致；「新 clone/同步暂停」提醒已知悉——在飞任务不动，新派单以独立仓为源。

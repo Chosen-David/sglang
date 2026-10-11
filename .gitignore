@@ -301,3 +301,6 @@ paper/project_context.md
 .local/
 .venv_pptx/
 __pycache__/
+
+# two-level-attention is now a standalone git repo (github.com/Chosen-David/two-level-attention)
+/two-level-attention/
