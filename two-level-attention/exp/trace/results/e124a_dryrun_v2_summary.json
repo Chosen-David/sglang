@@ -1,0 +1,261 @@
+{
+ "run": "e124a-dryrun v2 (geometry-consistent) on /tmp/trace/qwen3-8b-v/lb_hotpotqa_0, seq_id=0, CPU",
+ "why_v2": [
+  "v1 (results/e124a_dryrun_sample + e124a_dryrun_summary.json) 存在几何错配，已降格为「trace 特征回放 + 给定几何预算预览」，不支持因果/保护/容量闭包验收：",
+  "  1) run_e124a_dryrun.py --n-valid 旧默认硬编码 32768（非 None），meta.S 回退分支永不触发，trace 实际 S=16957 被静默覆盖；",
+  "  2) mid 切片 k_all[128:32640] 在 S=16957 时被 Python 静默钳制为 [128:16957]（16829 行）——SWA 尾段 128 token 未被切除混进特征 middle；",
+  "  3) 同一决策记录特征几何 16829（含 SWA）与预算几何 32512（按 n_valid=32768 编译）两套口径混用，near_range [16384,32640] 越出实际序列长度 16957。",
+  "依据：agent_doc/advice/2026-10-11_Runtime_Sequence_Layerwise_Execution_Plan_by_gpt.md「A1 验收反馈（2026-10-11 UTC）」节 + 主 AI 回应（修复在飞）。",
+  "v1 sample 为已入库历史，保留不动、不回改不删除；本目录为修复后同源正例。"
+ ],
+ "geometry": {
+  "k1": 128,
+  "k2": 1024,
+  "bs": 64,
+  "n_valid": 16957,
+  "n_valid_source": "meta.S（--n-valid 缺省回退，旧版硬编码 32768 已修）",
+  "n_protected": 256,
+  "n_prefix": 128,
+  "n_swa": 128,
+  "S": 16957,
+  "k_rows": 16957,
+  "n_mid": 16701,
+  "middle_formula": "S - n_prefix - n_swa = 16957-128-128 = 16701 = n_valid - n_protected",
+  "qpos": 16956,
+  "qpos_source": "blob",
+  "causal_visible_keys": 16957,
+  "method": "mavg",
+  "phase": "prefill",
+  "state_epoch": 0
+ },
+ "tiers_v2": {
+  "P_C": 1,
+  "P_F": 8
+ },
+ "tiers_v1_mismatched": {
+  "P_N": 4,
+  "P_F": 2,
+  "P_C": 3
+ },
+ "per_layer_v1_vs_v2": [
+  {
+   "layer_idx": 1,
+   "v1_s": 0.7571604093017794,
+   "v2_s": -0.6309474805475568,
+   "v1_requested": "P_N",
+   "v2_requested": "P_C",
+   "v1_applied": "P_N",
+   "v2_applied": "P_C",
+   "tier_changed": true,
+   "v2_n_mid": 16701,
+   "v2_near_range": [
+    12654,
+    16829
+   ],
+   "v2_far_range": [
+    128,
+    12654
+   ],
+   "v2_Tn_Tf": [
+    384,
+    384
+   ]
+  },
+  {
+   "layer_idx": 4,
+   "v1_s": -2.560124980132097,
+   "v2_s": -2.7063904848317053,
+   "v1_requested": "P_F",
+   "v2_requested": "P_F",
+   "v1_applied": "P_F",
+   "v2_applied": "P_F",
+   "tier_changed": false,
+   "v2_n_mid": 16701,
+   "v2_near_range": [
+    14742,
+    16829
+   ],
+   "v2_far_range": [
+    128,
+    14742
+   ],
+   "v2_Tn_Tf": [
+    192,
+    576
+   ]
+  },
+  {
+   "layer_idx": 8,
+   "v1_s": -1.4400495921450205,
+   "v2_s": -7.714902000851597,
+   "v1_requested": "P_F",
+   "v2_requested": "P_F",
+   "v1_applied": "P_F",
+   "v2_applied": "P_F",
+   "tier_changed": false,
+   "v2_n_mid": 16701,
+   "v2_near_range": [
+    14742,
+    16829
+   ],
+   "v2_far_range": [
+    128,
+    14742
+   ],
+   "v2_Tn_Tf": [
+    192,
+    576
+   ]
+  },
+  {
+   "layer_idx": 12,
+   "v1_s": 3.2043727627994545,
+   "v2_s": -4.6263511402636235,
+   "v1_requested": "P_N",
+   "v2_requested": "P_F",
+   "v1_applied": "P_N",
+   "v2_applied": "P_F",
+   "tier_changed": true,
+   "v2_n_mid": 16701,
+   "v2_near_range": [
+    14742,
+    16829
+   ],
+   "v2_far_range": [
+    128,
+    14742
+   ],
+   "v2_Tn_Tf": [
+    192,
+    576
+   ]
+  },
+  {
+   "layer_idx": 16,
+   "v1_s": -0.029324479533946013,
+   "v2_s": -2.766224608728479,
+   "v1_requested": "P_C",
+   "v2_requested": "P_F",
+   "v1_applied": "P_C",
+   "v2_applied": "P_F",
+   "tier_changed": true,
+   "v2_n_mid": 16701,
+   "v2_near_range": [
+    14742,
+    16829
+   ],
+   "v2_far_range": [
+    128,
+    14742
+   ],
+   "v2_Tn_Tf": [
+    192,
+    576
+   ]
+  },
+  {
+   "layer_idx": 20,
+   "v1_s": 1.3923860850952572,
+   "v2_s": -2.9384950955254787,
+   "v1_requested": "P_N",
+   "v2_requested": "P_F",
+   "v1_applied": "P_N",
+   "v2_applied": "P_F",
+   "tier_changed": true,
+   "v2_n_mid": 16701,
+   "v2_near_range": [
+    14742,
+    16829
+   ],
+   "v2_far_range": [
+    128,
+    14742
+   ],
+   "v2_Tn_Tf": [
+    192,
+    576
+   ]
+  },
+  {
+   "layer_idx": 24,
+   "v1_s": -0.2660051553478642,
+   "v2_s": -4.696635927415514,
+   "v1_requested": "P_C",
+   "v2_requested": "P_F",
+   "v1_applied": "P_C",
+   "v2_applied": "P_F",
+   "tier_changed": true,
+   "v2_n_mid": 16701,
+   "v2_near_range": [
+    14742,
+    16829
+   ],
+   "v2_far_range": [
+    128,
+    14742
+   ],
+   "v2_Tn_Tf": [
+    192,
+    576
+   ]
+  },
+  {
+   "layer_idx": 28,
+   "v1_s": 2.2281408344105555,
+   "v2_s": -2.396115065248944,
+   "v1_requested": "P_N",
+   "v2_requested": "P_F",
+   "v1_applied": "P_N",
+   "v2_applied": "P_F",
+   "tier_changed": true,
+   "v2_n_mid": 16701,
+   "v2_near_range": [
+    14742,
+    16829
+   ],
+   "v2_far_range": [
+    128,
+    14742
+   ],
+   "v2_Tn_Tf": [
+    192,
+    576
+   ]
+  },
+  {
+   "layer_idx": 35,
+   "v1_s": -0.582415122182314,
+   "v2_s": -4.690134508100516,
+   "v1_requested": "P_C",
+   "v2_requested": "P_F",
+   "v1_applied": "P_C",
+   "v2_applied": "P_F",
+   "tier_changed": true,
+   "v2_n_mid": 16701,
+   "v2_near_range": [
+    14742,
+    16829
+   ],
+   "v2_far_range": [
+    128,
+    14742
+   ],
+   "v2_Tn_Tf": [
+    192,
+    576
+   ]
+  }
+ ],
+ "tier_change_note": "几何修正后特征 middle 去掉了误含的 SWA 尾段 128 token、anchor 位置随之变化，s 值全部重算——档位变化是几何修正的预期结果，如实记录，新旧两版不构成任何可比实验（v1 仅回放预览口径）。",
+ "consistency_gate": "负例（v1 错配记录）在 test_e124a_geometry_consistency.py 中作为拒绝负例核验；显式 --n-valid 32768 重放 → [E124A-ABORT] 非零退出。",
+ "files": {
+  "per_seq_layer_decisions_lb_hotpotqa_0.jsonl": {
+   "sha256": "467c9e3a42b01b3d70c59029ebd97830be72df0ef4c32ccc8ec6a764c6b64c78",
+   "n_lines": 9
+  },
+  "controller_spec.json": {
+   "sha256": "812cd534fd6ac34219a7d2146f60e2a039fce7f1a006f0d3570eddaa01a376f1"
+  },
+  "v1_sample_sha256_unchanged": "2806240ea9b6f82ee856eed95e5f360b3643ae558f47136ed9325df25f0b7ca6"
+ }
+}

@@ -39,6 +39,15 @@
   T18 预算镜像    Bn=max(1,round(K1β)) 与生产 int(round()) 同口径；Kmid
                   =max(0,min(K2,|U|)−|P|)（§2.2 公式）。
 
+2026-10-11 几何一致性修复（GPT A1 验收反馈）入参修正记录：
+  decide() 新增同源几何绑定（k_mid 行数 == max(0, n_valid−n_protected)，
+  不一致 fail-closed）。本套件 T09/T10/T11/T17 原用「k_mid=2048 行 +
+  n_valid=28/8000/1200」的不一致几何入参（旧 v0 契约下特征只用 k_mid、
+  预算只用 n_valid，两套来源分离——恰是 GPT 反馈要求堵死的口径），
+  属用例构造问题而非被测行为问题：已把 k_mid 行数改为与各自
+  n_valid−n_protected 一致（T09/T11: 8000 行；T10: 28 行；T17: 100 行），
+  各用例验证的回退链/容量/保护语义推导全部不变（推导见各用例注释）。
+
 运行：
   python3 exp/trace/test_e124_dyn_controller.py           # 全量
   E124_ONLY=T01,T08 python3 ...                            # 子集
@@ -389,8 +398,10 @@ def test_T09_fallback_gamma_gt1():
     #    N_len=2000 → Cn=1024 ≥ 640 ✓，Tf=5360 ≤ Cf=6000 ✓ → 成功。
     # q 瞄准 k 的 target 维 dN=5（同维投影点积精确 amp²，跨维则被
     # R Rᵀ 交叉噪声随机化、档位不可控——初版 q=[3,4] 是构造缺陷）。
+    # k_mid=8000 行 == n_valid(8000)−n_protected(0)：几何同源绑定
+    # （2026-10-11 修复；原 2048 行与 n_valid 不一致，属用例入参问题）。
     q = _mk_q([5, 5])
-    k_mid = _mk_kmid(2048, 2, 5, 60, "N")     # 特征 → P_N
+    k_mid = _mk_kmid(8000, 2, 5, 60, "N")     # 特征 → P_N
     dec = _decide(q, k_mid, 1, 1, k1=128, k2=6000, bs=64,
                   n_valid=8000, n_protected=0, n_prefix=0, n_swa=0)
     _check(dec["profile"]["requested"] == "P_N", "请求档应为 P_N")
@@ -435,12 +446,14 @@ def test_T10_fallback_near_capacity():
     _check(ok2, f"P_C 应编译成功: {info2}")
     _check(info2["Tn"] == 7 and info2["Tf"] == 7, "P_C 整数配额应为 7/7")
     # 全链：特征 → P_F 请求 → 回退 P_C（q 瞄准 F 构造的 target 维 dF=60）
+    # k_mid=28 行 == n_valid(28)−n_protected(0)：几何同源绑定（2026-10-11
+    # 修复；原 2048 行与 n_valid 不一致，属用例入参问题——旧注释
+    # 「特征只用 k_mid、预算只用 n_valid 两套来源分离」正是 GPT A1
+    # 反馈要求堵死的口径，已废止）。
     q = _mk_q([60, 60])
-    k_mid = _mk_kmid(2048, 2, 5, 60, "F")     # 特征 → P_F
+    k_mid = _mk_kmid(28, 2, 5, 60, "F")     # 特征 → P_F
     dec = _decide(q, k_mid, 9, 1, k1=32, k2=14, bs=1, n_valid=28,
                   n_protected=0, n_prefix=0, n_swa=0)
-    # 注：k_mid=2048 与 n_valid=28 不一致——decide 的特征只用 k_mid，预算只用
-    # n_valid/n_protected（M0 状态来源分离，v0 契约如此）；此处验证回退链行为。
     _check(dec["profile"]["requested"] == "P_F", "请求档应为 P_F")
     _check(dec["profile"]["applied"] == "P_C",
            f"near 容量不足应回退 P_C，得 {dec['profile']['applied']}")
@@ -453,7 +466,9 @@ def test_T10_fallback_near_capacity():
 
 def test_T11_unsupported():
     q = _mk_q([3, 4])
-    k_mid = _mk_kmid(2048, 2, 5, 60, "N")     # → P_N
+    # k_mid=8000 行 == n_valid(8000)−n_protected(0)：几何同源绑定
+    # （2026-10-11 修复；原 2048 行与 n_valid 不一致，属用例入参问题）
+    k_mid = _mk_kmid(8000, 2, 5, 60, "N")     # → P_N
     # 未注册 method + 双档 γ>1 失败 → 三尝试后 unsupported
     dec = _decide(q, k_mid, 1, 1, method="nosuchmethod", k1=128, k2=6000,
                   bs=64, n_valid=8000, n_protected=0, n_prefix=0, n_swa=0)
@@ -602,7 +617,10 @@ def test_T16_decision_log():
 
 def test_T17_protection_exceeds_k2():
     q = _mk_q([3, 4])
-    k_mid = _mk_kmid(2048, 2, 5, 60, "N")
+    # k_mid=100 行 == n_valid(1200)−n_protected(1100)：几何同源绑定
+    # （2026-10-11 修复；原 2048 行与 n_valid−n_protected=100 不一致，
+    # 属用例入参问题）
+    k_mid = _mk_kmid(100, 2, 5, 60, "N")
     # U=1200, P=1100, k2=1024 → min(k2,U)=1024 < P → Kmid=0，M=100>0
     dec = _decide(q, k_mid, 1, 1, k2=1024, n_valid=1200, n_protected=1100,
                   n_prefix=550, n_swa=550)

@@ -563,7 +563,23 @@ def decide(q, k_mid, seq_id, layer_idx, method, *, k1, k2, bs,
     v0 边界：seq-once 条件化基线（§2.2：prefill 后预测一次、decode
     复用档位、每步重编译整数预算）是 A5 部署语义——本函数只提供
     单点决策，缓存/复用由集成层包。
+
+    几何同源绑定（GPT A1 验收反馈 2026-10-11，fail-closed）：k_mid
+    实际行数必须 == max(0, n_valid − n_protected)——特征切片与预算
+    编译共享同一合法前缀，不一致直接抛 ValueError，绝不静默截断/钳制
+    （旧 dryrun 入口 n_valid=32768 覆盖 meta.S=16957、切片被 Python
+    钳制漏切 SWA 尾段，同一决策记录里特征与预算混用两套几何，即本
+    校验要堵的缺陷）。controller 从 k_mid 行数+保护集即可推导唯一
+    几何，故采用「绑定」：以 k_mid 实际行数校验入参一致，而非各算各的。
     """
+    t_mid = 0 if k_mid is None else int(k_mid.shape[0])
+    expected_mid = max(0, int(n_valid) - int(n_protected))
+    if t_mid != expected_mid:
+        raise ValueError(
+            f"[E124A-GEOM-MISMATCH] k_mid 行数 {t_mid} != "
+            f"n_valid−n_protected = {int(n_valid)}−{int(n_protected)} "
+            f"= {expected_mid}：特征切片与预算编译必须共享同一合法前缀"
+            f"（fail-closed；切片越界静默钳制/两套几何混用一律拒绝）")
     t0 = time.perf_counter()
     method_c = canonical_method(method)
     feat = compute_features(q, k_mid, seq_id, layer_idx, phase=phase,
@@ -677,6 +693,9 @@ def controller_spec():
         "ref_boundary": "middle最后1/4=N_ref，其余F_ref（先于α定义）",
         "seed_scheme": "sha256('e124a|{seq_id}|{layer_idx}')前8字节"
                        "→torch.Generator；R∈{±1/√8}^{D×8}",
+        "geometry_contract": "decide(): k_mid行数必须==max(0,n_valid-"
+                             "n_protected)，不一致抛 ValueError"
+                             "（特征与预算同源绑定，GPT A1 验收 2026-10-11）",
         "budget_formulas": {
             "Bn": "max(1,round(K1*β))", "Bf": "K1-Bn",
             "Kmid": "max(0,min(K2,|U|)-|P|)",
