@@ -1,14 +1,6 @@
 # sglang 项目 agent_doc：任务、指南、建议与结果
 
-> **主项目移交（2026-10-11）**：TLI 科研主项目已移交到独立仓库
-> `/home/wangyuanshuo02/two-level-attention`，其 `agent_doc/` 为当前唯一
-> 治理中心（[task/TASK.md](../../two-level-attention/agent_doc/task/TASK.md)、
-> task_details、advice、results 均已迁移）。本目录保留为历史存档，不再
-> 双清单并行；新任务登记与审计建议一律写入 two-level-attention 的
-> `agent_doc/`。sglang 主仓仍承载用户私人指南（根 `TASK.md`、
-> `论文indexer.md`）与 sglang 自身工程事务。
-
-这是 sglang 仓库（历史治理存档区）的项目文档区，与
+这是 sglang 仓库（TLI/PSI 稀疏注意力索引器研究主线）的项目文档区，与
 `docs/`、`research/` 等普通文档分开，遵循 agent 库的
 [项目文档治理](https://github.com/Chosen-David/agent) 布局。工作流源码与
 模板从 `~/agent-research-workflows` 读取，本目录只放 sglang 项目自身的
