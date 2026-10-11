@@ -106,3 +106,33 @@ A2的离线oracle只评3档及控制，不重开静态全网格；其计算/存�
 最少新增产物（建议schema不是现有API）：controller_spec.json、split_manifest.json、method_support.json、per_seq_layer_decisions.jsonl、observation_bins.jsonl、candidate_replay.jsonl、原始predictions/scorer_meta、latency.jsonl、claim_evidence.tsv。复用原md§3字段，不再造平行系统。每个decision含seq/layer/phase/causal_prefix/state_epoch/features/profile/整数预算/保护与候选IDs摘要/fallback/cost；参数/代码/权重/文件内容hash同一冻结snapshot贯穿producer和consumer。
 首个返回只需：A0盘点+A1实现计划/实际支持表+3profile可行性，以及每阶段完成/缺口/所需资源；后续提交具体证据再验收，不用“已派agent/计划跑”表示完成。阴性留存；对旧advice仅在完整范围验收且证据已整理后普通Git删除，混合未决文件保留。本计划只指导本项目技术工作，不要求外部通信、自动调度或提交论文。
 
+
+---
+
+## 主 AI 回应（2026-10-11 11:0X，全部接受，合流执行）
+
+1. **与用户指令合流**：用户 10-11 指令「论文改逐层动态参数计算口径、
+   不同 method 组合用动态计算器海选（每组合只跑一次）、全量 vs baseline、
+   Observation 改每层差距、D' gate 动态版、静态留余力」与本方案 §0-§6
+   完全一致。已登记 S-T021/E124（task_details/S-T021.md），按 A0-A7
+   阶段制推进；「动态 = 当前 seq 当前层合法可见信息生成 α/β/γ，非层号/
+   任务名查表」采纳为判定语义。
+2. **668f8f1aa E123 raw 缺字节指认——属实，已修复（dbb9fc74a）**：根因
+   `.gitignore:173 *.jsonl` 全局规则，20 份 prediction JSONL + 4 运行
+   log 被静默挡在 git 外（工作区 6.9M 一直在）。已 `git add -f` 补交，
+   入库 30/30 文件；**入库副本 vs verdict v2 input_manifest 20/20
+   sha256+行数逐文件对账通过**，证据链闭合。E123 判决数值不受影响
+   （manifest 本就按工作区字节计算）。
+3. **执行边界确认**：静态全网格调参暂停新增（用户指令同口径）；E116b
+   在飞作业不取消不控制（采纳「不取消已在运行作业」），其产出转为静态
+   对照/回退 + fullkv 基线复用 + 动态 vs 静态消融素材。静态 mavg
+   (.25,.125,.625) 与 FullKV 作为 A3/A4 同协议锚点。
+4. **首个返回承诺（A0+A1）**：A0 复用盘点表 + method 支持表 + 3-profile
+   可行性 + 实际新入口/`--help`/dry-run resolved config/最小调用例。
+   M1/M2/M3 实现中遵守 §2.1 逐项成本记账（非连续 gather、K 投影、q
+   投影、位置构造全记账）；v0 规则冻结后不按筛选集回调。
+5. **A0 盘点开局事实**：现有 qwen3-8b-v trace 仅 4 任务 × 2 文档 × 9 层
+   （01/04/08/12/16/20/24/28/35），与 A2「全层、≥20 seq」缺口明确；
+   身份核验后缺什么补什么，trace 补采排 E116b 空卡窗口。E117a 回放
+   基建（analyze_p0p_perlayer_potential.py 评估链 + monkeypatch 纪律）
+   列为 A2 复用资产，原脚本不许改。
