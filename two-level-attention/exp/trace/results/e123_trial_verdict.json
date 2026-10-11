@@ -17,14 +17,191 @@
     0.848
   ],
   "fullkv_significant": false,
+  "input_manifest": [
+    {
+      "arm": "mavg",
+      "basename": "qasper-tli_64_128_1024_c4_a0.25_b0.125_g0.625-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "0b80c506f5dc1dc01e93dfbe62cc031713f1d36c5acbcea422b3d9be36dc1320",
+      "task": "qasper"
+    },
+    {
+      "arm": "mavg",
+      "basename": "hotpotqa-tli_64_128_1024_c4_a0.25_b0.125_g0.625-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "85552a2cdfe1139ab682ae29b16ab3c005220746e92bb7a4d97c71b600dbde34",
+      "task": "hotpotqa"
+    },
+    {
+      "arm": "mavg",
+      "basename": "gov_report-tli_64_128_1024_c4_a0.25_b0.125_g0.625-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "c91d028a1817c2c5d406a19948008438fc31d4ec8880a855362b34fff18952a8",
+      "task": "gov_report"
+    },
+    {
+      "arm": "mavg",
+      "basename": "musique-tli_64_128_1024_c4_a0.25_b0.125_g0.625-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "27a77db9caf08293958af34df160cc773792037618ce8b9281cc632082b638e5",
+      "task": "musique"
+    },
+    {
+      "arm": "mavg",
+      "basename": "repobench-tli_64_128_1024_c4_a0.25_b0.125_g0.625-1010201318.jsonl",
+      "expect": 500,
+      "rows": 500,
+      "sha256": "278691de615776de8230e1db823bc7ec5cedc554c12b4449b67e77c739086d81",
+      "task": "repobench"
+    },
+    {
+      "arm": "cavg_g",
+      "basename": "qasper-tli_64_128_1024_c4_Ba0.25_b0.5_g0.125-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "ee63aab1c80035a1e4ebe21a2250709774116bfea7bd983c63421d16d685802f",
+      "task": "qasper"
+    },
+    {
+      "arm": "cavg_g",
+      "basename": "hotpotqa-tli_64_128_1024_c4_Ba0.25_b0.5_g0.125-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "263ae421bc22576e471586d9f8a933c253e844f7d8ae1b728b72f69a2ccd1a0d",
+      "task": "hotpotqa"
+    },
+    {
+      "arm": "cavg_g",
+      "basename": "gov_report-tli_64_128_1024_c4_Ba0.25_b0.5_g0.125-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "7ae6438fdc5501df17cc525a2136e7eebdf25fff513455a92b99436be0e8e66b",
+      "task": "gov_report"
+    },
+    {
+      "arm": "cavg_g",
+      "basename": "musique-tli_64_128_1024_c4_Ba0.25_b0.5_g0.125-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "a20017904ca11493e16066e11eac75f4c1c8c7cc46fc8c8d94b85059a74681dd",
+      "task": "musique"
+    },
+    {
+      "arm": "cavg_g",
+      "basename": "repobench-tli_64_128_1024_c4_Ba0.25_b0.5_g0.125-1010201318.jsonl",
+      "expect": 500,
+      "rows": 500,
+      "sha256": "da75e00e3edb7aa2eaf0f00b32fbffef4356b71ffc2dfb998a40b1a755b56cb1",
+      "task": "repobench"
+    },
+    {
+      "arm": "cavg_off",
+      "basename": "qasper-tli_64_128_1024_c4_Ba0.126_b0.126_goff-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "51946c11f2038a3aaae3e266b13f2ac32a03e070fae59a2d9d5ee7c5d3922362",
+      "task": "qasper"
+    },
+    {
+      "arm": "cavg_off",
+      "basename": "hotpotqa-tli_64_128_1024_c4_Ba0.126_b0.126_goff-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "6f40764f26a90ce7568f0fcee68601b3bfbfb1ae36913e690742363e8fd35baf",
+      "task": "hotpotqa"
+    },
+    {
+      "arm": "cavg_off",
+      "basename": "gov_report-tli_64_128_1024_c4_Ba0.126_b0.126_goff-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "fdb54d749b651213510545a6c599ed61b394a698a228fb9712596ed6131c155d",
+      "task": "gov_report"
+    },
+    {
+      "arm": "cavg_off",
+      "basename": "musique-tli_64_128_1024_c4_Ba0.126_b0.126_goff_h869817629e-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "72123619cdb92645c21c531acdb5a54165fe0a4063caf16057368141eff19e9b",
+      "task": "musique"
+    },
+    {
+      "arm": "cavg_off",
+      "basename": "repobench-tli_64_128_1024_c4_Ba0.126_b0.126_goff_h3831db0d0c-1010201318.jsonl",
+      "expect": 500,
+      "rows": 500,
+      "sha256": "4ddbfcc21dd8588898aab6d6e54ca3c785f1a170afccd189af08b4d5d1c56f60",
+      "task": "repobench"
+    },
+    {
+      "arm": "fullkv",
+      "basename": "qasper-none-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "aa3543ff2197307003edd4df9628c7315d0a7dc3c50da21d3dccd93f86d0d5d5",
+      "task": "qasper"
+    },
+    {
+      "arm": "fullkv",
+      "basename": "hotpotqa-none-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "a48b03a4e8eec2ea1ea69dd522b196ee409e123bcdf2d9617af90b23d47d37d7",
+      "task": "hotpotqa"
+    },
+    {
+      "arm": "fullkv",
+      "basename": "gov_report-none-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "dca71f572acb59031267468bf2d6d9211ed6cc44b7acf2128ebda811f307b0b0",
+      "task": "gov_report"
+    },
+    {
+      "arm": "fullkv",
+      "basename": "musique-none-1010201318.jsonl",
+      "expect": 200,
+      "rows": 200,
+      "sha256": "926bfdd918bd4aca4d519634f4180a9e3c798112d189ccac4a345dd93d2f7df8",
+      "task": "musique"
+    },
+    {
+      "arm": "fullkv",
+      "basename": "repobench-none-1010201318.jsonl",
+      "expect": 500,
+      "rows": 500,
+      "sha256": "e4af87ad14caf2433dd9f1bea4fd2be27d6b50e64962e3aa83c310be71af152e",
+      "task": "repobench"
+    }
+  ],
   "meta": {
-    "bootstrap_B": 10000,
+    "bootstrap": {
+      "B": 10000,
+      "ci": "percentile 95%：sorted means[int(0.025*B)], means[int(0.975*B)-1]",
+      "rng": "stdlib random.Random（Mersenne Twister）",
+      "seed": 42,
+      "task_order": [
+        "qasper",
+        "hotpotqa",
+        "gov_report",
+        "musique",
+        "repobench"
+      ],
+      "unit": "任务级配对差（arm−mavg）有放回重采样"
+    },
     "cavg_g": "(.25,.5,.125)",
     "cavg_off": "(.126,.126, gamma off 自由竞争，未归一化混池 caveat)",
     "champion_ref": "mavg(.25,.125,.625) 新口径（R01+B10+B04 后）",
     "fullkv": "锚点参照，不参与判决",
     "n_tasks": 5,
-    "seed": 42
+    "provenance_v2": "TL-E123-VERDICT-PROVENANCE-083 补链：原始预测入 exp/trace/results/e123_trial_raw/，本 JSON 与其 sha256 逐格绑定",
+    "python": "3.11.12",
+    "scorer": "benchmark.LongBench.eval（官方 scorer，difflib 后端）"
   },
   "per_task": {
     "cavg_g/gov_report": {
@@ -103,5 +280,5 @@
       "mavg": 65.83
     }
   },
-  "verdict": "NO-GO: cavg 两臂均未显著优于 mavg 冠军，维持 mavg"
+  "verdict": "NO-GO: cavg 两臂均未证明优于 mavg 冠军（cavg_off 显著更差；cavg_g 未达换冠军证据门槛），维持 mavg"
 }

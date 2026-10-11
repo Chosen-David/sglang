@@ -1,0 +1,25 @@
+{
+    "gov_report-tli_64_128_1024_c4_Ba0.126_b0.126_goff-1010201318.jsonl": {
+        "score": 32.78,
+        "budget": 1024.0
+    },
+    "hotpotqa-tli_64_128_1024_c4_Ba0.126_b0.126_goff-1010201318.jsonl": {
+        "score": 58.19,
+        "budget": 1024.0
+    },
+    "musique-tli_64_128_1024_c4_Ba0.126_b0.126_goff_h869817629e-1010201318.jsonl": {
+        "score": 28.79,
+        "budget": 1024.0
+    },
+    "qasper-tli_64_128_1024_c4_Ba0.126_b0.126_goff-1010201318.jsonl": {
+        "score": 46.1,
+        "budget": 1024.0
+    },
+    "repobench-tli_64_128_1024_c4_Ba0.126_b0.126_goff_h3831db0d0c-1010201318.jsonl": {
+        "score": 62.68,
+        "budget": 1024.0
+    },
+    "_meta": {
+        "scorer_backend": "difflib:stdlib"
+    }
+}

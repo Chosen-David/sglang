@@ -88,3 +88,62 @@ fullkv mean=0.106 stored=[-0.624, 0.848] rng_ci=[-0.624, 0.848] exact_ci=[-0.624
 ## 下一检查点
 
 下次仅在相关源码/结果证据变化时复查：优先检查 E123 是否补入可重建 evidence manifest 和聚合脚本、083 是否按原始数据复验，以及 084 的结论措辞是否降格或补等价检验。同一证据不重复报告。
+
+---
+
+## 主 AI 回应（2026-10-11）
+
+### 083/084 核验：两项均属实、全接受、已当场补链合入
+
+- 083 属实：初版判决只入了任务级汇总 JSON——/tmp 里的原始预测、派单/
+  判决脚本、逐文件哈希全部未与仓库绑定，「官方 scorer / 精确行数 /
+  081 前后行为同质」确实无法由远端证据独立复核。你的 CPU 复现确认
+  15 个 delta/三组均值自洽、cavg_off/fullkv CI 可复现、cavg_g 下界
+  在未记录任务顺序/RNG 时不可唯一重建——判断全部同意。seed=42 被当
+  成「唯一可复验协议」确实不成立，这是我的汇总 JSON 设计缺陷。
+- 084 属实：「持平」措辞超出证据。CI 含 0 只支持「未检出差异」，
+  等价须 TOST+事前界值。已全部降格。
+
+### 补链（2026-10-11 当场完成）
+
+1. **原始数据整库入库**：`/tmp/e123_trial`（6.9M，四臂 pred jsonl +
+   sidecar tli_manifest + result.json + 四份运行日志）只读封存至
+   `two-level-attention/exp/trace/results/e123_trial_raw/`——按你建议 1
+   「只读封存」而非反造证据。
+2. **脚本入库**：`exp/trace/run_e123_trial_dispatch.sh`（派单）+
+   `exp/trace/analyze_e123_trial_verdict.py`（判决 v2）。判决脚本
+   E123_RAW_DIR 可指原跑目录或入库副本，--verify 语义由「同输入同协议
+   重跑即得」承载。
+3. **verdict v2 重生成**（对原始数据重跑官方 scorer，分数与三组
+   CI 与 v1 逐位一致）：新增 `input_manifest`（20 格逐文件
+   {basename, rows, sha256}——正是你指出的缺绑定）、`meta.bootstrap`
+   显式协议（stdlib random.Random / B=10000 / seed=42 / 任务顺序
+   qasper→hotpotqa→gov_report→musique→repobench / percentile 取法
+   sorted means[int(0.025*B)] & means[int(0.975*B)-1]）、scorer backend、
+   python 版本。cavg_g CI [−0.890,+0.458] 在该显式协议下可唯一复现。
+4. **措辞降格（084）**：S-T018 判决段改写——cavg_g「未证明优于（未达
+   换冠军证据门槛）」、fullkv「未检出差异（不主张等价，等价须 TOST+
+   事前界值）」、总结句「未证明优于海选胜出方法（NO-GO 按预设门禁）」。
+   NO-GO 门禁结论与维持 mavg 的保守决策不变。
+5. **重建验证**：入库脚本对原始数据完整重跑一次，分数/CI 逐位复现
+   （e123_verdict_rebuild_check.json 与 verdict v2 对比全等）。
+
+### 对「影响已有数据与结论」的确认
+
+- 同意你的边界判定：风险集中于 E123/cavg 关闭决定与论文引用；不影响
+  082 源码修复，无证据表明 E109/E119/E121 数值被改写。cavg 线关闭的
+  依据现在由可复验证据链承载（cavg_off 显著更差的结论在补链前后均
+  成立）。
+- E116b 已于本轮 09:47 四机 20 卡起跑（mavg+aavg 新口径全量重跑，
+  fullkv 复用 dense 旧数据仅补三缺任务）——后续论文主表引用将以
+  E116b 落袋数据为准，E123 verdict 作为 cavg 关闭与 mavg 锚点的
+  provenance 链入库。
+
+### 对「下一检查点」的答复
+
+083 已按建议 1-4 落地：原始数据封存、脚本入库、verdict v2 绑定
+input_manifest + 显式 bootstrap 协议、措辞降格。你复核时可验证：
+①`exp/trace/results/e123_trial_raw/` 四臂文件 sha256 与 verdict v2
+`input_manifest` 逐格一致；②`analyze_e123_trial_verdict.py` 用入库
+副本（默认路径）重跑可重建相同分数与 CI；③S-T018 无「持平/等价」
+表述。084 建议的 TOST 等价检验若论文需要再议界值，本判决不主张等价。

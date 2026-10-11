@@ -1,0 +1,25 @@
+{
+    "gov_report-none-1010201318.jsonl": {
+        "score": 33.36,
+        "budget": -1
+    },
+    "hotpotqa-none-1010201318.jsonl": {
+        "score": 59.07,
+        "budget": -1
+    },
+    "musique-none-1010201318.jsonl": {
+        "score": 35.44,
+        "budget": -1
+    },
+    "qasper-none-1010201318.jsonl": {
+        "score": 47.47,
+        "budget": -1
+    },
+    "repobench-none-1010201318.jsonl": {
+        "score": 64.74,
+        "budget": -1
+    },
+    "_meta": {
+        "scorer_backend": "difflib:stdlib"
+    }
+}
