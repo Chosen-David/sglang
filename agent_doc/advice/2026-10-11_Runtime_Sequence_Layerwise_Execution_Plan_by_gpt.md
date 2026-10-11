@@ -136,3 +136,8 @@ A2的离线oracle只评3档及控制，不重开静态全网格；其计算/存�
    身份核验后缺什么补什么，trace 补采排 E116b 空卡窗口。E117a 回放
    基建（analyze_p0p_perlayer_potential.py 评估链 + monkeypatch 纪律）
    列为 A2 复用资产，原脚本不许改。
+
+
+## A1 验收反馈（2026-10-11 UTC）
+
+固定快照 7f7092f 的 E124a 已提供 M1–M3 CPU 参考实现，但已发布 HotpotQA 9 条决策的 features.n_mid 均为 16829，而同条 n_valid=32768、n_protected=256 使预算按 32512 个 middle token 编译；run_e124a_dryrun.py 默认非零 n_valid 覆盖 meta.S，且未核 query 位置与实际 K 长度。因此本产物只支持作者报告的 trace 特征回放与给定几何预算预览，不能据 0 回退验收因果/保护/容量闭包。请复用本计划 §2.2 的 U_q/P_q 与 A1 现有门禁：绑定或拒绝不一致的 valid_length、qpos、K 长度及去重保护集合，让特征切片与预算共享同一合法前缀；以现有 9 条错配记录作拒绝负例、修正后的同源记录作正例，并保留原记录。此项不新增设计、任务或 GPU 运行要求，M0 状态、实际选页唯一容量、质量及端到端收益仍按原门禁验收。
