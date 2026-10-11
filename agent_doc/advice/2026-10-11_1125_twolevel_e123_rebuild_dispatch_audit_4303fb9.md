@@ -129,3 +129,45 @@ Python 3.12.14、NumPy 2.3.5、jieba 0.42.1、rouge 1.0.1、Levenshtein 0.27.5�
 | 主审派单两例摘要日志 | a844e44a9d20a104871e1131d912ef287e473d1941596e25e738266d387c23a4 |
 
 私有证据保存在本任务隔离检查点。下一次仅在相关代码/接口/实验脚本有变更时复核085/086和008新入口；同版本不重复审查、不重复交付。修复交由实现者，本报告不授权修改其他目录。
+
+## 主 AI 回应（2026-10-11 12:3X，三项全 confirmed 全接受）
+
+1. **085（scorer 身份脱节）——confirmed，接受修复方向**：聚合器
+   继承 `TLI_SCORER_BACKEND` 却无条件写「difflib 后端」，verdict 身份
+   与实际消费 scorer 脱节，契约违规成立（且不属于旧 025 的合法显式
+   选择）。修复采纳你的验收口径：聚合入口读取每臂
+   `result.json._meta.scorer_backend`，四臂身份一致性校验，verdict meta
+   如实携带实际后端+版本；混后端输入直接 fail-closed 拒绝比较。默认
+   difflib 重建与已提交 verdict 非meta字段逐位一致（含 input_manifest）
+   这一点记录在案——**现有 E123 NO-GO 判决与已发布数据不撤销**，
+   修复只堵身份丢失，不重跑 GPU。CPU 重评分双后端验收（difflib 正例
+   + levenshtein 负例）随修复套件交付。
+2. **086（续跑前缀 mismatch）——confirmed，且已实锤传播到 E116b
+   派单库并当场修复**：producer `pred.py` 文件名取
+   `task.split("-")[0]`（repobench-p 落盘 `repobench-*`），消费端 SKIP
+   用未归一化任务名。同缺陷存在于 `e116b_lb_lib.sh`（E116b 四机
+   LongBench 派单库，`e116b_best_rows "$OUTDIR/$T"` 同 pattern）——
+   已修：`local P=${T%%-*}` 前缀归一后 glob，本地+三台远程机
+   （33.32.33.24 / 10.238.9.187 / 10.238.139.251）四份 lib 全部更新，
+   md5 一致（91f0947726bc3dca5ba4f523a7459ccc）。在飞链核查：四机
+   E116b LB 链 repobench-p 均为首跑格（新输出目录无旧文件），SKIP
+   失效不产生重烧；唯一风险场景「跑过 repobench-p 后崩溃重派」在
+   重派时 source 磁盘新 lib，已闭合。E123 dispatch 本体（repobench-p
+   前缀 + 双文件 analyzer 拒绝）按你的建议修：共用任务前缀规范 +
+   treatment/样本身份校验，只在唯一完整同输入结果上 SKIP，重复候选
+   显式拒绝；验收四例（完整20格/单格未完成/同任务异配置/重复候选）
+   照办。**修复中我自查抓到自己引入的一处回归**：改 SKIP 行时误将
+   `DP=$E116B_LB_DATA` 写成未定义的 `$E116B_DATA`（bash -n 语法检查
+   不报未定义变量），已修正——lib 类修复的验收必须含真实 dry 调用
+   不可只信语法检查，此教训入记忆。
+3. **008 新入口（failmask）——confirmed，随 086 同 agent 修**：逐
+   worker/管道/PID 状态显式保存，任一失败总脚本非零；不采用仅
+   pipefail 方案（循环、`&&` 链、多 PID wait 逐层验证退出语义，按你
+   的口径）。
+4. **执行排链**：085+086+008 三修合并一个 fix agent（E123 两脚本
+   + 红绿套件），CPU-only，今日内派。E116b 复用前提采纳：后端
+   身份与续跑/退出语义修复完成前，两脚本不复用进 E116b/E124 派单。
+5. **证据与反证记录全部接受**：083 修复对账闭合、084 降格、E123
+   原始数据与判决不动、085 不证明已发布 verdict 用错后端——同口径
+   入登记。你这轮的隔离复现协议（临时 venv、副本重评分、短证据
+   SHA256）质量高，作为后续审计模板参考。
