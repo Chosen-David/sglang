@@ -13,9 +13,9 @@
 |---|---|---|---|---|---|
 | **Quest** | ✅ 已克隆 `sparse-bench/third_party/quest` @ `01c1623b`（2025-07-10） | 中（精度路径纯 PyTorch 可直接摘；kernel 路径带 libraft/CUDA 重依赖） | ① 官方 HF monkeypatch（仅 llama/mistral，需移植 Qwen3）；② 我们 harness 已有 `quest` indexer 臂 | 官方 CUDA kernel（page 化 gather + fused decode）vs 我们的 kernel，`benchmark/efficiency/` 同台面 | 官方 kernel 编译链重（libraft、cmake≥3.26、flash-attn 2.6.3），与现环境 torch 2.8/cu128 兼容性未验证 |
 | **MoBA** | ✅ 已下载 `sparse-bench/third_party/MoBA`（master tarball，2026-10-11） | **低**（`moba/` 仅 4 个 Python 文件，纯 PyTorch + flash-attn，无自研 CUDA） | 官方代码可直接包一层跑我们的 LongBench/RULER 数据；**口径警告见 §3.2** | 官方 `moba_attn_varlen`（flash-attn varlen 组合）即其性能实现，可与我们的 prefill 路径同数据对拍 | **官方自述需要续训，非 training-free drop-in**——论文口径必须写清 |
-| **ClusterKV** | ❌ **官方仓库地址未确认**（本环境搜索引擎全被墙，已试渠道见 §3.3） | —（拿不到码） | **Plan B**：我们 harness 的 `cavg`/`ccluster` 臂本身就是「参考 ClusterKV 论文实现」的口径（GUIDE.md 明确定义） | 同左 | 若确实从未开源，论文里对比口径只能引用其论文数字 + 自实现口径，需措辞严谨 |
+| **ClusterKV** | ✅ `sjtu-zhao-lab/ClusterKV` @ `c7380819`（主 AI 实锤修正，已落 `sparse-bench/third_party/ClusterKV`；DAC'25，SJTU 团队） | 中高（聚类用 pylibraft/rmm RAPIDS 重依赖 + 自研 CUDA kernel；但自带 uv.lock + 清华 PyPI 镜像，开箱即用程度高） | `accuracy/`（LongBench/ppl，--cluster/--quest/full 三模式，llama/glm4 patch，需移植 Qwen3） | `kernel/`（cluster + quest 双 CUDA kernel，自带 Quest 对照实现） | 依赖钉版（torch 2.5/transformers 4.45/flashinfer 0.2.5/pylibraft-cu11）与主环境 torch 2.8 冲突，必须独立 uv venv |
 
-**一句话**：Quest 和 MoBA 的官方源码已经在我手里，随时可以摘；ClusterKV 官方代码大概率未开源（或地址待网络畅通后确认），精度对比用我们已有的 ClusterKV 口径臂兜底。
+**一句话**：三基线官方源码全部在手（Quest / MoBA / ClusterKV 均已落 `sparse-bench/third_party/`），B 轨无障碍；ClusterKV 初判「未开源」系我方候选 org 清单漏了 sjtu-zhao-lab，已被主 AI 实锤修正（详见 §3.3 与文末主 AI 回应）。
 
 ---
 
@@ -110,16 +110,23 @@ two-level-attention/
 - B 轨摘取清单：`moba/` 整包（4 文件）→ `exp/vendor_baselines/moba_vendor/pred_moba_vendor.py`：复用我们 pred.py 的数据加载/prompt 模板/打分，只把模型加载换成 `attn_implementation="moba"`。注意 GQA 时官方 `wrapper.py` 用 `repeat_interleave` 展开 kv-head（显存开销大，128K 需评估是否 OOM；我们 Qwen3-8B 是 GQA 4:1）。
 - 超参口径：官方示例 chunk_size=4096/topk=12（≈选中 48K token，是按 1M 上下文设计的）；我们预算口径（K2=1024/2048）下应按 `topk = budget_token / chunk_size` 对齐，建议 chunk_size=64、topk=16/32 两档（与 E89 臂口径一致以便互证）。
 
-### 3.3 ClusterKV（论文 arXiv 2412.03213，ICLR 2025）
+### 3.3 ClusterKV（论文 arXiv 2412.03213，DAC'25）
 
-- 论文：「ClusterKV: Manipulating LLM KV Cache in Semantic Space for Recallable Compression」。方法口径（已与本项目 `sparse_methods_phase_survey.md` 核对）：prefill 期间对 key 做 k-means 聚类、每簇算术平均出代表；decode 时 q 与簇代表打分选 top 簇、取回簇内原始 KV 做精确 attention——**与我们 GUIDE.md 定义的 `cavg`/`ccluster_*` 方法族一一对应**（GUIDE 原文「参考clusterkv的论文实现」）。
-- **官方源码：地址未确认，且很可能未开源**。本环境证据链（2026-10-11 上午实测）：
-  - `git ls-remote` / codeload / 网页三连确认 `github.com/thunlp/ClusterKV` **404**；
-  - 候选 org 逐一 404：`THUNLP-MT`、`InfinigenceAI`、`Shanghai-AI-Lab`、`Infini-AI-Lab`、`sail-sg`；
-  - 搜索渠道全部被墙/超时：GitHub 搜索页、api.github.com、Google/DDG/Bing/百度、arxiv.org、export.arxiv.org、paperswithcode API、OpenReview API、hf-mirror papers 页、gitee API；
-  - 旁证：KVCache-Factory（活跃维护、专收此类方法，2026-08 仍有 commit）至今未集成 ClusterKV；sparse-bench README（2026-09-21）已记录「ClusterKV 仓库地址未确定」。
-- **Plan B（可立即执行，不阻塞）**：精度对比用我们 harness 的 `cavg`/`ccluster_kmeans` 臂作为「ClusterKV 口径」——这本来就是 GUIDE 的设计；论文里对比段引用 ClusterKV 论文报告数字时注明「官方代码未公开，口径为按论文实现的公平重跑」。
-- **待网络畅通后的确认清单**（交给有外网的机器或人工）：① Google 搜「ClusterKV github」；② paperswithcode.com 论文页看是否标注「no code」；③ OpenReview ICLR2025 页面看 code 链接；④ 若确认开源，按 §2.2 目录约定 clone 并补 B 轨适配。
+> ⚠️ 本节初版误判「官方代码未开源」，2026-10-11 被主 AI 实锤修正：官方仓库为
+> `github.com/sjtu-zhao-lab/ClusterKV` @ `c7380819588771e8c5dadacdbd33942d7c53adea`
+> （SJTU 团队，一作 Guangda Liu，通讯 Jieru Zhao）。我方候选 org 清单恰好漏掉正确
+> 答案；误判的证据链保留在文末「附：初版误判证据链」供复盘。源码已落
+> `sparse-bench/third_party/ClusterKV`（codeload tarball，pin 上述 commit）。
+
+- 论文口径（摘要 + 代码核实）：按**语义簇粒度召回** KV——prefill 期间对每个 kv-head 的 key 做 GPU k-means 聚类（可选 balanced kmeans / ivf_flat），簇心做代表；decode 时 q 与簇心打分选 top 簇、取回簇内原始 KV 精确 attention。32K 上下文、1k–2k 预算下精度近无损，报告最高 2× 延迟加速、2.5× decode 吞吐。**与我们 GUIDE.md `cavg`/`ccluster_*` 方法族对应**。
+- 仓库结构（实测）：
+  - `accuracy/`：LongBench（`pred.py`，`--cluster` / `--quest` / 默认 full 三模式）+ pg19 ppl；`cluster_attention.py` 是核心——**聚类直接调 pylibraft**（`KMeansParams`/`fit`/`ivf_flat`）+ 自研 CUDA 算子 `clusterkv._clusterkv_knl.search_indices` + `cluster_cache_simulator.py`；`patch.py` 对 LlamaAttention 做 monkeypatch（llama 与 glm 两套 forward）。
+  - `clusterkv/`：e2e 集成包（`clusterkv_models/ClusterKVAttention.py` + `clusterkv_utils/clusterkv_controller.py`/`decode_wrapper.py`）——**且内置完整 Quest 实现**（`quest_models/QuestAttention.py`），一个仓库可同时出 ClusterKV/Quest/FullKV 三臂，B 轨可借此互证 Quest。
+  - `kernel/`：cluster + quest 两套 CUDA kernel（cmake + setup.sh，依赖 3rdparty 的 raft/flashinfer/pybind 三个 git 子模块）。
+  - `efficiency/bench_textgen.py`：e2e 效率台面（clusterkv/quest/full 三方法）。
+- 依赖（pyproject 钉版，**与主环境 torch 2.8 冲突，必须独立 venv**）：python 3.10、torch==2.5.0、transformers==4.45.2、flashinfer-python==0.2.5、pylibraft-cu11==24.10.0、flash-attn==2.6.3；自带 `uv.lock` 且默认索引指向**清华 PyPI 镜像**（`uv sync` 在国内网络可直接用）。README 声明 CUDA 12.8 测试通过——与我们 H20 环境 cu128 一致。
+- 官方超参口径（`patch.py` 默认值）：token_budget=1024、chunk_size=16、sink=16、nlist=400、fit_iter=20、head_sel=truc、gqa_policy=qavg、--balance 切 balanced kmeans。官方支持模型仅 llama3/3.1-8b 与 glm4-9b——**Qwen3 移植是 B 轨阶段 2 的工作**（参考其 llama forward 写 Qwen3Attention 版本；注意其 `layer_id` 全局递减赋值与 Quest 同款，适配时需如实记录改动）。
+- B 轨预算口径：按主 AI 裁定，vendor 臂预算对齐我们 `cavg`/`ccluster` 臂以便互证（token_budget 1024 ↔ 我们的 K2=1024 臂；nlist/fit_iter 保持官方默认）。
 
 ---
 
@@ -129,7 +136,7 @@ two-level-attention/
 
 | 阶段 | 内容 | 验证门禁 | 资源 |
 |---|---|---|---|
-| 0 | `two-level-attention/third_party/` 落 vendor 源码（quest pin `01c1623b` 含 `--recurse-submodules` 补 raft 子模块；MoBA 已就位）；写 provenance README | 目录 + commit 锚点落袋 | CPU（需一次稳定的 GitHub 连接，codeload tarball 已验证可行） |
+| 0 | `two-level-attention/third_party/` 落 vendor 源码（quest pin `01c1623b` 含 `--recurse-submodules` 补 raft 子模块；MoBA 已就位；ClusterKV pin `c7380819`，含 raft/flashinfer/pybind 三子模块）；写 provenance README；为 ClusterKV/Quest 各建独立 uv venv | 目录 + commit 锚点落袋；venv `uv sync` 成功 | CPU（GitHub 窗口需求可由主会话承担；codeload tarball 已验证可行） |
 | 1 | **C 轨 sanity**：Quest 官方 `evaluation/` 在 Llama-3.1-8B-Instruct 上复现官方 LongBench 单子任务数字（对齐其论文表），MoBA 官方 `examples/llama.py` 冒烟 | 与官方报告值偏差在任务噪声内（记录偏差值） | 1 卡，小时级 |
 | 2 | **B 轨移植**：`qwen3_quest_patch.py`（Quest 官方算法 → Qwen3Attention）；`pred_moba_vendor.py`（moba backend + 我们数据流）；入口接入 snapshot/postfix/SKIP 幂等纪律 | 红-绿双证：① 小样本（n=20）与 harness 内 quest/E89 臂同数据对拍，分数差如实记录（预期接近但不必逐位等）；② `python` 与 `python -O` 双跑 | 1–2 卡 |
 | 3 | **三件套跑分**：vendor 臂 × LB v1 16 任务 + LB v2 503 + RULER 32/64/128K（Qwen3-8B），复用官方 scorer | 全格齐 + 与 S-T019 新口径主表同台面合并 | 等 GPU 空窗，四机调度复用 S-T019 派单模板 |
@@ -142,7 +149,7 @@ two-level-attention/
 1. **网络受限是最大工程风险**：本机仅 codeload.github.com 稳定（git 协议/网页/API/搜索引擎均不稳定或被墙）。clone 操作建议统一走 `curl -L https://codeload.github.com/<org>/<repo>/tar.gz/refs/heads/<branch>`；Quest 补 raft 子模块需要 git 协议窗口期或找 raft 的 release tarball 替代。
 2. **flash-attn 版本冲突**：Quest/MoBA 都钉 `flash-attn==2.6.3`，本机 base 环境 torch 2.8.0+cu128 且 `import flash_attn` 失败（生产跑批用的解释器环境需在派单机上先确认）。vendor 实验建议独立 venv，勿污染 S-T019 生产环境。
 3. **MoBA decode 路径官方未完成**（paged attn TODO）：长生成任务（gov_report 等）vendor 臂 decode 会退化为慢速路径——e2e 速度对比时这是对方工程债，记录即可，不要替它优化（保持 vendor 原样是 B 轨的意义）。
-4. **ClusterKV 若最终确认有官方码**，本方案 §3.3 清单可直接续上；若确认无码，论文措辞走 Plan B。
+4. **ClusterKV/Quest 的依赖钉版与主环境冲突**：ClusterKV 钉 torch 2.5/transformers 4.45/flashinfer 0.2.5/pylibraft-cu11，Quest 钉 flash-attn 2.6.3 + libraft——一律独立 venv 隔离（ClusterKV 自带 uv.lock + 清华镜像，最顺；Quest 的 raft 子模块需 git 窗口期或 raft release tarball 替代），严禁污染 S-T019 生产环境。
 5. **Qwen3-32B / DeepSeek-V2-Lite 的 vendor 移植**放阶段 3 之后——先 8B 打通链路，再按 GUIDE 的多模型矩阵扩展（DeepSeek 是 MLA，Quest/MoBA 的 GQA 假设全部不适用，届时大概率只能用论文引用数字 + 口径说明）。
 
 ## 6. 给其他 AI 的评判要点（Reviewer checklist）
@@ -151,8 +158,17 @@ two-level-attention/
 - [ ] vendor 源码放 `two-level-attention/third_party/` 是否符合最终开源计划？LICENSE 兼容性（Quest=Apache-2.0，MoBA=MIT，需复核）？
 - [ ] Quest 官方 kernel 编译失败时的降级方案是否可接受（性能数字引用官方论文的口径风险）？
 - [ ] MoBA training-free 口径的论文措辞是否会引来「对比不公平」的审稿意见？是否需要补一档「续训后 MoBA」的实验（成本极高，建议明确不做并给理由）？
-- [ ] ClusterKV 的证据链是否足以支撑「按论文实现口径对比」的写法？
+- [ ] ClusterKV 的证据链是否足以支撑「按论文实现口径对比」的写法？【已被主 AI 实锤修正：官方码在 sjtu-zhao-lab，此问题转为 §3.3 B 轨移植评审】
 - [ ] 阶段门禁里的红-绿双证标准是否与 S-T014~S-T017 固化的审计纪律一致（snapshot/postfix/SKIP/双跑）？
+
+---
+
+## 附：初版误判证据链（ClusterKV「未开源」误判复盘，2026-10-11 上午）
+
+- `git ls-remote` / codeload / 网页三连确认 `github.com/thunlp/ClusterKV` 404；候选 org 逐一 404：`THUNLP-MT`、`InfinigenceAI`、`Shanghai-AI-Lab`、`Infini-AI-Lab`、`sail-sg`；
+- 搜索渠道全部被墙/超时：GitHub 搜索页、api.github.com、Google/DDG/Bing/百度、arxiv.org、export.arxiv.org、paperswithcode API、OpenReview API、hf-mirror papers 页、gitee API；
+- 旁证误导：KVCache-Factory（活跃维护）未集成 ClusterKV；sparse-bench README（2026-09-21）已记「地址未确定」。
+- **教训**：候选清单按「论文团队归属猜测」构造（THUNLP 系），实际一作/通讯均为 SJTU（zhao-jieru@sjtu.edu.cn）——猜 org 应以论文署名的单位/邮箱域名为准，而非方法谱系联想；且「搜索渠道全被墙」时应降级为「未确认」而非「未开源」。
 
 ---
 

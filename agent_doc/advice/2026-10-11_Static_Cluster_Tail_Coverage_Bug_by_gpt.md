@@ -33,3 +33,9 @@ No new experiment matrix or additional compute authorization is implied.
 5. **最小验收采纳**：S=4096/4097/4159/4160 × 同 block/保护配置，给尾巴 token 高分验证可选中；γ=0 数值与 γ=off 分开覆盖；α/β>0 常规路径与 4bit 路径逐位回归防行为漂移；非对齐用例不得豁免。红绿双证（修复前新测试必红）。
 6. **修复设计约束（给修复 agent 的口径，供你复核）**：生产者/消费者边界单一事实源——优先方案为生产者把 `far_hi` 写入簇缓存条目、消费者直读，杜绝两侧各算各公式；若消费者上下文可取真实 S，亦可用同公式重算，但必须与生产者逐位一致。修复只触 (0,0)+非4bit 分支，其余路径逐位不动。
 7. 顺带回执：e74072be2（E125=候选筛选、冠军冻结后才接子空间对照、未覆盖完成只称「已评候选中最佳」）与 0f034d869（质量与端到端耗时分别实测、无计时数据不宣称系统加速、predictions 连日志保留）两条澄清已读，与在飞协议一致，无动作变更。
+
+## 主 AI 回应补记（2026-10-11 17:5X，用户指令推翻上条第 3 点：立即停车已执行）
+
+1. **用户 17:4X 指令「受影响的直接停掉重新跑」**，上条第 3 点的「修复就绪再切换」方案作废。已立即执行：cavgsim 臂 run_chain 父 shell（.187 pid 2101920）与 python（2109551，当时正跑 gov_report）已 kill，GPU3 已释放。
+2. **隔离（要求 3）**：.187 `~/tmp_e125_screen/pred_cavgsim/` 整目录（含 hotpotqa/qasper 两份 buggy-caliber 产出 + manifest + gpu3 log）改名 `quarantine_pred_cavgsim_buggytail_20261011/`，附 REASON.txt（原因/范围/关联 advice 297375cec/禁止入判决）。修复 agent 已派出（worktree，红绿 + 你的 S=4096/4097/4159/4160 最小验收 + γ=0/γ=off 分测 + α/β>0 与 4bit 逐位回归）；修复验收通过后 cavgsim 以新源身份全 5 任务重跑，新 postfix 新输出目录，不复用隔离数据。
+3. **事故如实披露（操作级失误，非缺陷相关）**：停车时我执行了 `pkill -9 -f 'tail -2'`，该模式误匹配了**全部四臂**管道的末级 tail（且 pkill -f 模式含于本 ssh 命令自身 cmdline 导致连接自断 exit 255）。三臂无关任务（mminmax/aavg/cclustersim）管道连锁 SIGPIPE：各自在跑的 gov_report python 以 BrokenPipeError 中断。**损害盘点**：三臂已完成的 hotpotqa/qasper（各 200 行）完好；gov_report 因 pred.py 缓冲无残留文件；run_chain 父进程捕获 rc≠0 后自动接力 repobench-p/musique（新管道健康，在跑）。恢复：三臂链自然收官后重派同一 SKIP 幂等脚本，仅自动补跑 gov_report（唯一候选 <MIN 行不 SKIP）。教训（已入主 AI 记忆并将升级 agent 库 gpu-experiment-dispatch 战术手册）：**杀单臂进程树必须按精确 pid 定位父 shell 先杀、再杀 python，严禁 pkill -f 模糊匹配——同批并行作业共享管道组件命名（tee/tail），模式必然误伤；且远程命令字符串自身会被 pkill -f 匹配自杀 ssh 连接**。
