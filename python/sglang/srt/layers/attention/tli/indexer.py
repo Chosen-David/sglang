@@ -484,8 +484,9 @@ class TLIIndexer:
     ) -> torch.Tensor:
         """index: build_block_index 产物；q: [1, H, D]；t: 当前 query 位置。
 
-        返回 [Hkv, K2] 的 token 位置（use_l2_kernel 时池不足的槽位填
-        哨兵 S，下游 valid = sel < S 统一处理）。
+        返回 [Hkv, K2] 的 token 位置（池不足的槽位填哨兵 S——含
+        use_l2_kernel 与 eager 两路径，C1 修复后统一口径；下游
+        valid = sel < S 统一处理）。
         tail_k: [S, Hkv, D]（D' 跳过远端时用于近端/滑窗精筛；None 则用 index）
         use_l1_kernel: True 时 L1 用 Triton fused kernel（E8-2 实测
         3.6×/1.6×；并列截断多选的块由 L2 4bit 精筛自然淘汰，质量不降）
@@ -658,13 +659,33 @@ class TLIIndexer:
             if far_tok_hi > far_tok_lo:
                 k2_far = min(p.far_tokens, far_tok_hi - far_tok_lo, far_cap)
                 far_f = fine[:, far_tok_lo:far_tok_hi]
-                i_f = torch.topk(far_f, k2_far, dim=-1).indices + far_tok_lo
+                # C1 修复（GPT 审计 sglang_twolevel_audit 2026-10-08，E118）：
+                # 原 `topk(...).indices` 不看选中分数——池内有限候选 <
+                # 配额时（L1 未入围/非因果位为 -inf），-inf 槽位的下标仍是
+                # [0,S) 内的真实位置，消费端 valid = sel < S 无法屏蔽 →
+                # 被粗筛淘汰的 token 直接进注意力（near 饥饿反例：配额
+                # 768 vs 有限候选 192，≥576 个非法槽位）。按选中分数过滤
+                # + 哨兵 S（与 use_l2_kernel 哨兵协议同款，下游
+                # _sparse_attn_batched 的 valid 掩码统一屏蔽）。
+                top_f = torch.topk(far_f, k2_far, dim=-1)
+                i_f = torch.where(
+                    top_f.values > float("-inf"), top_f.indices + far_tok_lo, S
+                )
                 near_f = fine.clone()
                 near_f[:, far_tok_lo:far_tok_hi] = float("-inf")
                 k2_near = max(0, p.token_budget - k2_far)
-                i_n = torch.topk(near_f, min(k2_near, S), dim=-1).indices
+                top_n = torch.topk(near_f, min(k2_near, S), dim=-1)
+                i_n = torch.where(
+                    top_n.values > float("-inf"), top_n.indices, S
+                )  # [Hkv, ≤k2_near]（-inf 槽位 → 哨兵 S）
                 return torch.cat([i_f, i_n], dim=-1)  # [Hkv, K2]（far + near 拼接）
-        return torch.topk(fine, p.token_budget, dim=-1).indices  # [Hkv, K2]
+        # C1 修复（同上）：非分区兜底 topk 同样按分数过滤 + 哨兵——池不足
+        # 时 -inf 槽位不再以真实位置返回。k 取 min(budget, S)：S < budget
+        # 的行（生产不可达：eager 短行走 dense）原 topk 会直接越界报错。
+        top_a = torch.topk(fine, min(p.token_budget, S), dim=-1)
+        return torch.where(
+            top_a.values > float("-inf"), top_a.indices, S
+        )  # [Hkv, K2]
 
     @torch.no_grad()
     def _select_taskmd(self, index: dict, q: torch.Tensor, t: int) -> torch.Tensor:
