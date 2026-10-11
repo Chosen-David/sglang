@@ -16,6 +16,19 @@ v2（TL-E123-VERDICT-PROVENANCE-083）：
   - 结论措辞按 084 降格：CI 含 0 = 「未证明优于 / 未检出差异」，
     不写「持平/等价」。
 
+v3（TL-E123-SCORER-IDENTITY-085，2026-10-11 审计修复）：
+  - scorer 身份不再写死「difflib 后端」：run_eval 从每臂 result.json._meta
+    如实读取实际打分后端（benchmark/LongBench/metrics.py SCORER_BACKEND_ID，
+    取值形如 "difflib:stdlib" / "levenshtein:<version>"），缺失即 fail-closed；
+  - 重评分前先核验既有 result.json 的 scorer 身份四臂一致（raw 记录被篡改或
+    跨后端混装时拒绝进入，防身份歧义输入），实际打分后端四臂不一致同样
+    fail-closed——同字节输入在不同后端下分数不同，混后端比较无意义；
+  - verdict meta.scorer / meta.scorer_backend 如实携带实际后端+版本。
+    TLI_SCORER_BACKEND 环境变量的继承保留（显式选择是合法功能，025 口径），
+    变化的只是身份必须如实记录；
+  - eval 子进程 PYTHONPATH 保留调用方路径（重评分注入 jieba/rouge 的通道），
+    /tmp/e117_extra_pkgs（本机 fluentllmenv 不可写的既有解法）追加在后。
+
 Caveat（如实记录）：
   - cavg_off 臂未归一化混池（far GQA group-sum 点积 vs near softmax
     概率，GPT 7c31909 量纲更正）：其结果按「未归一化混池实测」口径报告。
@@ -79,21 +92,32 @@ def run_eval(arm_dir, label):
     cmd = [PY, "-m", "benchmark.LongBench.eval",
            "--output-path", arm_dir,
            "--expect-count", "200"]  # 行数下限门禁；逐文件精确行数另行对账
+    # 085：保留调用方 PYTHONPATH（重评分注入 jieba/rouge 等依赖的通道），
+    # /tmp/e117_extra_pkgs（本机 fluentllmenv 不可写时的既有解法）追加在后
     r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
                        env={**os.environ,
-                            "PYTHONPATH": REPO + ":/tmp/e117_extra_pkgs"})
+                            "PYTHONPATH": REPO + ":"
+                                          + os.environ.get("PYTHONPATH", "")
+                                          + ":/tmp/e117_extra_pkgs"})
     if r.returncode != 0:
         print(f"[EVAL-FAIL] {label}: rc={r.returncode}")
         print(r.stdout[-2000:])
         print(r.stderr[-2000:])
         sys.exit(1)
     result = json.load(open(os.path.join(arm_dir, "result.json")))
+    # 085：scorer 后端身份从 result.json._meta 如实读取（metrics.py 落盘的
+    # SCORER_BACKEND_ID，形如 "difflib:stdlib" / "levenshtein:<version>"），
+    # 缺失即 fail-closed——身份不可臆造，不得默认替打为 difflib
+    backend = (result.get("_meta") or {}).get("scorer_backend")
+    if not backend:
+        sys.exit(f"[ABORT] {label}: result.json 缺 _meta.scorer_backend——"
+                 f"scorer 身份不可臆造，fail closed")
     scores = {}
     for fn, v in result.items():
         if fn == "_meta" or not fn.endswith(".jsonl"):
             continue
         scores[fn.split("-")[0]] = v["score"]
-    return scores
+    return scores, backend
 
 
 def paired_bootstrap(deltas, B=B, seed=SEED):
@@ -125,11 +149,35 @@ def main():
     print(f"[READY] 四臂 5 任务行数精确对账通过（repobench=500 其余=200），"
           f"manifest {len(manifest)} 格")
 
-    # 2) 官方打分（四臂）
-    scores = {}
+    # 1.5) 085：既有 result.json 的 scorer 身份一致性预检——raw 记录若声明了
+    #      混后端身份（被篡改 / 跨后端混装的历史残留），拒绝进入重评分，
+    #      fail-closed。全新目录（无 result.json）不参与本次比较。
+    prior = {}
+    for arm in ARMS:
+        rp = os.path.join(OUT_ROOT, f"pred_{arm}", "result.json")
+        if not os.path.exists(rp):
+            continue
+        m = json.load(open(rp)).get("_meta") or {}
+        bid = m.get("scorer_backend")
+        if not bid:
+            sys.exit(f"[ABORT] {rp}: _meta.scorer_backend 缺失——"
+                     f"scorer 身份不可臆造，fail closed")
+        prior[arm] = bid
+    if len(set(prior.values())) > 1:
+        sys.exit(f"[ABORT] scorer backend mismatch（既有 result.json 身份"
+                 f"不一致，拒绝混后端比较）: {prior}")
+
+    # 2) 官方打分（四臂）——085：携带每臂实际 scorer 后端身份
+    scores, backends = {}, {}
     for arm in ARMS:
         print(f"=== 打分 {arm} ===")
-        scores[arm] = run_eval(os.path.join(OUT_ROOT, f"pred_{arm}"), arm)
+        scores[arm], backends[arm] = run_eval(
+            os.path.join(OUT_ROOT, f"pred_{arm}"), arm)
+    if len(set(backends.values())) != 1:
+        sys.exit(f"[ABORT] scorer backend mismatch（实际打分后端四臂不一致）: "
+                 f"{backends}")
+    backend_id = backends[ARMS[0]]
+    print(f"[SCORER] 四臂实际打分后端一致：{backend_id}")
 
     # 3) 配对差值（vs mavg 新口径锚点）+ bootstrap CI
     verdict = {"per_task": {}, "input_manifest": manifest, "meta": {
@@ -144,7 +192,10 @@ def main():
             "rng": "stdlib random.Random（Mersenne Twister）",
             "ci": "percentile 95%：sorted means[int(0.025*B)], means[int(0.975*B)-1]",
             "task_order": TASKS},
-        "scorer": "benchmark.LongBench.eval（官方 scorer，difflib 后端）",
+        # 085：scorer 身份如实记录实际后端（metrics.py SCORER_BACKEND_ID 格式，
+        # 含版本信息），不再无条件写死 difflib
+        "scorer": f"benchmark.LongBench.eval（官方 scorer，后端 {backend_id}）",
+        "scorer_backend": backend_id,
         "python": platform.python_version(),
         "provenance_v2": "TL-E123-VERDICT-PROVENANCE-083 补链："
                          "原始预测入 exp/trace/results/e123_trial_raw/，"
