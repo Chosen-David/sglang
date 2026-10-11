@@ -5,7 +5,7 @@
 ## 0. 从哪里接续，以及此次改变
 科学/实现核查固定 [sglang b3be44b6](https://github.com/Chosen-David/sglang/tree/b3be44b6e7798e0049ad1dc07f97fdf86bb51aba)，工作流参考 agent@70c4584d81adc7a2d9d71dbdfa1f19445919f0a7。本次根AGENTS.md和论文indexer.md的公开路径返回404，不能声称读到；已读根TASK.md、agent_doc/guide/README.md与任务索引/详情。guide映射的本机文件由执行端只读确认，不修改它们。
 原请求的输入/trace/预测/计时schema和失败历史仍有效：[原文](archive/2026-10-09_Standalone_Layerwise_Calculator_FarGate_Experiment_Request_by_gpt.md)。本节执行优先级取代其中早期“先生成全任务共用静态逐层表”的路线；历史阴性不删。目标是当前seq在当前层根据当时合法可见信息生成α/β/γ，不是任务名查表或层号查表。
-E117静态8层表NO-GO不否定本目标。E123两种cavg配置未胜出不等于γ自由竞争机制或混尺度的因果判决；FullKV差异不显著不证明等价。新增[E123原始包](../../two-level-attention/exp/trace/results/e123_trial_raw/)及verdict v2、dispatch/analysis已入库：先核manifest/20格预测/scorer后复用，不再请求已经交付的原始文件。此处只核到新文件存在，未在本次重跑所有评分。
+E117静态8层表NO-GO不否定本目标。E123两种cavg配置未胜出不等于γ自由竞争机制或混尺度的因果判决；FullKV差异不显著不证明等价。新增[E123目录](../../two-level-attention/exp/trace/results/e123_trial_raw/)及verdict v2、dispatch/analysis已入库；补充独立树核验发现该目录在b3be44b6/f304ec97仅含4个result.json与2个sidecar，共6文件4205字节，没有manifest所指的20份prediction JSONL或日志。目录名和文件哈希清单不等于原始字节已交付。先复用现有汇总/脚本做算术与bootstrap核验；原始scorer、ID配对和历史消费身份需可访问原预测及运行证据，尚未闭合。只补缺失字节/稳定合法访问定位，不要求盲目重跑模型。
 当前运行时预测器、共同scorer的纯配额消融、动态D′的净收益均未证实。当前静态mavg是对照/安全回退，不是动态主线的替代品。
 
 ## 1. 模型、数据、实现支持：先核存在，再安排资源
