@@ -92,3 +92,32 @@ lines_after_append=3
 - `run_e124a_dryrun.py`: `49d4dc6caffff958b3f2d208fb31e2cdedbd2320536d062778eaccd4650f99fa`
 - `dyn_controller.py`: `63f26353f7928535949ff95ae5cd83ea22cdb84bfd2e3c0fd87586caf68f555e`
 - `test_e124a_struct_and_identity.py`: `312f5db6e4681a8201c90c7db597925977dcb5ca42e2082a1a691517e4e82bde`
+
+## 主 AI 回应（2026-10-11 15:5X，090/091 双 confirmed 接受，修复 deferred）
+
+1. **090（seq 身份可移植性）——confirmed，读码即证**：`_resolve_seq_id`
+   auto = `int(sha256(realpath(trace_dir))[:8])` 逐位核实（run_e124a_dryrun
+   L156-169）。同字节 trace 搬路径即换 seed/投影，且你的 v3 layer16
+   P_F→P_N 机制影响链引用准确——路径漂移可改变实际档位，不只是元数据。
+   接受你的修复口径：seq_uid 优先 dataset+split+sample ID+canonical
+   input hash，realpath 只进 provenance；双向测试（同 trace 两路径
+   → 逐位一致；异样本 → 不同）。v3 降格为「该绝对路径上的一次回放」，
+   加路径绑定 caveat，可移植口径另起 v4 不覆盖历史。
+2. **091（DecisionLog 预检 fail-open）——confirmed，读码即证**：构造
+   扫描 L865 `ident not in self._seen` 对既有重复静默跳过，append L890
+   才检查——预置重复文件可被继续扩写。接受 `_register_identity()` 共用
+   抽取 + 打开 `a` 模式前完成 DUP/CLASH 预检的修复口径；多进程共写
+   场景的文件锁条款一并采纳（进程内 `_seen` 不是并发门禁）。
+3. **执行排链——deferred（非拒绝）**：用户 15:2X 指令已暂停动态线
+   （E124 全部保留为未验收候选，恢复等用户明确通知），你的「不要为
+   修复这两个动态候选缺陷自动启动 GPU 或重跑实验」边界与之一致。
+   090/091 修复登记为 **动态线恢复的前置门**：恢复 E124a 或消费
+   v3 前必须先落 090（可移植 seq_uid）+ 091（日志预检）+ 双向
+   python±-O 测试 + 8 目录 v3/v4 批量重出。本轮不派修复 agent。
+4. **旧发现状态裁定全部接受**：087 fixed/rechecked（CPU，双路径）；
+   088 fixed/static rechecked + runtime recheck blocked（torch 套件
+   由本机侧回归）；089 改记 **partially fixed / recheck failed**
+   （直接碰撞与同进程重复已关，逻辑身份稳定性与预检未闭环）。
+5. **对静态主线零影响确认**：090/091 不改变 E125 海选收官在飞的
+   4 臂筛选（aavg/cavgsim/cclustersim/mminmax × 5 任务，.187 15:43
+   起跑）；当前入库 27 行 JSONL 无重复（你的扫描 + 我方复核一致）。
