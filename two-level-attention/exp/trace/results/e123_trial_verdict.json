@@ -1,0 +1,107 @@
+{
+  "cavg_g_avg_delta": -0.242,
+  "cavg_g_ci95": [
+    -0.89,
+    0.458
+  ],
+  "cavg_g_significant": false,
+  "cavg_off_avg_delta": -2.202,
+  "cavg_off_ci95": [
+    -4.07,
+    -0.714
+  ],
+  "cavg_off_significant": true,
+  "fullkv_avg_delta": 0.106,
+  "fullkv_ci95": [
+    -0.624,
+    0.848
+  ],
+  "fullkv_significant": false,
+  "meta": {
+    "bootstrap_B": 10000,
+    "cavg_g": "(.25,.5,.125)",
+    "cavg_off": "(.126,.126, gamma off 自由竞争，未归一化混池 caveat)",
+    "champion_ref": "mavg(.25,.125,.625) 新口径（R01+B10+B04 后）",
+    "fullkv": "锚点参照，不参与判决",
+    "n_tasks": 5,
+    "seed": 42
+  },
+  "per_task": {
+    "cavg_g/gov_report": {
+      "arm": 33.25,
+      "delta": -0.35,
+      "mavg": 33.6
+    },
+    "cavg_g/hotpotqa": {
+      "arm": 58.49,
+      "delta": -0.93,
+      "mavg": 59.42
+    },
+    "cavg_g/musique": {
+      "arm": 34.88,
+      "delta": 0.63,
+      "mavg": 34.25
+    },
+    "cavg_g/qasper": {
+      "arm": 47.14,
+      "delta": 0.69,
+      "mavg": 46.45
+    },
+    "cavg_g/repobench": {
+      "arm": 64.58,
+      "delta": -1.25,
+      "mavg": 65.83
+    },
+    "cavg_off/gov_report": {
+      "arm": 32.78,
+      "delta": -0.82,
+      "mavg": 33.6
+    },
+    "cavg_off/hotpotqa": {
+      "arm": 58.19,
+      "delta": -1.23,
+      "mavg": 59.42
+    },
+    "cavg_off/musique": {
+      "arm": 28.79,
+      "delta": -5.46,
+      "mavg": 34.25
+    },
+    "cavg_off/qasper": {
+      "arm": 46.1,
+      "delta": -0.35,
+      "mavg": 46.45
+    },
+    "cavg_off/repobench": {
+      "arm": 62.68,
+      "delta": -3.15,
+      "mavg": 65.83
+    },
+    "fullkv/gov_report": {
+      "arm": 33.36,
+      "delta": -0.24,
+      "mavg": 33.6
+    },
+    "fullkv/hotpotqa": {
+      "arm": 59.07,
+      "delta": -0.35,
+      "mavg": 59.42
+    },
+    "fullkv/musique": {
+      "arm": 35.44,
+      "delta": 1.19,
+      "mavg": 34.25
+    },
+    "fullkv/qasper": {
+      "arm": 47.47,
+      "delta": 1.02,
+      "mavg": 46.45
+    },
+    "fullkv/repobench": {
+      "arm": 64.74,
+      "delta": -1.09,
+      "mavg": 65.83
+    }
+  },
+  "verdict": "NO-GO: cavg 两臂均未显著优于 mavg 冠军，维持 mavg"
+}
