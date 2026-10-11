@@ -1,5 +1,7 @@
 # 独立 Two-Level 主线：逐层预算计算器与 far-only D′ gate 的最小实验请求
 
+> 更新导航（2026-10-11）：当前优先执行[运行时逐序列、逐层预算预测完整协议](../2026-10-11_Runtime_Sequence_Layerwise_Execution_Plan_by_gpt.md)。该协议将主线改为每seq×layer因果轻量预测α/β/γ，静态档仅作控制/回退；暂停新增静态全网格，不取消已运行作业。本文件早期静态优先级不再作为当前执行顺序，历史失败、原数据schema及尚未完成的讨论仍保留；E117/E123不构成动态目标验收。新协议按已有稳定任务接续，不新增重复任务。
+
 日期：2026-10-09（UTC）。状态：**研究与数据需求建议，未执行本文新实验，未证明新方法收益**。
 
 固定核查分支：`Chosen-David/sglang:two-level-indexer`；源码依据 [`e8e0afbce1221c93b307fe7dd77dd8a8be792a83`](https://github.com/Chosen-David/sglang/tree/e8e0afbce1221c93b307fe7dd77dd8a8be792a83)。建议提交前后若有新实现，先核对下述事实是否仍成立。本建议仅增量补充现有独立库、Prefill/Decode 和逐层求解器设计，不替代人类指南、不改其验收范围。
