@@ -174,3 +174,38 @@ A2的离线oracle只评3档及控制，不重开静态全网格；其计算/存�
 4. **不新增设计/任务/GPU**：按你的边界执行——只加一致性门禁，
    三档规则与 M1-M3 数值语义零改动；E124 既有 18 用例套件必须
    python±-O 保持全绿。
+
+### 主 AI 验收补记（2026-10-11 14:0X，几何一致性修复已合主仓 f34c02de4）
+
+修复 agent 交付 894e09433，主 AI 独立验收后 cherry-pick 合入主仓
+（f34c02de4，8 文件 +1125/−18）：
+
+- **绑定口径落地**：--n-valid 缺省改 None（meta.S=16957 回退真生效，
+  来源如实记录）；显式值≠meta.S → [E124A-ABORT][GEOM-MISMATCH] 非零
+  退出；逐 layer blob k 行数/blob["S"]/meta.S 三方双向核对；切片前
+  防钳制断言（越界即拒，不再静默截断）；保护集两分量闭合校验
+  （n_prefix+n_swa==n_protected，防 mid 行数与预算几何两套口径）；
+  qpos+1==n_valid 因果核对，qpos 入每条决策 geometry 段。
+- **decide() 同源绑定**：k_mid 行数必须 == max(0, n_valid−n_protected)，
+  不一致抛 ValueError——按你的「绑定或拒绝」二选一，controller 可从
+  k_mid+保护集推导唯一几何，选绑定。geometry_contract 入 spec。
+- **红绿双证**：新套件 11 用例 python±-O 全绿——你的 9 条错配记录
+  作拒绝负例逐条验证（G08：9/9 按新绑定口径全被拒，历史保留不动，
+  旁附 ERRATA.md）；正例 = 缺省回退 meta.S 的同源重跑（G02/G03：
+  features.n_mid=16701==n_valid−n_protected、near/far 落
+  [128,16829] 不越界、qpos 因果闭合、显式一致值与回退路径逐层同 s）。
+  基线红验证：stash 修复后 G02 在旧代码下 FAIL。既有 18 用例套件
+  python±-O 保持全绿（T09/T10/T11/T17 原用「两套来源分离」入参，
+  已对齐为一致几何，语义推导不变，文件头如实记录）。
+- **档位结论修正（重要）**：同源修正后 hotpotqa 9 层档位分布
+  P_N×4/P_F×2/P_C×3 → **P_C×1/P_F×8（7/9 层档位变化）**。SWA 移出
+  特征 middle + anchor 重排使 s 全部重算——**v1 的 hotpotqa 档位
+  观察完全不可用**，v2 口径才是 A2 合法素材；E124a A1 验收按完整
+  口径恢复（其余 7 目录仅 summary 聚合、无决策落盘且全为错配口径，
+  随 errata 整体降格为回放预览，同源重算属 A2 素材补充）。
+- 产物：e124a_dryrun_v2_sample/（9 决策 + spec）+
+  e124a_dryrun_v2_summary.json（含 v1 错配原因与本反馈引用）+
+  ERRATA；v1 sample 不回改不删除。*.jsonl gitignore 坑再现，已
+  add -f 并核验入库（30/30 同款教训清单化）。
+- 你的「不新增设计/任务/GPU」边界遵守：只加一致性门禁，三档规则
+  与 M1-M3 数值语义零改动，无 GPU 运行。
