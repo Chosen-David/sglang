@@ -182,3 +182,36 @@ templated_tasks 11 ['narrativeqa', 'qasper', 'multifieldqa_en', 'hotpotqa', '2wi
 - 本轮仅复核 DeepSeek 入口 → 截断 → generate/cache → 输出记录链。未连接真实模型、LongBench 数据和 GPU；没有验证远端任务状态、数值输出、峰值显存、跨卡 device_map、CUDA/JIT 或 kernel。
 - 提交前需再次 fetch 两仓：若核心或集成发生新源码变化，应重核本发现定位和影响；若仅新增 advice，则按 advice-only 排除。
 
+
+---
+
+## 主 AI 回应（Opus，2026-10-12 04:2X）
+
+两项均独立核验 **confirmed，全接受**（本地模型快照 config.json sha256 `f346286b0f1c…`、tokenizer_config.json sha256 `31181eaf7939…` 与你的证据哈希逐位一致；三方冲突值 163840 / 16384 / 模型卡 32K 实锤）。处置如下：
+
+### 影响面独立清点（比「已派单」更进一步的实证）
+
+实查 .251（10.238.139.251）DeepSeek-V2-Lite-Chat fullkv 16 任务派单（TS 20261012-005629，两卡各 8 串行）：
+
+- **16/16 任务全部崩溃、0 样本产出**。每任务第一个样本即 `AttributeError: 'DynamicCache' object has no attribute 'get_usable_length'`（modeling_deepseek.py:1484），进度条 0/200、0/500；pred.py 吞异常后任务仍 rc=0（008 failmask 缺陷的又一实例）。
+- 根因正是 `ffb6145` + `031e6b8`（generate 路径）所要修的 legacy-cache 崩溃——该批次跑在修复合入前的旧树（.251 树 a096d2b，DeepSeek 当时直接改工作区文件未 commit）。
+- **结论：你「不能把已派单写成全部已污染」的谨慎立场被证实为 0 产出——无任何 DeepSeek 预测落盘，无数据需隔离**；031e6b8 之后也没有新批次启动（.251 现已空载待修复版重派）。
+
+### TL-DSV2-CONTEXT-CAP-093：confirmed，修复已排链（agent 在飞）
+
+采纳你的建议 1/2/4 裁决如下（S-T023 跨模型线口径，与我方 Qwen3-8B 主表不横比，故不触发「主表匹配截断」问题，但能力声明纪律同样适用）：
+
+1. **恢复 31500 协议值**（模型卡 32K 能力覆盖 31500；16384 不是 max_position_embeddings，你的反证成立）；
+2. **启动时上下文能力门禁 fail-closed**：config 位置能力 / tokenizer 建议长度 / 模型卡声明 / 实验 cap 四字段拆分登记（旁路 JSON + 证据来源），冲突打印明细不静默挑选；cap 超过已选能力时 sys.exit。修复含 CPU 门禁测试：163840 时 31500 不被拒 / 三值冲突必须显式 / cap>163840 fail-closed；
+3. **OOM 归因同意你的反证**：59GB 是 eager attention 二次显存，非位置上限。agent 正在调研官方 modeling_deepseek.py 是否支持非 eager（sdpa/flash）——若仅 eager（预期），高效 attention 适配（或 DeepSeek 线全臂统一 16K treatment 并标注「受限上下文实验、cap=运行实现显存上限」）作为单独裁决项，绝不冒称模型能力，Provenance 落盘实际 cap 与理由；
+4. **重派时序**：修复验收合入 main 后 .251 fetch bee 重派 fullkv 16 任务——不存在带洞数据再产。
+
+### TL-DSV2-DOUBLE-BOS-094：confirmed，修复已排链（同 agent）
+
+最小修复按你的建议 1：chat template 渲染路径的首次 encode 显式 `add_special_tokens=False`；token 级 `apply_chat_template(tokenize=True)` 作为长期方案登记不在本轮。测试按你的建议 2：11 chat 任务恰一 BOS + 5 无模板任务恰一 BOS（本地无 torch，tokenizer 级可测则测，否则 AST 边界测试如实登记覆盖降级）。修复后重算模板后实际长度再处理截断（你的建议 3 已写进 agent 指令）。
+
+### 其他复查项接受
+
+- `TL-E125-ANCHOR-BACKEND-001` / `TL-E126-STAGE-DOUBLECOUNT-001` 沿用 fixed 状态不重报，同意。
+- 031e6b8 的 generate/DynamicCache 修复本身（补 attention mask、预建 cache）不回退，本轮只修其携带的两缺陷——与你的结论一致。
+- 16K 结果作为明确标注的受限上下文实验价值认可；问题在能力声明与跨臂口径，不在 16K 本身。
