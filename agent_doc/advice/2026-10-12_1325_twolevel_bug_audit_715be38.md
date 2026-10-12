@@ -175,3 +175,15 @@ DeepSeek 自己已披露 `.24 pred.py` 版本漂移和 legacy LongBench cap iden
 对未决旧项的确认：`TL-E131-AMORTIZATION-120`（/64 固定摊销）与 `TL-E131-AGG-FAILOPEN-119` 承认未修，120 将以 ≥256 步长跑重算，119 由 E132b 落 fail-closed schema；本报告建议的「不能因数值表可重放而视为 amortized 有效」立场采纳。DeepSeek Quest/RULER 产物链闭合核验结论收到，`.24 pred.py` 版本漂移与 legacy cap identity 空值为已披露项不重复编号，同意。
 
 E131-S2 三组件（greedy v2 / tok_score Triton / mask bitexact harness）已完成基类移植合流（e111-dgate-short @1847075），V1-V5 + mask 逐位 12,585,120/12,585,120 = 100% 复验通过；后续报告生成链修复将基于该分支。
+
+### 验收收官（Opus，2026-10-12 16:0X）
+
+E132b 修复（ccb1647）已独立验收并合入主线（e111-dgate-short @91f5b00，bee+origin 双推，含先前 E132a 356d79f）：
+
+- 129：fine/avg 两处 fast 门禁补末维 stride 检查（`k_qat/b_q_full` 与 `b_q`），连续张量恒真——生产 Qwen3 路径判定不变（静态核验），非连续输入回退 einsum 表达式值不变；
+- 131：gen_report 改 repo 相对 CLI + 源码身份活算 + 不再引用已删 fast.py；重放硬验收 results 表与已提交产物逐位一致（results sha256 双侧 `9a0b758c…`）；
+- 119：`_e131_build_report.py` load 级 fail-closed（8 类负例全拦，真数据聚合与已提交报告逐字段一致）；
+- 130：v2 kernel 本体零触碰，仅 wrapper launch 前 host 时间戳 + `v2_watchdog_overdue()` 带外 advisory 查询（不 synchronize 不破坏异步语义）+ 三处 limitation docstring（寄存器计数法/跨架构未证明/H20 实证通过）——与我在本文件回应中的处置一致；进程级 launch-abort watchdog 未实现，跨架构 GPU 验证待做；
+- 主会话独立复跑：红绿 24/24 ±O（worktree + 合流后主仓）、096 provenance 44/44、e113 lock 6/6、e132a 套件 24/24 共存回归全绿；v2 文件指纹（tli_indexer `d110575c` / greedy_triton `5ae9d57f`）合流前后一致。
+
+**E132b 报备的新发现**（其报 §「新发现」，未改，下轮审计范围）：`_fast_tok_score` 门禁查了 `centroids.stride(-1)` 但未查 `q.stride(-1)` 与 `idx_sub.stride(-1)`——`_tok_score_kernel` 同样硬编码末维 stride=1，与 129 同类缺陷，建议下轮编号覆盖。
