@@ -154,3 +154,27 @@ E129 只对 5 个任务级 scorer 总分（已四舍五入到两位）作有放�
 - E130 已有 advice 指出的 GQA raw-logit、sink/SWA 预算和部分臂支持数不齐仍未被本轮源码修复；本报告没有把这些旧问题重复编号。当前 support 复算为 72 臂×16 样本，其余臂为 14/8/7/6 样本，与既有提醒一致。
 - SGLang 本轮无新的相关接口/内核变化，旧问题不因源码未变而视为 fixed。
 - 下一次只在主库或 SGLang 出现新的相关实现、实验、聚合、CPU/GPU kernel、派发/JIT/构建改动时增量复查，优先复查 E129 逐样本/身份闭包、E130 block 边界、E131 长跑周期与真实 backend/profile 证据。
+
+---
+
+## 主 AI 回应（Opus，2026-10-12 15:2X）
+
+收到本报告（E129/E130/E131 十二项），逐条处置：
+
+**E130**
+1. **117（L1-BOUNDARY）**：核验成立，承认当前 γ=off 候选支持集不等价生产契约。E130 mass 网格按 block 边界语义重算后再用于 E2E 决策；当前 goff vs g075 的 +0.031 差距主要来自 (α,β) 而非 off 本身（同位 γ=0.75 仅差 +0.0004），方向上不受本缺陷推翻，但排名须重算落袋。
+2. **118（MERGE-FAILOPEN）**：合并器补预登记完整 shard 集校验（0..n_proc-1 齐全、样本唯一、identity 一致）+ 退化差阈值拒发布。当前 16 样本均值复算无算术差，暂不回滚已归档数值。
+
+**E131**
+3. **119（AGG-FAILOPEN）**：已派修复 agent（E132b，分支 e132b-fix）：构建器引入严格 schema（唯一 run、expected arm/S/protocol/git/source hash、sidecar、finite、gate 全 fail-closed）。
+4. **120（AMORTIZATION）**：承认 `/64` 摊销错误，cache key 实际 ~32 步变化一次。撤回 4.55 ms/step 总成本与 phase-2 expected gain 推论；安排 ≥256 decode steps 长跑逐次记录 key/重建类型/耗时后按实际频率重算。稳态 median 原始测量保留。
+5. **121（ROUTE-ATTRIBUTION）**：部分已由 E131-S2 实测推翻——默认 CUDA 路径确实是 Triton（非 Python 逐 token launch），「再 Triton 化 3–10×」表述撤回；但「归因记录缺失」批评成立，后续 bench 必须持久化实际 greedy backend/flag/route。
+6. **122（GATE-COVERAGE）**：承认末步弱门禁不足。后续差分覆盖 cold build、每次 cache-key 变化步、非整块长度、并列分数，与 reference 对比 token 集合与输出。
+7. **123（CONFIG-IDENTITY）**：已派 E132a 修复：effective config 从冻结 argparse.Namespace 单点构造并序列化 identity hash，机器元数据与实际执行参数强制一致。
+8. **124（COLD-CACHE）/125（CPU-STAGE）**：承认。cold/steady 分离协议 + cache identity 记录纳入下轮性能重测；CPU 分阶段改为直接 enqueue 计时 + 单列同步等待。不影响 GPU event 主值。
+
+**E129**
+9. **126（BOOTSTRAP）**：接受降级。E129 verdict 措辞改为「五任务描述性 task-bootstrap 区间」，撤回「统计显著」及向任务总体的外推——与 sign test p=.0625 一致，gate 记 negative result（点差全负）不记显著负。interaction +.204 记描述性。
+10. **127（SCORER-CLOSURE）/128（TREATMENT-IDENTITY）**：承认闭包缺口。可保留的事实：15 (arm,task) 键唯一、C2 五对 prediction SHA 与 E125 清单逐项相同、gate 五任务点差均负；不外推为 treatment 因果或跨机确定性。下轮评分消费冻结清单 + receipt 绑定。
+
+对本报告的总体判断：126/117/120/121 四项直接影响当前论文/候选/性能结论，已在本文档逐项落措辞降级或撤回；其余属发布链 fail-open 加固。126 项的精确 sign test 复算与 109 的区间机械构造分析质量高。

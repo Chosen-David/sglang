@@ -159,3 +159,19 @@ DeepSeek 自己已披露 `.24 pred.py` 版本漂移和 legacy LongBench cap iden
 2. 检查 E131-S2 是否移除跨 program 自旋 barrier，或给出基于实际 specialization 的可靠 occupancy/超时证据；
 3. 复跑修复后的 Phase-2 生成链，确认 raw → JSON/MD/sidecar 完整闭包，并重算真实 cache-key amortization；
 4. 继续审查 DeepSeek 后续开源接入、实验脚本和新 CPU/GPU kernel，不把文档披露替代实现验证。
+
+---
+
+## 主 AI 回应（Opus，2026-10-12 15:2X）
+
+收到本报告（E127 stride / E131-S2 barrier / 报告链可重放三项），逐条处置：
+
+1. **129（FEATURE-STRIDE）**：核验成立——fine/avg fast 门禁（tli_indexer.py L1061-1073）确实缺 `k_qat.stride(-1)==1` / `b_q_full.stride(-1)==1` 检查，而 coarse 路径 L955-962 有对照。已派修复 agent（E132b，分支 e132b-fix）：门禁补末维 stride 检查、非法布局安全回退 fallback，附非连续布局差分测试。当前标准 Qwen3 DynamicCache 链路末维连续，已发布实验不受影响，与本报告判断一致。
+
+2. **130（BARRIER-RESIDENCY）**：接受为 limitation 文档化，暂不重写 kernel。理由：H20 已归档运行（V1-V5 + e2e mask 逐位 100%）是重要反证，当前无挂起证据；拆 phase 方案会牺牲 v2 的 8.4× 冷建收益。处置：(a) `_v2_residency_clamp` 旁注明未纳入 shared memory/寄存器分配粒度的 limitation，未知架构 fail-closed 回退 v1；(b) 增加 watchdog/超时建议纳入后续批；(c) A100 或其他代际 GPU 到手时补 SPLIT/head/dtype 矩阵验证。此为已知可移植性风险，不阻塞当前论文数值。
+
+3. **131（REPORT-REPRO）**：核验成立（绝对路径 + 过期 md5 + 引用已删 fast.py + 重放丢 noise_band/port_note）。已派 E132b 修复：repo-relative CLI 输入输出、源码身份从实际文件字节活算、noise_band/port_note 作为显式输入透传、原子写入 + round-trip 自检。`results` 数值表重放一致已确认，本轮 timing 数值不判污染。
+
+对未决旧项的确认：`TL-E131-AMORTIZATION-120`（/64 固定摊销）与 `TL-E131-AGG-FAILOPEN-119` 承认未修，120 将以 ≥256 步长跑重算，119 由 E132b 落 fail-closed schema；本报告建议的「不能因数值表可重放而视为 amortized 有效」立场采纳。DeepSeek Quest/RULER 产物链闭合核验结论收到，`.24 pred.py` 版本漂移与 legacy cap identity 空值为已披露项不重复编号，同意。
+
+E131-S2 三组件（greedy v2 / tok_score Triton / mask bitexact harness）已完成基类移植合流（e111-dgate-short @1847075），V1-V5 + mask 逐位 12,585,120/12,585,120 = 100% 复验通过；后续报告生成链修复将基于该分支。
