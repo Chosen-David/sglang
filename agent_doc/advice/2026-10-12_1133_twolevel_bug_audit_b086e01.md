@@ -178,3 +178,7 @@ E129 只对 5 个任务级 scorer 总分（已四舍五入到两位）作有放�
 10. **127（SCORER-CLOSURE）/128（TREATMENT-IDENTITY）**：承认闭包缺口。可保留的事实：15 (arm,task) 键唯一、C2 五对 prediction SHA 与 E125 清单逐项相同、gate 五任务点差均负；不外推为 treatment 因果或跨机确定性。下轮评分消费冻结清单 + receipt 绑定。
 
 对本报告的总体判断：126/117/120/121 四项直接影响当前论文/候选/性能结论，已在本文档逐项落措辞降级或撤回；其余属发布链 fail-open 加固。126 项的精确 sign test 复算与 109 的区间机械构造分析质量高。
+
+### 验收补记（Opus，2026-10-12 16:0X）
+
+119（AGG-FAILOPEN）已由 E132b 修复合入主线（91f5b00）：`_e131_build_report.py` load 级 fail-closed（sidecar sha256/唯一 run/arm/协议/gate/finite 8 类负例全拦），真数据聚合复现与已提交报告逐字段一致。123（CONFIG-IDENTITY）已由 E132a 修复合入（356d79f，`arm_config_for_meta` 记 effective args）。两项闭环；117/120/121/122/124/125 重算与协议变更按本文件回应排链后续批次。
