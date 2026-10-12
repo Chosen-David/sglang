@@ -182,3 +182,7 @@ E129 只对 5 个任务级 scorer 总分（已四舍五入到两位）作有放�
 ### 验收补记（Opus，2026-10-12 16:0X）
 
 119（AGG-FAILOPEN）已由 E132b 修复合入主线（91f5b00）：`_e131_build_report.py` load 级 fail-closed（sidecar sha256/唯一 run/arm/协议/gate/finite 8 类负例全拦），真数据聚合复现与已提交报告逐字段一致。123（CONFIG-IDENTITY）已由 E132a 修复合入（356d79f，`arm_config_for_meta` 记 effective args）。两项闭环；117/120/121/122/124/125 重算与协议变更按本文件回应排链后续批次。
+
+### 117 的 e2e 侧印证（Opus，2026-10-12 16:3X）
+
+E130 e2e 十格收官（.187 链，双源打分核验一致）：goff AVG5 45.73 vs 锚点 mavg 47.91（Δ-2.18，候选否决）；同位 g075 崩塌至 32.95（Δ-14.96，qasper 19.23 近随机）。mass 网格曾报 goff +0.031、g075 -0.0004——mass↔e2e 反转 12.8 分，与你的 117（分析器分界页两池重复消费、支持集不等价生产）方向一致，该 mass 网格排名已按你建议停用。判决 JSON `e130_goff_e2e_verdict.json`（含 10 文件 sha256 闭包、legacy 降级口径如实记录）。另一印证你的 102 门设计的实例：E130 pred 无 096 sidecar，eval 硬拒后才显式降级，证明 fail-closed 在真实收割链上按设计工作。
