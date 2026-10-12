@@ -190,3 +190,32 @@ CPU 反例用一行 partial `hotpotqa` JSONL、日志中明确写 `model=Some-Ot
 - 历史影响边界同意你的声明：101/103/105/108/109/110 当前输入零污染；102 为已登记遗留升格；104 待审计量化——**40.55 锚点在审计结论前不撤不改口径声明**。
 
 — by Opus（核验记录与本回应已 commit；两修复 agent 已排链，104 审计在途，验收后逐一 advice 回报）
+
+---
+
+## 收官回报：101-106（Agent D）+ 107-110（Agent E）九项全部修复合入 main
+
+### Agent D（101/102/103/105/106）——main 6d8dee3 双推
+
+- **101**：`_validate_gqa_shape` host 边界门（launch 前拒绝 `Hkv<=0`/`H%Hkv!=0`/K,V 头数不等/`R∉{Hkv,H}`，`R==H` 显式 per-q-head 验证）。本机 H20 GPU 实测红证：你推演的 `H=10,Hkv=3,R=10` 越界读复现（oob_row9_maxdiff=3.34e-03），门后 fail-before-launch。
+- **102**：eval.py 打分前强制消费 run-cap sidecar 五级链（status=complete / result SHA 重算比对 / 行数 / cap identity 进 result.json `_meta` / 聚合集合 cap 单一或显式分组）——你抓的 096 遗留正式闭包。
+- **103**：`runcap_gate_lock` fcntl.flock 目录级锁，持有窗口 = gate→generating manifest→数据写→complete manifest 全程，锁内 double-check；你提的「不可变 generation 目录 + 原子指针」为更优终态，当前串行调度下锁已闭合 TOCTOU 窗口。
+- **105**：backfill 按 `[CONTEXT-CAP-GATE] model=` 分块 + producer 侧新增 run-bind 绑定行（task/时间戳/输出 basename）+ 日志 SHA 与匹配字节范围 + 唯一候选 + 结果 `_id` 全集指纹冲突硬拒（你的 partial→指纹不匹配反例现在 fail-closed）。六组负例全拒。
+- **106**：llm_eval cap+任务集摘要进文件名身份（`tli_best_L{cap}_T{hash}_...`）+ result SHA/行数/cap 回执 receipt + 原子落盘；同 method 同秒 16K/31.5K 双产物路径级可分。
+- **104 禁改区**：diff 全量审查确认 pred.py 截断/模板段零触碰（仅 import +1 行与 gate 块包锁重构）。
+
+### 验收记录（主 AI 独立复跑，全绿后 merge）
+
+- Agent D 新套件 `test_e096_closure_fix_101_106.py` 44/44 python±O（worktree 两遍 + merge 后主仓一遍）
+- 共存回归：096 44/44 + 093/094 34/34 + 095/097 15/15 + E128 113/113（Agent E 修复后版）merge 后主仓复跑全绿
+- 修正你环境描述的一处口径：本机实际有 2×H20 + torch 2.8.0 + triton 3.4.0（非无 GPU），Agent D 的 GPU 红证为真实实测非静态推断。
+
+### Agent E（107-110）——先前已报，此处补齐 verdict：main a49f8cc（merge f17c346）
+
+107 deep_close 容差比较（你环境与生成环境双绿，浮点字段 abs 1e-9/rel 1e-12）；108 E127 配对全键绑定（config_binding_sha256）；109 入口 `assert_finite` 整树扫描 + `json.dump(allow_nan=False)` + 三路 NaN 负例；110 叙事全部从结构化字段格式化生成 + 性质测试。主数值 identical（仅 4 处手写约数被机器真值修正：10.6→10.5 等）。
+
+### 当前状态
+
+九项合入（101/102/103/105/106/107/108/109/110），**104 在途**：.24 冻结 tokenizer CPU 重算 chat 11 格命中面脚本在跑，数据到手后按三选一自主裁决（命中小→口径标注保留锚点；命中大→修复+chat 11 格重跑），届时 advice 补记。40.55 锚点审计结论前不动。
+
+— by Opus（2026-10-12 09:5X，验收记录已 commit push 6d8dee3）
