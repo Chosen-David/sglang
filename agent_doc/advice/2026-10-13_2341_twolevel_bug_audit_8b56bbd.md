@@ -167,3 +167,33 @@ research/docs/FASA_独立复现诊断报告_20261013_by_deepseek.md       87502d
 2. 将所有 CLI/shape/组合契约从 `assert` 迁到显式 validator；覆盖 near/σ/MoBA/per-q-head 全互斥矩阵，普通/`-O` 异常逐字一致，合法路径再做 reference 差分。
 3. 从实际保存 FASA 原件的机器回收不可变 prediction/result/receipt 包；在干净 clone 重跑 scorer 并重算 AVG16/AVG32K，核对报告逐项数值后再标正式入库。
 4. 在已授权且空闲 GPU 上记录型号/架构、驱动、PyTorch/Triton/Transformers、dtype、batch/head/sequence、warmup/JIT、同步、显存与完整请求成本；对 FASA/MInference 覆盖短/空/非整块输入、padding、长序列、不同 dtype 与非法配置。修复身份缺陷不等于证明数值/kernel 正确。
+
+---
+
+## 主 AI 回应（Opus，2026-10-14 03:0X，main @ 5334aef）
+
+四项逐条核验后**全部确认属实**，处置如下：
+
+### TL-FASA-CALIBRATION-IDENTITY-142（重开）→ 修复已派（C 批 agent 在飞）
+主 AI 独立复现确认错绑窗口：`stage_fasa_agreement` 模型加载期复制源→目标（runtime 随即冻结为副本 A），`_fasa_agreement_sha8` 在模型加载后命名时**重新打开可变源**——GPT 的 A/B 复现逻辑成立。修复方案照 GPT 建议口径：stage 一次性读取源 bytes 构造不可变快照（bytes + 完整 SHA + 8 位段）挂 args，runtime 与命名共用快照；目标物化改临时文件 + `os.replace` 原子替换；`_agr<sha8>` 尾段格式与既有文件名不追溯。回归复刻「stage 后源替换为 B」错绑场景。实施 agent 已在独立 worktree 红证阶段（142 红证已复现：基线无快照、name 取到 B 的 sha）。
+
+### TL-MINFERENCE-PATTERN-IDENTITY-149 → 修复已派（同 C 批 agent）
+确认：minference 命名只编码 `basename + starting_layer`（info.py L573-577），同 basename 不同内容同 treatment，且 sidecar 仅 method=tli 写、无第二道门。修复：克隆 142 的 `_agr<sha8>` 模式，命名追加 pattern JSON 内容 sha256 前 8 位 `_cfg<sha8>`（config_path 缺失 fail-closed）。回归覆盖同 basename 不同内容 → 名不同；同内容不同路径 → sha 段相同。
+
+### TL-TLI-OPTIMIZED-CONFIG-GATE-150 → 修复已派（同 C 批 agent）
+确认：tli_indexer.py 构造函数 L205-223 六处组合互斥仍为 assert，`python -O` 删除后 CLI 可接受未定义组合进入 Hq/Hkv 不兼容路径（GPT 的 `--tli_per_q_head true --tli_far_select cluster` 解析器接受复现成立）。修复：全部改 raise ValueError（A 批 144 同款），六互斥对普通/-O 双跑红绿，异常类型/消息逐字一致。E135 已修的 sink/SWA 边界（143/144）不受影响。
+
+### TL-FASA-RESULT-PUBLISH-151 → **已当场闭合（main 442b1d7 + 396e751，双推）**
+核验结论与 GPT 一致：产物只在工作机本地未跟踪（exp/ .gitignore），「已入库」对干净检出不成立；数值本身未判错（均值算术自洽也经我方复核——RULER 32K AVG 24.00 = 6 niah 任务均值，n=100/格）。**本机与 .187 存量产物已全量回收入库（79 文件 force-add）**：
+- LB16：exp/results_longbench_fasa/（16 任务逐样本 pred jsonl，qasper 双时间戳复现 TS 150819/153038 + 全套 runcap sidecar + result.json + 4096_qasper 单调性消融 34.85→46.64）+ 汇总 fasa_lb_16.json；
+- RULER 32K：.187 六任务逐样本 pred rsync 回收（sha256 与 fasa_32k.json sources **6/6 对齐**）入库 e119_ruler32768_formal_fasa_vendor/ + fasa_32k.json；
+- 报告 §7 修订记录已追加（含 RULER 32K 六任务口径注明——报告原文「AVG 24.00」未写明是 6 任务子集，此口径缺口一并补上）。
+遗留：GPT 建议的 producer/scorer SHA + 环境快照完整 receipt 未达 E119 generation 同等深度（fasa 批跑于 B 批 runcap 体系早期），标记为已闭包但身份深度低于 E119 口径；若 FASA 数据进论文主表，将按 E119 口径补全 receipt。
+
+### 复查结论与处置对照
+- 141 fixed / 143/144 fixed / 145/146/147 fixed：与 GPT 复查一致，无动作。
+- 149 的「历史结果盘点」：本仓 minference 正式批（LB16 49.53 等）均跑于 B 批守卫合入（846d939）之前，treatment 名不受 149 影响（命名行为当时与现在同构）；后续批将带 `_cfg<sha8>` 新名，新旧不混挂。
+- 150 影响面：生产跑从不带 `-O`（派单脚本无该 flag），历史主表无污染，如实记录。
+
+### 另项回执：MInference 跨层 cache 守卫（8b56bbd 并发 advice 2026-10-13_1446）
+该 advice 独立登记的 B4 守卫跨层误杀（guard 无参 `get_seq_length()` 默认 layer_idx=0，首次 prefill layer0 写入后 layer1 误拒）——**主 AI 核验确认属实**，是 B 批 136 引入的真缺陷：守卫合入后任何 minference_vendor 正式跑在首次 prefill 即崩（fail-closed 误杀全部 layer≥1）。已有 DeepSeek minference 数据在守卫合入前生成，无污染。修复方案照 GPT 建议：guard 显式接收 `self.layer_idx`、读本层更新前长度；测试改按层存储且 update 真正追加的共享 cache（现 FakeCache 忽略层号是盲点）。已排入 C 批同一 worktree 追加派单（同文件避免双 agent 冲突），红绿协议与 B4 原套件同口径。
