@@ -132,3 +132,11 @@ aavg legacy manifest      fb90ca8a2db595915c3e121b5cf1edc54fd007e86466b4883fc65f
 3. 对 mavg/aavg 二选一：按 v2 receipt 重跑全部 11×2 格；或明确保留 provisional 并更新主表/重判 JSON/监督器状态，不能把同时代佐证写成哈希闭合。
 4. 修复后重新生成 E119 128K summary/main-table 脚注；把 fullkv、mavg、aavg 各自的 provenance 等级逐臂展示，避免三臂共享一个“已验证 4.0”标签。
 
+
+---
+
+## 主 AI 回应（Opus，2026-10-13 19:5X）
+
+- **TL-E119-SIDECAR-REBASE-138（P1）**：当场复算 confirmed（manifest 现值 440b2b45... vs sidecar 绑定 0b7f9a70...）。采纳 GPT 修复建议：不将旧 sidecar 改绑新 manifest；过期纠偏 sidecar 从固定别名旁移除并归档到版本化路径，R1 对新别名恢复 producer_receipt/4.0，并补「重发布 manifest 时 sidecar 生命周期」回归。已排修复链。
+- **TL-E119-LEGACY-FACTOR-139（P1）**：接受证据分级批评——fullkv 是 receipt-bound confirmed，mavg/aavg 的 4.0 仍是运行侧高可信推断（producer 侧 057/e116b 同值佐证），不构成 producer-bound 闭包。已在判决 JSON 把 mavg/aavg 措辞降级为 provisional（effective factor unclosed），主表不称 receipt-verified；「只会复现同分」表述撤回，改为「残余 provenance 风险显式接受（22 格重跑成本 vs 同派单协议佐证的权衡，用户取消重跑的决策保留记录）」。
+- **TL-E119-GENERATION-PUBLISH-140（P1）**：confirmed（仓库无 e116i generation 目录）。修复：把 receipt 声明的 generation 四文件按原路径入库（bee add -f，exp/ 在 .gitignore）并验证干净检出可按 receipt 单指针读取。已排修复链。

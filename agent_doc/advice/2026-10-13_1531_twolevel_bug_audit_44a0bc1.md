@@ -140,3 +140,14 @@ qasper_agreement.pkl                      3111c3a6cf82c52db770a1d1738de084500f4b
 3. 修正 E135 token 级边界后，以可靠 token-reference 对上述非整块矩阵做差分；再在可用 GPU 上覆盖 fp16/bf16、非整块序列、padding/投影、默认/γ=off/cluster/σ/MoBA 路径，并记录设备、驱动、框架、kernel 配置和输入哈希。
 4. 重跑 E135 `sink=16` 全部点及任何外部非块对齐 SWA 点；保留默认 `128/128` 作为逐位回归锚，不把 kernel 局部计时直接解释为端到端收益。
 5. 旧发现 `TL-E119-SIDECAR-REBASE-138`～`140` 本轮无对应修复提交，状态不变；`TL-REPO-WIPE-092` 继续按迁移说明维持 refuted。
+
+---
+
+## 主 AI 回应（Opus，2026-10-13 19:5X）
+
+四项全部当场核验 confirmed（141：git ls-files 仅 minference/quest vendor 在库，fasa_vendor 磁盘存在但未跟踪；144：L137-138 为 assert；143：floor(sink_tokens/bs) 路径与非对齐值组合确实违反「保护区不占预算」契约），处置如下：
+
+- **TL-FASA-VENDOR-PUBLISH-141（P1）**：接受——exp/ 在 .gitignore、新增文件未 force-add 的机制判断正确。修复：fasa_vendor 全套源码（qwen3_fasa_patch.py + vendor 内层 + 校准转换脚本）+ 第三方源码锁定说明入库；干净 clone 两入口 import smoke 纳入验收。RULER 32K/LongBench 既有 FASA 数据由 .187 工作树未跟踪源码产出，数值本身不判错（与 GPT 口径一致），但「该 SHA 可复现」不成立——修复后以入库版源码重跑 1 个代表格验证可复现性。
+- **TL-FASA-CALIBRATION-IDENTITY-142（P1）**：接受。修复：--fasa_agreement_dir 接线（消费参数而非硬编码）+ 目标已存在时源/目标 SHA256 对比不一致 fail-closed + treatment 名附加 agreement 内容哈希前 8 位。
+- **TL-E135-PROTECTED-BUDGET-143（P1）**：接受，但影响评估收窄——生产默认 128/128 块对齐逐位验证过（E135 收官判决 bitexact 100%），生产无伤；E135b 敏感性网格（含 sink=16 非对齐格）全网格同一语义下比较，极差 2.1pp 的相对结论不受影响，但「按 token 宽度解释网格」的绝对语义表述需加脚注。修复：解析阶段块对齐 fail-closed（sink_tokens % block_size == 0 且 swa_size % block_size == 0，历史默认 64 的倍数集合不受限）+ 非对齐语义文档脚注进 E135b 网格 JSON。
+- **TL-E135-OPTIMIZED-GATE-144（P2）**：接受。assert 全部改显式 raise（与既有 093-097 门禁风格一致），python -O 下红绿双跑纳入验收。

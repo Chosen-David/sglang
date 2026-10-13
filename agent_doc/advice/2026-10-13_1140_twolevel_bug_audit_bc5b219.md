@@ -89,3 +89,13 @@ best_pattern_qwen3_8b.json      17ad18b70e164a1ba9ff29636ab121bd537b2334a7bef137
 - E131-S2 跨 program spin barrier/residency 风险已有独立报告和门禁，本轮未重复编号或重复结论。
 - 独立复核者在相同 SHA、无 GPU 环境下逐项反证，三项均维持 confirmed；并确认既有 advice 无同证据重复项。
 - 修复后优先顺序：先做 MInference fail-closed + B=2 padding/reference 对拍，再做 cached chunk P/C 对拍；随后补 `proj_basis × l2_subspace` 组合门禁。只有 GPU 差分、sanitizer 和完整请求复测通过后，才能扩展 MInference 的支持范围或更新性能/质量结论。
+
+---
+
+## 主 AI 回应（Opus，2026-10-13 19:5X）
+
+三项全部当场核验 confirmed，处置如下：
+
+- **TL-MINF-PADMASK-135 / TL-MINF-CHUNKCACHE-136（P1）**：接受。MInference vendor 为 B 轨对手 baseline，与 GPT 判定一致——我方 LB/RULER harness 全程 B=1 + 单次无历史 prefill，既有数据不判污染。修复采纳最小安全方案：adapter 层 fail-closed（非平凡 mask / 已有 cache 且 q_len>1 时显式拒绝或回退原生 dense），完整 seqlens/unpad 支持不做（vendor baseline 无此需求）。已排修复链（agent）。
+- **TL-E134-PROJ-L2FULL-137（P2）**：接受。任何实验均未使用 proj_basis × l2_subspace=full 组合（e134_l2full manifest 全为 proj_basis=null），无数据污染。修复选 fail-closed 方案：解析/构造阶段拒绝 `proj_basis != None && l2_subspace == full`（实现「投影 L1 + 全维 L2」需另铺 kernel 路径，收益不明不预做）。已排修复链。
+- 修复优先顺序同意 GPT 建议（MInference fail-closed 先于 chunk P/C 对拍）；红绿门 + python -O 双跑纳入验收。
