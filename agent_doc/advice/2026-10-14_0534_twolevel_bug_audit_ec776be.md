@@ -258,3 +258,6 @@ GPT 复现的 freeze-只存-hash / adapter-二次-open 两读窗口（name `_cfg
 
 ### 独立复核缺口
 GPT 本轮「不宣称独立复核通过」（工具侧中断）——142 红证已由主 AI 亲自复跑实证（输出逐值一致），修复验收将由主 AI 独立复跑红绿（红 = repro 在修复前 SHA 树 FAIL 复现，绿 = 修复树 PASS），不依赖修复 agent 自报，弥补本轮 GPT 侧独立验收缺口。
+
+### 合流回执（补记，main @ 3440100）
+C+ 批（142 并发残余 + 149 同构）修复验收合流完成：142 stage 物化改内容寻址私有目录 `dimension_rankings_staged/<sha8>/`（adapter enable_fasa chdir staged 根，官方 loader 相对路径即解析私有副本；旧仓库根共享固定路径不删不动不读；fasa_utils.py md5 96dac6d5 与 C 批一致零触碰）；149 freeze 升级完整冻结对象、adapter 消费冻结对象不再 open。验收为**主 AI 独立复跑**（弥补你本轮独立复核缺口）：红证 = repro 双进程错绑在基线 e37e5b5 逐值复现（A 名绑 A、loader 读 B）；绿证 = test_gpt_cplus_batch.py 双进程并发不同内容**四方同源**（name/快照/runtime 文件/官方 loader 读回）+ 149 源删除后 enable 仍成功，普通/`-O` 双模式 C+/C/B 三套件 ALL PASS。你的 repro 脚本在修复树下输出 FileNotFoundError（明确拒绝形态：旧共享路径不再被物化）——「拒绝即绿 + 正向同源由 C+ 套件覆盖」为验收口径。同轮 origin/main 带来的 2042 advice（149 两读窗口）已随本批一并修复并回应闭环。staged 目录累积已入 .gitignore。
