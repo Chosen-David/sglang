@@ -1,40 +1,101 @@
 {
- "section": "Full paper (EN, 23pp): abstract through Limitations",
- "target_venue": "ML systems venue (article class; benchmarked against academic register)",
- "diagnostics": {
-  "words": 12247,
-  "sentences": 337,
-  "mean_sentence_len": 36.3,
-  "stdev_sentence_len": 33.5,
-  "hedges_per_1k": 1.06,
-  "emdash_per_1k": 7.02,
-  "antithesis_per_1k": 1.22,
-  "taxonomy_markers_per_1k": 3.1,
-  "we_per_1k": 2.2,
-  "reframe_moves_per_1k": 0.08,
-  "necessity_sufficiency_per_1k": 0.0,
-  "note": "stdev/mean ratio 0.92 -- live variance signature intact; mean sentence length far above the author's 14-16 band (dense results prose with parenthesized CI/protocol qualifiers)"
- },
- "rubric": {
-  "voice": {
-   "score": 4,
-   "rationale": "Executes the reduce-to-a-named-set move repeatedly and well (three positional layers, two orthogonal dimensions, four-quadrant selection taxonomy, four-granularity flatness); antithesis present but sparse for the density of claims ('a safety switch, not a source of accuracy gain'; 'the two-level form itself is not our contribution'); run-in bold labels structure every subsection; honesty markers conspicuous (parities with CIs, negative results named as such, 'not a net-win shape'). Misses: no Scope-style paragraph in the intro; the vivid single-example move is absent; we-density 2.2/1k is below the academic band, and mean sentence length 36 with stdev 33 signals qualification-stacking rather than the author's short-declarative-against-long-complex rhythm."
+ "evals": [
+  {
+   "iteration": "round5_slim (2026-10-06 archived snapshot)",
+   "section": "Full paper (EN, 23pp): abstract through Limitations",
+   "target_venue": "ML systems venue (article class; benchmarked against academic register)",
+   "diagnostics": {
+    "words": 12247,
+    "sentences": 337,
+    "mean_sentence_len": 36.3,
+    "stdev_sentence_len": 33.5,
+    "hedges_per_1k": 1.06,
+    "emdash_per_1k": 7.02,
+    "antithesis_per_1k": 1.22,
+    "taxonomy_markers_per_1k": 3.1,
+    "we_per_1k": 2.2,
+    "reframe_moves_per_1k": 0.08,
+    "necessity_sufficiency_per_1k": 0.0,
+    "note": "stdev/mean ratio 0.92 -- live variance signature intact; mean sentence length far above the author's 14-16 band (dense results prose with parenthesized CI/protocol qualifiers)"
+   },
+   "rubric": {
+    "voice": {
+     "score": 4,
+     "rationale": "Executes the reduce-to-a-named-set move repeatedly and well (three positional layers, two orthogonal dimensions, four-quadrant selection taxonomy, four-granularity flatness); antithesis present but sparse for the density of claims ('a safety switch, not a source of accuracy gain'; 'the two-level form itself is not our contribution'); run-in bold labels structure every subsection; honesty markers conspicuous (parities with CIs, negative results named as such, 'not a net-win shape'). Misses: no Scope-style paragraph in the intro; the vivid single-example move is absent; we-density 2.2/1k is below the academic band, and mean sentence length 36 with stdev 33 signals qualification-stacking rather than the author's short-declarative-against-long-complex rhythm."
+    },
+    "logic": {
+     "score": 4,
+     "rationale": "Every major claim is scoped to its measurement protocol (mass-replay vs e2e, main arm vs reference arm, TIA vs PSI protocol for the +8.40/+7.98 split), CIs accompany effect sizes, and causal mechanisms are explained not asserted (anti-eviction via GQA head unevenness; rotation-pair frequency argument with the dot-product decomposition). Two fuzzy spots hold it back from 5: the abstract still asserts 'accuracy parity... delivers the bandwidth win' while the e2e section documents no net win shape in any tested configuration (kernel-internal speedup only); and the two-profiles-two-arms deployment protocol is stated as verified uniformity while the underlying selection signal for profile membership is never operationalized (the paper's own E79-style finding was that no cheap signal separates them)."
+    },
+    "structure": {
+     "score": 4,
+     "rationale": "Clean MoBA-style arc: stakes-with-named-products, three-family critique with quantified deficiencies, research question, mechanism, claim-first contributions; Observations section with explicit phenomenon-mechanism-implication-boundary template is a structural strength; evidence sits beside its claims throughout; Limitations returns to every headline number with a scope restriction. The abstract is the weakest structural element: ~500 words and 25+ numbers in one paragraph, front-loading the concession list instead of the design-space-characterization thesis the paper actually argues."
+    }
+   },
+   "mean_rubric": 4.0,
+   "flags": [
+    "anti_gaming: rubric dimensions uniform (4/4/4) -- spot-checked; not lockstep optimization, the uniformity reflects genuinely even quality across dimensions",
+    "diagnostic-vs-rubric: voice=4 while mean sentence length 36.3 is far outside the author band -- corroborated, not contradictory: the paper reads confident and on-register in moves but over-stacks protocol qualifiers per sentence; a venue-cleanup compression pass is the natural fix",
+    "abstract overload is the single highest-leverage structural residual (consistent with the caller's independent reviewer history; scored blind here from the text itself)"
+   ],
+   "confidence": "high (full-text read of EN version; deterministic metrics reproduced twice)",
+   "notes": "Blind eval of the round5 revision. Rubric 4.0/5 with the residual gap concentrated in: (1) abstract doing 40% concession-listing instead of leading with the design-space-characterization thesis; (2) intro missing the Scope paragraph and the single-quoted-concrete-example move; (3) the profile-selection signal being asserted as deployable without an operationalization. None of these are logic errors; all are presentation-level. On the venue's novelty bar this remains a different question (see pc-review).",
+   "pc_review": {
+    "lean": "weak reject",
+    "score": "4/10 (round3, the latest full adversarial review before this snapshot)"
+   },
+   "integrity": {
+    "status": "n/a (baseline)"
+   }
   },
-  "logic": {
-   "score": 4,
-   "rationale": "Every major claim is scoped to its measurement protocol (mass-replay vs e2e, main arm vs reference arm, TIA vs PSI protocol for the +8.40/+7.98 split), CIs accompany effect sizes, and causal mechanisms are explained not asserted (anti-eviction via GQA head unevenness; rotation-pair frequency argument with the dot-product decomposition). Two fuzzy spots hold it back from 5: the abstract still asserts 'accuracy parity... delivers the bandwidth win' while the e2e section documents no net win shape in any tested configuration (kernel-internal speedup only); and the two-profiles-two-arms deployment protocol is stated as verified uniformity while the underlying selection signal for profile membership is never operationalized (the paper's own E79-style finding was that no cheap signal separates them)."
-  },
-  "structure": {
-   "score": 4,
-   "rationale": "Clean MoBA-style arc: stakes-with-named-products, three-family critique with quantified deficiencies, research question, mechanism, claim-first contributions; Observations section with explicit phenomenon-mechanism-implication-boundary template is a structural strength; evidence sits beside its claims throughout; Limitations returns to every headline number with a scope restriction. The abstract is the weakest structural element: ~500 words and 25+ numbers in one paragraph, front-loading the concession list instead of the design-space-characterization thesis the paper actually argues."
+  {
+   "iteration": "round5_r2 (2026-10-08 working tree, +61 words vs slim snapshot)",
+   "section": "Full paper (EN): abstract through Limitations",
+   "target_venue": "ML systems venue (article class; benchmarked against academic register)",
+   "diagnostics": {
+    "words": 12308,
+    "sentences": 340,
+    "mean_sentence_len": 36.2,
+    "stdev_sentence_len": 33.3,
+    "hedges_per_1k": 1.06,
+    "emdash_per_1k": 6.99,
+    "antithesis_per_1k": 1.22,
+    "taxonomy_markers_per_1k": 3.17,
+    "we_per_1k": 2.19,
+    "reframe_moves_per_1k": 0.08,
+    "necessity_sufficiency_per_1k": 0.0,
+    "note": "stdev/mean ratio 0.92 -- live variance signature intact; mean sentence length far above the author's 14-16 band (dense results prose with parenthesized CI/protocol qualifiers); we-density and taxonomy density both below the academic band"
+   },
+   "rubric": {
+    "voice": {
+     "score": 4,
+     "rationale": "Reduce-to-a-named-set moves remain the spine of every argument (three positional layers, four-quadrant selection taxonomy, four-granularity flatness, triple verdict, five-combination dual-metric grid); the strongest antithesis in the draft is the deployment-simplicity line ('We do not propose a parameter that needs tuning; we show this parameter does not need tuning'); run-in bold labels carry every subsection; honesty markers conspicuous (parity-level phrasing, CIs stated with every effect, negative results promoted to named findings). The real-incident move now appears in the causality design (repetitive-loop generation collapse on the 30B model with root cause; the 8B tolerating the same bug). Holds at 4: no Scope-style paragraph in the intro; we-density 2.19/1k below the academic band; mean sentence length 36.2 with protocol-qualifier stacking replaces the author's short-declarative-against-long-complex rhythm."
+    },
+    "logic": {
+     "score": 4,
+     "rationale": "Every headline claim is scoped to its measurement protocol, and the dual-protocol gap (replay vs e2e) is itself a first-class methodological claim with a stated reliability boundary (trace detects collapse-level differences; e2e is the only ranking instrument); the abstract handles the speed question honestly by narrowing the claim to kernel/compute/storage layers with prefill named as the boundary of any net win. Two residuals hold it at 4: the two-profiles-two-arms deployment protocol asserts 'practitioners select by task profile' without operationalizing profile membership (the paper's own four-granularity flatness results imply no cheap signal separates the profiles, so the deployment rule silently relies on a human task taxonomy); and the intro's research question still promises 'delivers the bandwidth win' while every measured e2e shape loses to Quest -- the narrowed abstract claim and the un-narrowed question are in mild tension."
+    },
+    "structure": {
+     "score": 4,
+     "rationale": "Clean MoBA-style arc intact: stakes with named products, three-family critique with quantified deficiencies, research question, mechanism, claim-first contributions; the Observations section runs the four-element phenomenon-mechanism-implication-boundary template; evidence sits beside its claims throughout; Limitations returns to every headline number with a scope restriction. The abstract remains the single weakest structural element: ~450 words in one paragraph carrying 25+ numbers, front-loading the concession list; it leads with the mechanism thesis but the numeric density still buries it."
+    }
+   },
+   "mean_rubric": 4.0,
+   "pc_review": {
+    "lean": "weak reject",
+    "score": "5/10 (round5 adversarial review, 2026-10-05: up 1 from round3 4/10; writing-level fixes estimated to reach 6/10 borderline accept)"
+   },
+   "integrity": {
+    "status": "PASS",
+    "detail": "limitations 5/5, claims 13/13, hedges 1.08->1.06, no honesty regressions vs round5_slim snapshot"
+   },
+   "flags": [
+    "anti_gaming: rubric static (4/4/4) across consecutive evals while diagnostics move <1% -- micro-revision, not stalling; spot-checked, no lockstep optimization",
+    "diagnostic-vs-rubric: voice=4 while mean sentence length 36.2 is far outside the author band (14-16) -- corroborated as qualification-stacking density rather than voice break; compressing protocol parentheticals is the standing fix",
+    "hedges 1.06/1k sits below the author's authentic floor (~1.3-2.1) -- mild scrub signal, unchanged this round; integrity_check PASS"
+   ],
+   "confidence": "high (full-text blind read of EN version; deterministic metrics reproduced; integrity_check PASS vs prior snapshot)",
+   "notes": "Blind eval of the round5 working-tree revision (post slim archive, +61 words). Rubric holds at 4.0/5. Residual gap concentrated in: (1) abstract overload (~450 words, 25+ numbers); (2) intro missing the Scope paragraph and the quoted-concrete-example move; (3) task-profile selection rule asserted without operationalization; (4) new mild tension between the un-narrowed 'delivers the bandwidth win' research question and the honestly narrowed abstract claim. None are logic errors; all are presentation-level. Venue acceptance is a separate bar (pc-review 5/10 weak reject, with a named path to borderline-accept)."
   }
- },
- "mean_rubric": 4.0,
- "flags": [
-  "anti_gaming: rubric dimensions uniform (4/4/4) -- spot-checked; not lockstep optimization, the uniformity reflects genuinely even quality across dimensions",
-  "diagnostic-vs-rubric: voice=4 while mean sentence length 36.3 is far outside the author band -- corroborated, not contradictory: the paper reads confident and on-register in moves but over-stacks protocol qualifiers per sentence; a venue-cleanup compression pass is the natural fix",
-  "abstract overload is the single highest-leverage structural residual (consistent with the caller's independent reviewer history; scored blind here from the text itself)"
- ],
- "confidence": "high (full-text read of EN version; deterministic metrics reproduced twice)",
- "notes": "Blind eval of the round5 revision. Rubric 4.0/5 with the residual gap concentrated in: (1) abstract doing 40% concession-listing instead of leading with the design-space-characterization thesis; (2) intro missing the Scope paragraph and the single-quoted-concrete-example move; (3) the profile-selection signal being asserted as deployable without an operationalization. None of these are logic errors; all are presentation-level. On the venue's novelty bar this remains a different question (see pc-review)."
+ ]
 }

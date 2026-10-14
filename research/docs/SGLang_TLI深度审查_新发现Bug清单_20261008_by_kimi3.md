@@ -228,3 +228,74 @@ tag 解析对全部 49 臂逐一验证无误；cavgsim/cclustersim 的 sim=0.9 �
 - 子代理发现附代码引用、主会话抽样复核机制：其余各条。
 - 未做：GPU 全链路回归、真实模型 e2e 对拍（E109 占卡中）；hotpotqa 子集性质（前缀 vs 随机）需联网对拍 `_id`。
 - 与 GPT 两份审查（`SGLang_Indexer_Bug审查与任务链核查_20261008_by_gpt.md`、`SGLang_最新代码复查_新增Bug与修复回归_20261008_by_gpt.md`）的关系：本报告全部为新发现或其修复的回归核验，不重复 B01-B09 本体。
+
+---
+
+## 8. 新增 Bug B10 — near 起点未扣 SWA（α 扫描语义偏移，2026-10-09 核查）
+
+**来源**：GPT 复审报告指控"代码先算 α × mid长度，但 near 起点从序列末尾往前推，没有扣除 SWA，导致实际 near 区偏短"。主会话亲验坐实。
+
+**证据链**（权威 spec + 双实现源码 + 数值复现）：
+
+1. **spec**（根 `TASK.md` L53, L137，人写定义）：
+   - L53："除去sink和swa区域...剩下的是mid区域的mid_L个token（near是mid区域中靠近q的，far是离目标q远的其余部分）"
+   - L137："near_L = alpha * mid_L，剩下的作为 far_L = mid_L - near_L"
+   - ⇒ near POOL 应 = α × mid_L = α × (S − sink − swa)，区间 = [S − swa − near_L, S − swa)
+
+2. **双实现源码完全同构**（对拍一致但共语义错误的根因）：
+   - HF 权威 `two-level-attention/sparse_attn/indexer/tli_indexer.py` L796-806：
+     ```
+     near_len_dyn = max(bs, int(self.alpha * mid_len))   # = α × (S−sink−swa)  ✓ spec
+     near_blks = max(sink_blocks, (kt*bs - near_len_dyn) // bs)   # ← 从 S 推，不扣 swa
+     swa_lo_blk = max(near_blks, kt - max(1, swa_tok // bs))
+     ```
+   - SG `python/sglang/srt/layers/attention/tli/indexer.py` L235-242：逐行同构。
+   - 注：L790 注释"旧口径 near 池含 swa 8 块，抢 β 配额 25%"——历史上 swa_lo_blk 的引入是**有意的修复**（把 swa 排除出 near 池上界），但只改了池**上界**、未同步改池**下界**（near_blks 仍从 S 推），导致 swa 被**扣两次**。这是"修了一半"的 bug。
+
+3. **数值复现**（`/tmp/verify_alpha_near2.py`，块边界完全对齐场景）：
+   - S=4416, sink=128, swa=192, bs=64, α=0.5
+   - spec near_L = 0.5 × 4096 = 2048 tokens (32 blocks)
+   - 代码 near_blks = (4416 − 2048)//64 = 37 → near 起点 = 2368
+   - swa_lo_tok = 4416 − 192 = 4224
+   - 实际 near POOL = 4224 − 2368 = **1856 tokens (29 blocks)**
+   - 差距 = 2048 − 1856 = **192 tokens = swa_tok**（swa 被扣两次：mid_len 已扣 + 上界再扣）
+
+**影响半径**（`/tmp/verify_alpha_impact.py`，eff_α = 实际 near_pool / mid_L）：
+
+| S | α 标称 | α 实际生效 | 相对偏差 |
+|---|---|---|---|
+| 4096 | 0.125 | 0.085 | **+32.2%** |
+| 4096 | 0.500 | 0.458 | +8.5% |
+| 8192 | 0.125 | 0.106 | +15.4% |
+| 8192 | 0.500 | 0.480 | +4.1% |
+| 16384 | 0.125 | 0.116 | +7.6% |
+| 16384 | 0.500 | 0.490 | +2.0% |
+| 32768 | 0.500 | 0.495 | +1.0% |
+
+规律：**S 越短、α 越小，相对偏差越大**。E109 的 aavg/mavg 最优 α=0.125 在 4k-8k 任务上实际生效 α≈0.085-0.106（偏差 15-32%），即论文写"α=0.125"但实际 near 区只占 mid 的 8.5-10.6%。
+
+**是否影响 E109 数据有效性**：**不影响**。
+- 双实现同构 → α 扫描的相对排序、最优 α 的选取**内部一致**（所有臂共同样的偏移）。
+- 真正影响的是**论文叙事**：若论文写"near_L = α × mid_L"，读者按 spec 复现会得到与代码不同的 near 区。
+- 修复后**最优 α 值会平移**（小幅），但不改变"E109 已落袋数据的相对结论"。
+
+**修复**（一行，双实现同步）：
+```python
+# 原：near_blks = max(p.sink_blocks, (S - near_len_dyn) // bs)
+# 修：near 起点从 S-swa 推（near 是 mid 区域中靠近 q 的部分，mid 已不含 swa）
+near_blks = max(p.sink_blocks, (S - swa_tok - near_len_dyn) // bs)
+```
+修后 near POOL = (S − swa) − (S − swa − near_len_dyn) = near_len_dyn = α × mid_L ✓ spec。
+
+**决策**：缓期至 E109 α 扫描收官后、论文写作前修复。理由：① E109 在跑、修了会扰动在跑链；② 双实现同构保证 E109 相对结论有效；③ 修复后需重跑至少一组 α 扫描验证最优 α 平移幅度。
+
+---
+
+## 9. B04/B09 复核确认（GPT 二次报告，2026-10-09）
+
+GPT 复审报告重新提出两项风险，主会话复核确认与之前 B04/B09 同一对象、同一结论：
+
+- **B04（首 token EOS 不停）**：`pred.py` L249-264，`generated_content = [pred_token_idx.item()]` 后才进循环，首 token 若是 EOS 仍会继续生成。E109 未实测触发（LongBench 多任务首 token 非 EOS），风险存在。最小修：L250 后加 `if pred_token_idx.item() == tokenizer.eos_token_id: break`。
+- **B09（输出文件同名覆盖）**：`info.py` L11-13 `method_name` 只含 `tia_block_size/level1_topk/level2_topk/cmp_ratio/ABD`，**不含 α/β/γ**；`pred.py` L426 输出名 = `{dataset_prefix}-{method_name}-{args.t}.jsonl`。E109 用 `time="${month}${day}${hour}${minute}"`（精度到分钟）+ 顺序串行 → 实际未触发。但跨 method 同分钟重跑会覆盖。修法：method_name 追加 α/β/γ（缓期，与之前决策一致）。
+
+两项均维持"缓期至 E109 收官后"的既有决策，无新增动作。
