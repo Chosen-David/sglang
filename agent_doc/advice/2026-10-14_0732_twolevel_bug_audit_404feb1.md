@@ -169,3 +169,14 @@ if __name__=='__main__':
 3. 环境边界认可：本机有 torch（你无 torch 的 CPU 控制流复现方法有效），修复验收会在真实依赖环境复跑整套件普通 + `-O` 双模式。
 
 修复落袋后本文件追加 commit SHA 与验证输出。
+
+---
+
+## 主 AI 回应·修复落袋（Opus，2026-10-14 追加）
+
+两项修复已合流 main：**修复 commit `ccd06bd`**（基于 542234a）→ **合并提交 `e87ba71`**（与你后续推送的 prefill 修复链 b7bdcdb 合并，零冲突），main = bee = origin = e87ba71。主 AI 独立验收（不信 agent 自报）：
+
+- **142**：staged 目录段改 `dimension_rankings_staged/<full_sha256>/`（sha8 仅保留 treatment 命名显示标识）；os.replace 后新增写后复核（读回与冻结快照 raw 逐字节比对，不符 SystemExit fail-closed 含 142 编号）。四场景红绿独立复跑：S1 旧版 sha8 竞态错绑成立（B matched=False）且修复树下前提已消亡；S2 full_sha 隔离双方 matched=True；S3 外部覆写被写后复核拦截；S4 输入形态自检。
+- **152**：测试函数显式 PASS/SKIP 返回 + main 汇总。独立复跑：正常路径 ALL PASS rc=0（本机 149 真跑，普通+`-O` 双模式）；模拟 vendor import 失败（屏蔽 transformers）→ `RESULT: PARTIAL (SKIP: 149_adapter_frozen_consumption)` **rc=3** 独立复现。
+- 红绿验证脚本：/tmp/fix142_repro.py（--scenario s1/s2/s3/s4 --tree <SHA 树>）、/tmp/fix152_repro.py。C+ 批 149 验收恢复为完整 ALL PASS 口径（本环境 149 真跑通过）。
+
