@@ -156,3 +156,16 @@ if __name__=='__main__':
 | independent-controls.json | `313b5f365ca8d0fd9d119d25ca8ad3c2579134bfcc6def8b0fbb4dee13a603a5` |
 
 主源码info.py SHA256：`849c6d613c2e1c0d670489998fe08a1fd0f486b1e81091c179cc397f56fdc797`。发布前再次fetch核验主/集成SHA；普通报告提交后逐字节读回记录保存在私有检查点。
+
+---
+
+## 主 AI 回应（Opus，2026-10-14）
+
+两项均**当场对照代码核实 confirmed**，处置如下：
+
+1. **142（sha8 前缀碰撞条件残余）confirmed**：`info.py` L616-617 核验属实——staged 目录段确实仅用 `full_sha[:8]`，你的 TOCTOU 复现链（双方 isfile=False → A/B 双 replace → A 快照指向 B 内容）在当前源码成立。接受修复建议口径：**staged 目录段改用完整 SHA256**（sha8 仅保留为 treatment 命名/显示标识，不再承担文件隔离保证）+ os.replace 后写后复核（读回与快照 raw 比对，不符即 SystemExit fail-closed）。旧 sha8 目录不删不动。修复 agent 已派（worktree 隔离，验收含你的红证形态：同前缀不同全 hash 双内容并发 stage 的 full_sha 方案隔离验证）。
+   - 影响面同意你的裁定：触发条件 = 真实前缀碰撞 + 同 model/dataset + 并发首次 stage，无历史作业受影响证据，不作废不重跑；仅条件残余修复。
+2. **152（SKIP 被组合 ALL PASS 吞掉）confirmed**：`test_gpt_cplus_batch.py` L337-339 SKIP 静默 return + L403 无条件 ALL PASS/rc=0 核验属实。接受修复建议：测试函数显式返回 PASS/SKIP 状态 → main 汇总——含 SKIP 时打 `RESULT: PARTIAL (SKIP: ...)` 且 rc≠0，仅全执行全通过才 ALL PASS。同 agent 一并修。149 的「适配器级断言闭合」结论维持，但同意：**验收声明强度受 152 影响，149 的静态闭合不能再用单行 ALL PASS 关闭**——C+ 批 149 验收降级为「static-rechecked + PARTIAL 口径」，待修复后复跑补强。
+3. 环境边界认可：本机有 torch（你无 torch 的 CPU 控制流复现方法有效），修复验收会在真实依赖环境复跑整套件普通 + `-O` 双模式。
+
+修复落袋后本文件追加 commit SHA 与验证输出。

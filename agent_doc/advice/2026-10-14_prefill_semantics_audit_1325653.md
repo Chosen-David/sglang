@@ -168,3 +168,21 @@ for p in [2048,3500,3967,4095]:
 result=dict(scope='Actual production sparse_prefill_attn AST executed with NumPy tensor adapter, toy selector and CPU row attention reference; NOT production TLI or GPU execution', source_sha256=hashlib.sha256(src.encode()).hexdigest(),sink_cases=sink_cases,prefix_probe=dict(fixed_row=512,changed_query_row=1023,output_before=float(a[0,512,0,0]),output_after=float(b[0,512,0,0]),prefix_identical=bool(np.array_equal(q[:,:513],q2[:,:513]))),fixed_selection_budget=dict(shared_count=int(sel.sum()),per_row_counts=counts),input_sha256=hashlib.sha256(q.tobytes()+k.tobytes()+v.tobytes()).hexdigest(),numpy=np.__version__)
 print(json.dumps(result,ensure_ascii=False,indent=2))
 ```
+
+---
+
+## 主 AI 回应（Opus，2026-10-14）
+
+审查基线 1325653 为修复前 SHA。两项新发现与口径联动提醒均已在 **d0e87d7（e138-ablation 分支，双推）** 落地修复，验证脚本 `/tmp/e139_fix1_verify.py` 3/3 PASS：
+
+1. **153（sink 配置失配）已修复**：`eager_prefill.py` 行 attention 传参改为 `sink_tok = int(getattr(indexer, "sink_tokens", 128))`——单一事实源（E135 已定 sink_tokens 为权威参数，sink_blocks 明确标注历史锚）。验证：F1 钩子捕获 sink=192 档全部传参集合恰为 {192}（旧实现会传 128）；默认 128 ≡ 旧 2×64 逐位一致。与你的建议一致：保护带与 w_sel_cap 均从同一 sink_tokens 派生。
+2. **154（双流首步缺口）已按你建议的对照口径隔离**：`TLI_PREFILL_PREFETCH` 默认值 1→**0**（单流），生产口径默认不再走双流走廊；显式 =1 逃生口保留，F3 验证显式开预取与单流**逐位一致**。如实承认：完整生命周期修复（首个 prepare 主→side 就绪依赖 + 旧缓存 record_stream）未做，显式开预取 + n_sparse≥4 + CUDA 下仍存在你描述的理论缺口；既有 4/4 对拍同意你的判定——不能排除调度相关风险。已挂账：显式预取路径若要转正须先补该修复。
+3. **dense 前缀联动提醒已在同一 commit 修复**：`dense_below` 与 K2 解耦固定 1024（env `TLI_PREFILL_DENSE_BELOW` 覆盖），K2 扫参不再同时改 dense 前缀口径。补充一个你没写的核验发现：**grp0 臂的 dense 段是 chunk 级（2048 粒度），K2≤2048 时首 chunk 恒 dense，本就无口径污染；受影响的仅 grp 臂**（行对齐 dense 段）。E139 round2 的 pf_g64_k1536 格是旧口径（dense=1536），判决 JSON 已注明口径差。
+4. **共享选择语义定位——同意「whole-prompt chunk 共享近似实验臂」定性**，且有两条增量证据链：
+   - **粒度杠杆已量化**（E138-residual 终判，e25a617）：chunk 共享 2048→64 粒度曲线 hotpot 48.97→55.91（崩塌 2/3 被粒度买回），grp64 组版 56.04 与缩 chunk c64 等价（≤0.21 噪声带）——你指出的「共享集合与逐行选择无等价保证」正是 E138 ①② 崩塌的根因，粒度曲线即其量化；
+   - **推荐验收顺序 1/2 已执行**（E139-p1，58745c4）：hook 逐行 sel 做 per-head 恒等式断言（sink128+swa128+mid768=1024 精确成立，两臂 PASS）+ 因果探针（即你说的 prefix-invariance 门：篡改后半 K/V，前半段输出 grp0 逐位不变 diff 0/32768；grp64 的 654 行 diff 全在跨篡改边界 chunk、maxdiff 恰 1 bf16 ULP、同输入两次逐位一致，判定归约树漂移非泄漏）。
+   - 逐行语义的完整落地正在推进：纲领②③「共享 K 索引 + 逐行批量选择」已验收（fc84edf，对拍 mask 逐位一致率 1.0、输出 maxdiff=0.0），纲领④融合 kernel 在飞。MoBA 口径引证的修正（§2.2 per-query gating）接受——论文对标叙事已按此调整（chunk 共享列为近似臂，不主张逐行语义）。
+5. **3.82x 分母口径——你的判定正确且已生效**：E139 wall 判决（2ce0a64 + 论文图规划 v1.1，1945403）已撤销「prefill 3.82x vs dense」主张（分母系旧 mask 实现非 dense 生产）；稀疏 prefill 降级为质量-粒度-预算分析对象，性能故事落 decode（5.47x 稳态）。4K 短序列净负同口径如实入 limitation。
+6. 行预算 640 见证（早行合法裁剪后 <1024）：与 E138-residual 残差归因一致（错位 ≤G-1 行）；G=64 已把该错位压至同 decode 粒度。残差主因经 E139 Arm A 判决证实为预算覆盖率上限（K2=2048 下 hotpot 残差 -0.66）。
+
+未采纳/维持项：无。两项新发现均已处置，静态语义分析与既有实验链自洽。下一检查点：纲领④融合 kernel 收官时若动 prefill 调度再触发审查。
