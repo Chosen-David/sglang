@@ -14,7 +14,7 @@
 % we propose+命名+key advantage → 部署声明）。
 % =====================================================================
 \begin{abstract}
-扩展大语言模型的有效上下文长度需要突破 KV 缓存带宽的制约：在 131K 上下文的 8B 模型上，decode 每步的全量 KV 读取远超计算量，成为吞吐上限。现有方案面临一个困难权衡：training-free 的稀疏索引依赖下界近似，在长上下文检索任务上质量崩塌（我们实测 Quest 在 RULER 16K 的 multikey\_3 上仅 21 分）；训练类索引（DSA）引入可学习参数与上千步 warm-up 成本，且选择质量依赖训练分布。本文提出 PSI，一个两级 training-free 稀疏注意力索引：第一级用 4bit 量化子空间上的块级 minmax \textbf{上界}粗筛保证子空间口径下无漏选，第二级用 far/near 分区的 token 级精筛保护远端关键 token 不被近端高分挤出。在 Qwen3-8B 的 LongBench 13 任务上，PSI 与 FullKV 精度持平（50.78，逐样本配对 bootstrap 95\% CI 含 0）；far-heavy 多跳任务 musique 达 34.71，为全部方法（含 FullKV）最高（单任务 CI 亦含 0）。RULER 上合成 needle 参照臂 87.93，主臂 85.83，差距集中于 far-dense 词表任务且长度稳定，分区增益 16K 转正（+0.91），双臂按任务形态并报。速度侧，在精度持平前提下选择链相对 dense 打分取得 1.46$\times$@32K $\rightarrow$ 5.09$\times$@128K 的 kernel 级加速；e2e 三臂对照（同机同协议，30B-A3B）如实报告：Quest 全形状 e2e 占优（TP2 64K total 62.1s 对 PSI 142.0s），PSI 的相对优势点在 decode 段索引开销（对 Quest 1.85$\times$），速度主张据此收窄至 kernel、计算量与存储三层，prefill 索引构建是 e2e 净兑现的当前边界。全部精度代价与负结果在同机同协议下如实报告。PSI 已在 sglang 生产形态（paged 寻址、增量索引、CUDA graph）下集成。
+扩展大语言模型的有效上下文长度需要突破 KV 缓存带宽的制约：在 131K 上下文的 8B 模型上，decode 每步的全量 KV 读取远超计算量，成为吞吐上限。现有方案面临一个困难权衡：training-free 的稀疏索引依赖下界近似，在长上下文检索任务上质量崩塌（我们实测 Quest 在 RULER 16K 的 multikey\_3 上仅 21 分）；训练类索引（DSA）引入可学习参数与上千步 warm-up 成本，且选择质量依赖训练分布。本文提出 PSI，一个两级 training-free 稀疏注意力索引：第一级用 4bit 量化子空间上的块级 minmax \textbf{上界}粗筛保证子空间口径下无漏选，第二级用 far/near 分区的 token 级精筛保护远端关键 token 不被近端高分挤出。在部署口径（sink4/swa128 强制保留、decode-only 稀疏 + dense prefill、$\alpha{=}0.25/\beta{=}0.0625/\gamma{=}0.625$、$K_2{=}1024$）下：Qwen3-8B 的 LongBench-EN 13 任务 50.65 对 dense 锚 50.36 持平（$\beta{=}0.125$ 同口径 51.25）；RULER 32K/64K/128K 三档 59.29/48.85/45.73 对 FullKV 59.38/48.54/46.43（保持率 98--99\%，64K 反超锚 +0.31），同预算下领先全部 training-free baseline——JSSA 58.7（budget$=$1024 同预算）、AsyncTLS 50.09（其最终 attention 覆盖 8$\times$ 词元）、Quest 42.85；半预算 $K_2{=}512$ 仍胜 AsyncTLS +5.9，代价集中于词枚举任务（cwe $-43$，如实披露），$K_2{=}384$ 为悬崖下界。分区 vs 单池增益随上下文长度单调增长（32/64/128K：$+0.93/+3.58/+6.47$，同预算单池臂）；跨规模 Qwen3-32B 成立（50.03 对锚 52.22），跨模型族 Llama-3.1-8B 在 $\beta{=}0.125$ 成立（86.19 对锚 85.40），$\beta{=}0.0625$ 甜点为 Qwen3 特异（Llama $-2.31$，作为边界披露）。速度侧，在精度持平前提下选择链相对 dense 打分取得 1.46$\times$@32K $\rightarrow$ 5.09$\times$@128K 的 kernel 级加速；e2e 三臂对照（同机同协议，30B-A3B）如实报告：Quest 全形状 e2e 占优（TP2 64K total 62.1s 对 PSI 142.0s），PSI 的相对优势点在 decode 段索引开销（对 Quest 1.85$\times$），速度主张据此收窄至 kernel、计算量与存储三层，prefill 索引构建是 e2e 净兑现的当前边界。全部精度代价与负结果在同机同协议下如实报告。PSI 已在 sglang 生产形态（paged 寻址、增量索引、CUDA graph）下集成。
 \end{abstract}
 
 % =====================================================================
@@ -214,6 +214,42 @@ PSI 在 sglang 生产形态下实现，选择链由四个 kernel 组件构成：
 % MoBA 3.1 式：In this section, we conduct... to validate...
 本节在双基准上验证 PSI 的质量：RULER~\cite{ruler}（3 长度 $\times$ 11 任务 $\times$ n=100，NVIDIA 官方预生成）考察长上下文检索，LongBench~\cite{longbench} 13 子集考察真实任务混合口径。对比方法中，TIA 是与本文同一管线下的第一代 training-free 块上界索引器（块 min/max 上界 + 4bit 子空间量化，无分区预算与感知 gate），作为 PSI 最直接的结构消融对照；Quest 为下界近似的代表；KV 压缩三 baseline 走统一 monkeypatch 管线。全部实验用 Qwen3-8B~\cite{qwen3} 真实权重；PSI 用终局配置（sink/swa 强制保留不计入预算的严格口径）。主表臂的 L1 块级上界在全维 128 维计算（无 4bit 量化），L2 token 级细筛在 tail32 子空间 4bit 量化。主臂配置另做了 tail32-L1 的 13 任务配对全量（50.53 对 50.78，配对差 $-0.25$，95\% CI $[-0.57, +0.06]$ 含 0；逐样本 bootstrap $B{=}10000$）：L1 上界维度对主表结论统计不可分——但方向性结构存在，far 检索最重的 hotpotqa 掉 1.81 分（$\gamma{=}0.625$ 的紧 far 预算放大上界信息损失），代码与摘要任务差在 0.3 分内；早先 $\gamma{=}0.125$ 参照臂的成对校准（54.83 对 54.43、33.22 对 34.76）与之相容：维度敏感性随 far 预算收紧而增大。主表采用全维 L1 口径，tail32-L1 为同预算消融臂（其对 FullKV 差 $+0.16$，逐样本 bootstrap 均值口径、CI 含 0，持平口径在全维与 tail32 两种 L1 下都成立）。
 
+\subsection{部署口径：sink4、decode-only、长上下文}\label{sec:caliber}
+
+从本小节起到 \S\ref{sec:abl} 前的各表属 4K--16K 多方法协议的部署前配置族测量，保留为多方法对照记录。部署配置在三个轴上与之不同，下列部署主张全部按新口径全量重测：(i) 强制保留几何为 sink4/swa128（sink128 时代数据不再进入部署主张）；(ii) 运行模式为 decode-only 稀疏 + dense prefill；(iii) 预算配比为 $\alpha{=}0.25/\beta{=}0.0625/\gamma{=}0.625$、$K_1{=}128/K_2{=}1024$——$\beta$ 值由 32K 三点曲线选举（$\beta{=}0.125$ 58.30、$\beta{=}0.0625$ \textbf{59.29}、$\beta{=}0.03125$ 58.07，倒 U 且 $+0.99/-1.22$ 不对称超任务级噪声带），相对 $\beta{=}0.125$ 近池减半（16$\to$8 页、640$\to$320 词元）、far 池翻倍（120 页、572 词元）。
+
+\begin{table}[h]\centering
+\caption{部署口径 RULER 长上下文主表（string\_match\_all $\times$100，每格 n=100，Qwen3-8B，sink4/swa128，decode-only 稀疏；PSI $=$ $\alpha{=}0.25$、$\beta{=}0.0625$、$\gamma{=}0.625$、$K_1{=}128$、$K_2{=}1024$，最终 attention 覆盖 1024 词元加强制区；JSSA budget$=$1024 为同预算行；AsyncTLS kt$=$512 为打分侧预算、其最终 attention 覆盖 128 块 $\times$ 64 词元 $=$ 8192 词元（PSI 的 8$\times$）；Quest@1024 页粒度选取；单池臂为同预算 $\alpha{=}0$ 参照；标 ``--'' 的格为该系统在此协议下尚未测量）。}
+\label{tab:rulerlong}
+\begin{tabular}{lccc}
+\toprule
+ & 32K & 64K & 128K \\
+\midrule
+FullKV & \textbf{59.38} & \textbf{48.54} & \textbf{46.43} \\
+PSI $\beta{=}.0625$（$K_2{=}1024$） & 59.29 & 48.85 & 45.73 \\
+PSI $\beta{=}.125$（$K_2{=}1024$） & 58.30 & 48.05 & 46.02 \\
+PSI 单池（同预算） & 58.37 & 45.27 & 39.25 \\
+\addlinespace
+Quest@1024 & 42.85 & 26.25 & 19.33 \\
+AsyncTLS（kt$=$512） & 50.09 & 34.11 & -- \\
+JSSA（budget$=$1024） & 58.70 & -- & -- \\
+\addlinespace
+PSI $K_2{=}512$（半预算） & 56.00 & -- & -- \\
+PSI $K_2{=}384$（下界探针） & 15.00 & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+表~\ref{tab:rulerlong} 的四层解读。其一，\textbf{保持率}：主臂对 FullKV 三档为 $-0.09$/$+0.31$（反超）/$-0.70$（保持率 98.5--99.8\%），对 $\beta{=}0.125$ 同胞臂在 64K 档 +0.80——far 池翻倍随上下文增长兑现，与分区增益同一长度梯度机制。其二，\textbf{baseline}：同 budget$=$1024 下 PSI 领先 JSSA（58.7）+0.59（噪声带边缘）、Quest +16.4；对 AsyncTLS 的对比按构造分两层——AsyncTLS 打分花 kt$=$512 但 attention 覆盖 8192 词元，其 50.09 是 8$\times$ 覆盖点（64K 档 34.11，PSI 领先 $+14.7$），诚实配对行是 PSI $K_2{=}512$：56.00，胜 AsyncTLS $+5.91$。其三，\textbf{半预算代价剖面}：$K_2{=}512$ 的损失全部集中于词枚举任务 cwe（32.5，$-43.4$），niah 家族零损（single 100/99/94、mk1 97、mk2 75 均 $\ge$ 全预算臂）且 multivalue/fwe 反升——far 配额挤兑是任务形态代价，如实披露；$K_2{=}384$ 崩至 15.00，预算下界锁定 512 与 384 之间。其四，\textbf{分区}：同预算单池臂落后 $0.93/3.58/6.47$（32K 同机配对），两级分区价值随上下文长度单调增长——部署恰是收益区。
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.98\linewidth]{figures/fig4_partition_gain.pdf}
+\caption{部署口径下 RULER 的分区价值与 baseline 长度轨迹（11 任务，每格 n=100，Qwen3-8B，sink4/swa128）。(a) 分区臂（$\beta{=}.0625$、$K_2{=}1024$）对同预算单池臂：增益随上下文长度单调增长（32/64/128K：$+0.93/+3.58/+6.47$）。(b) 三档 baseline 轨迹：Quest 与 AsyncTLS 随长度崩塌而 PSI 贴住 FullKV（Quest 42.85$\rightarrow$19.33；AsyncTLS 50.09$\rightarrow$34.11，其 128K 格未测）。}
+\label{fig:partitionlong}
+\end{figure}
+
+同口径 LongBench 家族（31.5K 截断）：EN-13 50.65（$\beta{=}.0625$）/ 51.25（$\beta{=}.125$）对 dense 锚 50.36；ZH-8 45.65/46.00；v2（503 MCQ）32.21/32.41 对锚 32.21（$\beta{=}.0625$ 臂与锚同分）；分区增益 EN $+0.38$（同机）/ ZH $+0.36$ / v2 $+2.59$。四个 $\beta{=}.0625$ 臂仅在噪声带边缘通过（ZH $-0.36$、EN $-0.60$、128K $-0.29$、32B $-0.61$），作边缘通过披露而非静默进位。跨规模：Qwen3-32B RULER-32K 50.03（$\beta{=}.0625$；$\beta{=}.125$ 50.64）对锚 52.22，其 mq/mv/mk3 退化在 dense 锚同任务同样出现（模型侧而非稀疏致伤）。跨模型族：Llama-3.1-8B 在 $\beta{=}0.125$ 达 86.19 对锚 85.40（$+0.79$）；$\beta{=}0.0625$ 甜点不迁移（$-2.31$，rotate\_half GQA 下近池减半代价放大），作模型族边界披露。跨系统预算账：PSI 最终 attention 消耗 1024 词元加强制区（共 1156），为集合中最小最终覆盖预算；L1 粗筛成本约 258 MAC/token（DSA 类学习投影的 1/32），索引存储 336B/token（约为 Quest $\sim$1KB/token 的 1/3）。
+
 \begin{table}[h]\centering
 \caption{RULER 终表（string\_match\_all $\times$100；PSI 为分区配置：(minmax, avg) 打分、$\alpha{=}0.125$、$\beta{=}0.25$、$\gamma{=}0.125$、$K_2{=}1024$，即合成 needle 形态最优的参照配置——LongBench 主表臂为 $\beta{=}0.375/\gamma{=}0.625$，由端到端网格选举产生（\S\ref{sec:abl}），其在 RULER 的同表重扫为总 AVG 85.83（$-$2.10 集中于 cwe/fwe 词表任务，32K 档外推为 $-$2.15 长度稳定，其余任务基本持平——7 个逐位、multikey\_3/multivalue 微伤 $\leq$3 分，见正文）；PSI-单池 = 同预算 $\alpha{=}0$ 单池消融臂；32K$^\dagger$ 行用 NVIDIA 官方生成器自产数据（essay 语料与 4K--16K 同源，n=100，niah\_single 系上界家族满分校验管线，Quest 91--98），多数任务进入全族退化区（见正文）；该档 TIA 与 PSI-单池 11 任务逐位同分——同管线同预算下两条命令路径的输出逐字节一致（双卡独立运行验证），系算法等价复现而非誊写错误；总 AVG 保持 4K--16K 三长度口径）。}
 \begin{tabular}{llllll}
@@ -372,7 +408,7 @@ e2e 三臂对照终值（Qwen3-30B-A3B，H20，同机同协议同 env：PSI vs Q
 % =====================================================================
 \section{局限与未来工作}
 
-精度侧：LongBench 主表臂对 FullKV 差 +0.42（13 任务 8 胜 5 负、负向均 $\leq$1 分）——13 任务无 seed 重复，$+0.42$ 的逐样本配对 bootstrap 95\% CI $[-0.18, +1.02]$ 含 0（held-out 11 任务 $+0.08$，$[-0.46, +0.60]$），精度主张为持平级而非显著领先；双基准最优臂分属两套 $(\beta,\gamma)$ 配置（LongBench 真实任务形态 $\beta{=}0.375/\gamma{=}0.625$，RULER 合成 needle 形态 $\beta{=}0.25/\gamma{=}0.125$）——主臂 $\gamma{=}0.625$ 在 RULER 的同表重扫（33 臂全量）为 85.83（$-$2.10；32K 档六臂补点外推 $-$2.15，长度稳定），伤害集中于 far-dense 词表任务 cwe（82.0/68.6/55.5，绝对分 4K--16K 随长度退化、32K 回升至 61.9），其余 9 任务中 7 个逐位持平、multikey\_3/multivalue 微伤 $\leq$3 分：统一性已验证并如实报告，部署口径为双臂按任务形态二选一；RULER 最优臂 87.93 仍低于 FullKV 88.71（$-$0.78），也低于同门第一代 TIA 的 88.35（$-$0.42），残余代价集中于 multikey\_3（16K：75--80 vs TIA 89）——4bit 预算粒度在超多干扰 key 任务上主导。速度侧：e2e 三臂对照下 PSI 全形状不敌 Quest 与 dense（TP2 142.0s 对 62.1s/106.1s），损失集中在 prefill 两级索引构建（136.0s 对 Quest 一级索引 54.4s）；decode 段对 Quest 1.85$\times$ 的索引开销优势是 e2e 层唯一兑现点；跨请求批量化（3.8$\times$ 已验证）与 prefill 索引构建的 kernel 化为两条修复路径。规模与模型族侧：全部结论在 Qwen3 单模型族上取得——同族 32B 上子空间机制强度递减（entry recall 口径 0.66--0.87 vs 全维差距 $\le$0.08，机制存在、如实报告），但跨模型族外推未验证：旋转对机理依赖 rotate\_half（GPT-NeoX 式）布局下「尾维 = 低频完整对」的对应；interleaved（GPT-J 式）布局下同一映射不成立，须重推维度选择；无 RoPE 或部分旋转模型上「位置稳定低频子空间」这一前提本身待检验。MLA 架构的 latent 索引（DeepSeek 系）是 future work。上界无漏选的性质只在「子空间打分口径」内成立，跨口径漏选已有静态 pair 臂类实证（重放增益不可外推）。gate 的 far 统计为 per-layer 单值，混合 batch 下跨请求污染（生产语义应 per-row）。
+精度侧：LongBench 主表臂对 FullKV 差 +0.42（13 任务 8 胜 5 负、负向均 $\leq$1 分）——13 任务无 seed 重复，$+0.42$ 的逐样本配对 bootstrap 95\% CI $[-0.18, +1.02]$ 含 0（held-out 11 任务 $+0.08$，$[-0.46, +0.60]$），精度主张为持平级而非显著领先；双基准最优臂分属两套 $(\beta,\gamma)$ 配置（LongBench 真实任务形态 $\beta{=}0.375/\gamma{=}0.625$，RULER 合成 needle 形态 $\beta{=}0.25/\gamma{=}0.125$）——主臂 $\gamma{=}0.625$ 在 RULER 的同表重扫（33 臂全量）为 85.83（$-$2.10；32K 档六臂补点外推 $-$2.15，长度稳定），伤害集中于 far-dense 词表任务 cwe（82.0/68.6/55.5，绝对分 4K--16K 随长度退化、32K 回升至 61.9），其余 9 任务中 7 个逐位持平、multikey\_3/multivalue 微伤 $\leq$3 分：统一性已验证并如实报告，部署口径为双臂按任务形态二选一；RULER 最优臂 87.93 仍低于 FullKV 88.71（$-$0.78），也低于同门第一代 TIA 的 88.35（$-$0.42），残余代价集中于 multikey\_3（16K：75--80 vs TIA 89）——4bit 预算粒度在超多干扰 key 任务上主导。部署口径（\S\ref{sec:caliber}）的精度边界：四个 $\beta{=}0.0625$ 臂仅噪声带边缘通过（ZH $-0.36$、EN $-0.60$、128K $-0.29$、32B $-0.61$，对 $\beta{=}0.125$ 同胞臂方向一致向下）——甜点为 Qwen3 族结果，$\beta{=}0.125$ 并行数据保留披露而非静默选取；$\beta{=}0.0625$ 迁移 Llama-3.1-8B 失败（$-2.31$，rotate\_half GQA 下近池减半放大），跨模型族主张建立在 $\beta{=}0.125$ 行（$+0.79$）上；半预算 $K_2{=}512$ 行以 cwe $-43.4$（词枚举任务 far 配额挤兑）换取对 AsyncTLS $+5.91$ 领先，$K_2{=}384$ 结构性崩塌；AsyncTLS 64K/128K 与 FASA RULER-32K 格为测量中，JSSA 领先 $+0.59$ 贴噪声带——长上下文 baseline 主张为当前快照而非闭合扫描。速度侧：e2e 三臂对照下 PSI 全形状不敌 Quest 与 dense（TP2 142.0s 对 62.1s/106.1s），损失集中在 prefill 两级索引构建（136.0s 对 Quest 一级索引 54.4s）；decode 段对 Quest 1.85$\times$ 的索引开销优势是 e2e 层唯一兑现点；跨请求批量化（3.8$\times$ 已验证）与 prefill 索引构建的 kernel 化为两条修复路径。规模与模型族侧：全部结论在 Qwen3 单模型族上取得——同族 32B 上子空间机制强度递减（entry recall 口径 0.66--0.87 vs 全维差距 $\le$0.08，机制存在、如实报告），但跨模型族外推未验证：旋转对机理依赖 rotate\_half（GPT-NeoX 式）布局下「尾维 = 低频完整对」的对应；interleaved（GPT-J 式）布局下同一映射不成立，须重推维度选择；无 RoPE 或部分旋转模型上「位置稳定低频子空间」这一前提本身待检验。MLA 架构的 latent 索引（DeepSeek 系）是 future work。上界无漏选的性质只在「子空间打分口径」内成立，跨口径漏选已有静态 pair 臂类实证（重放增益不可外推）。gate 的 far 统计为 per-layer 单值，混合 batch 下跨请求污染（生产语义应 per-row）。
 
 % =====================================================================
 % 附录
