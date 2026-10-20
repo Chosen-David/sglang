@@ -266,6 +266,15 @@ class TLIProfile:
         # 多跳 ~0.015-0.026）。----
         self.dyn_far_gate: bool = _env_bool("SGLANG_TLI_DYN_GATE", False)
         self.dyn_far_thresh: float = _env_float("SGLANG_TLI_DYN_GATE_THRESH", 0.01)
+        # ---- E155b 边界页保送（对齐 HF tli_boundary_bypass 默认 true
+        # 新口径，2026-10-20 双仓审计补齐）：sink/swa 跨界页退出 L1
+        # 竞争池直接 OR 进候选（不占 K1 配额、词元照常 L2 竞争），池
+        # 区间端点收缩。false 逐位回旧口径（对拍/消融臂）。sglang
+        # sink 恒整页对齐（sink_blocks 块数口径）→ sink 跨界页不触发，
+        # 仅 swa 跨界页生效（decode 非对齐 S 步进 ~63/64 概率常见）。
+        # 单池（α=0 或 β=0）不消费（HF 同——CTRL 单池旧口径）。----
+        self.boundary_bypass: bool = _env_bool(
+            "SGLANG_TLI_BOUNDARY_BYPASS", True)
 
     def subspace_idx(self, head_dim: int) -> list[int]:
         """position-stable 子空间维度索引（Qwen3 rotate_half 两半的尾维）。

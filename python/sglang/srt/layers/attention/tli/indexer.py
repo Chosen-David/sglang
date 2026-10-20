@@ -272,7 +272,54 @@ class TLIIndexer:
             else:
                 nt_near = min(int(nb_near * bs * p.gamma), K2_mid)
             far_budget = max(0, K2_mid - nt_near)
+        # ---- E155b boundary_bypass（对齐 HF compute_mask L2237-2305，
+        # 2026-10-20 双仓审计补齐）：swa 跨界页（swa_lo_tok % bs != 0 时
+        # 的 floor 块）退出双池竞争、OR 进 L1 候选（不占 K1 配额、词元
+        # 照常 L2 竞争）；池端点收缩。sglang sink 恒整页对齐
+        # （sink_blocks 块数口径）→ sink 跨界页条件恒 False（保留判定
+        # 镜像 HF 结构）。仅 e64 消费（单池不消费，HF 同）。端点
+        # fail-closed 断言镜像 HF L2257-2276（保送页必在池端点，未来
+        # 几何变化破坏该假设时显式报错而非静默多收缩整段池）。----
+        bypass_blks: tuple = ()
+        far_pool_lo, far_pool_hi = far_lo_blk, far_hi_blk
+        near_pool_lo, near_pool_hi = near_blks, swa_lo_blk
+        if e64 and getattr(p, "boundary_bypass", True):
+            _bp = []
+            if sink_tok % bs != 0:
+                _bp.append(far_lo_blk)
+            _swa_lo_tok = max(0, S - swa_tok)
+            if _swa_lo_tok % bs != 0:
+                _cb = _swa_lo_tok // bs
+                if _cb >= far_lo_blk:
+                    _bp.append(_cb)
+            bypass_blks = tuple(_bp)
+            for _b in _bp:
+                if far_pool_lo <= _b < far_pool_hi:
+                    if _b == far_pool_lo:
+                        far_pool_lo = _b + 1
+                    elif _b == far_pool_hi - 1:
+                        far_pool_hi = _b
+                    else:
+                        raise ValueError(
+                            f"boundary bypass 页 {_b} 非 far 池端点 "
+                            f"[{far_pool_lo},{far_pool_hi})——池收缩几何"
+                            "假设被破坏（对齐 HF 同款 fail-closed）")
+                if near_pool_lo <= _b < near_pool_hi:
+                    if _b == near_pool_hi - 1:
+                        near_pool_hi = _b
+                    elif _b == near_pool_lo:
+                        near_pool_lo = _b + 1
+                    else:
+                        raise ValueError(
+                            f"boundary bypass 页 {_b} 非 near 池端点 "
+                            f"[{near_pool_lo},{near_pool_hi})——池收缩几何"
+                            "假设被破坏（对齐 HF 同款 fail-closed）")
         return {
+            "bypass_blks": bypass_blks,
+            "far_pool_lo": far_pool_lo,
+            "far_pool_hi": far_pool_hi,
+            "near_pool_lo": near_pool_lo,
+            "near_pool_hi": near_pool_hi,
             "e64": e64,
             "nblk": nblk,
             "sink_tok": sink_tok,
@@ -773,24 +820,27 @@ class TLIIndexer:
         if e64:
             # ---- E64 L1 双池：far/near 独立块配额（严格无保底）----
             nb_near, nb_far = r["nb_near"], r["nb_far"]
+            # E155b：池区间用 bypass 收缩后的端点（跨界页退出竞争）
+            far_pool_lo, far_pool_hi = r["far_pool_lo"], r["far_pool_hi"]
+            near_pool_lo, near_pool_hi = r["near_pool_lo"], r["near_pool_hi"]
             # far 池分数源：far_method（avg=块均值 / minmax=块上界）
             src_far = sc_avg if (p.far_method == "avg" and sc_avg is not None) else sc1
-            sc_far = src_far[..., far_lo_blk:far_hi_blk]
+            sc_far = src_far[..., far_pool_lo:far_pool_hi]
             i_f = (
                 torch.topk(sc_far, min(nb_far, sc_far.shape[-1]), dim=-1).indices
-                + far_lo_blk
+                + far_pool_lo
             )  # [1, Hkv, nb_far']
             # near 池分数源：near_method；上界 swa_lo_blk（swa 块排除出双池）
             src_near = (
                 sc1 if (p.near_method == "minmax" or sc_avg is None) else sc_avg
             )
-            sc_near = src_near[..., near_blks:swa_lo_blk]
+            sc_near = src_near[..., near_pool_lo:near_pool_hi]
             if sc_near.shape[-1] > 0:
                 i_n = (
                     torch.topk(
                         sc_near, min(nb_near, sc_near.shape[-1]), dim=-1
                     ).indices
-                    + near_blks
+                    + near_pool_lo
                 )  # [1, Hkv, nb_near']
             else:
                 i_n = i_f[..., :0]  # near 池空（mid 不足一块）→ 不选
@@ -798,6 +848,10 @@ class TLIIndexer:
             blk_onehot.scatter_(
                 1, torch.cat([i_f[0], i_n[0]], dim=-1), True
             )
+            # E155b：保送页 OR 进 L1 候选（全 head 广播；indices 不含保送
+            # 页 → 不占 K1 配额；其 token 在 L2 细筛按 far/near 配额竞争）
+            for _b in r["bypass_blks"]:
+                blk_onehot[:, _b] = True
         else:
             # ---- 单池：far_method 独占全管线（E109a 修复口径）----
             sc_pool = (
@@ -1551,6 +1605,28 @@ class TLIIndexer:
                 in_near_blk = (blk_id.view(1, -1) >= near_blks_r.view(-1, 1)) & (
                     blk_id.view(1, -1) < swa_lo_blk_r.view(-1, 1)
                 ) & causal_blk
+                # E155b boundary_bypass per-row（对齐 HF compute_mask
+                # L2237-2305 的批量推广）：swa 跨界页 = floor((S_r−swa)/bs)
+                # （swa_lo_tok_r % bs != 0 时），退出双池竞争（掩码排除 ≡
+                # HF 池端点收缩的选择语义）+ OR 进 per-head 候选（全 head
+                # 广播，不占 K1 配额）。sglang sink 恒整页对齐 → sink
+                # 跨界页不触发。掩码排除比端点收缩更普适（退化短序列时
+                # bypass 页可能落在 far 池内任意端，二者选择集等价）。
+                bp_blk_r = None
+                if getattr(p, "boundary_bypass", True):
+                    _swa_lo_tok_r = (S_r - swa_tok).clamp(min=0)  # [n]
+                    _cb_r = _swa_lo_tok_r // bs
+                    _bp_on = (
+                        (_swa_lo_tok_r % bs != 0)
+                        & (_cb_r >= p.sink_blocks)
+                        & (_cb_r <= t_c // bs)
+                    )  # [n]（上限当前块：因果域防御）
+                    is_bp_blk = (blk_id.view(1, -1) == _cb_r.view(-1, 1)) & (
+                        _bp_on.view(-1, 1)
+                    )  # [n, nblk]
+                    in_far_blk = in_far_blk & ~is_bp_blk
+                    in_near_blk = in_near_blk & ~is_bp_blk
+                    bp_blk_r = is_bp_blk
                 # far 池 topk（静态宽 nb_far；池不足/非 far 位 -inf → keep 剔除）
                 src_far = (
                     sc_avg if (p.far_method == "avg" and sc_avg is not None) else sc1
@@ -1586,6 +1662,10 @@ class TLIIndexer:
                 oh_n = torch.zeros(n, Hkv, nblk, dtype=torch.bool, device=device)
                 oh_n.scatter_(2, i_n, keep_n)
                 onehot_h = oh_f | oh_n
+                # E155b：保送页 OR 进 per-head 候选（全 head 广播；HF
+                # topk_mask[..., _b]=True 同款，不占 K1 配额）
+                if bp_blk_r is not None:
+                    onehot_h = onehot_h | bp_blk_r.unsqueeze(1)
                 onehot = onehot_h.any(1)  # [n, nblk] 候选并集
             else:
                 # ---- 单池：far_method 独占 + 当前块 per-row 强制 inf ----
@@ -2384,6 +2464,24 @@ class TLIIndexer:
             in_near_blk = (blk_id.view(1, -1) >= near_blks_t.view(-1, 1)) & (
                 blk_id.view(1, -1) < swa_lo_blk_t.view(-1, 1)
             ) & valid_blk
+            # E155b boundary_bypass per-row（对齐 HF compute_mask
+            # L2237-2305；decode 非对齐 S 步进 ~63/64 概率触发）：
+            # swa 跨界页退出双池竞争（掩码排除）+ OR 进 per-head 候选。
+            bp_blk_t = None
+            if getattr(p, "boundary_bypass", True):
+                _swa_lo_tok_t = (S_t - swa_tok).clamp(min=0)  # [n]
+                _cb_t = _swa_lo_tok_t // bs
+                _bp_on_t = (
+                    (_swa_lo_tok_t % bs != 0)
+                    & (_cb_t >= p.sink_blocks)
+                    & (_cb_t <= t_t // bs)
+                )  # [n]（上限当前块：因果域防御）
+                is_bp_blk_t = (blk_id.view(1, -1) == _cb_t.view(-1, 1)) & (
+                    _bp_on_t.view(-1, 1)
+                )  # [n, NBLK_CAP]
+                in_far_blk = in_far_blk & ~is_bp_blk_t
+                in_near_blk = in_near_blk & ~is_bp_blk_t
+                bp_blk_t = is_bp_blk_t
             # E155d：nb 显式（nt_near_pages）覆盖 β 规则
             if getattr(p, "nt_near_pages", None) is not None:
                 nb_near = max(0, int(p.nt_near_pages))
@@ -2419,6 +2517,10 @@ class TLIIndexer:
             oh_n = torch.zeros(n, Hkv, NBLK_CAP, dtype=torch.bool, device=device)
             oh_n.scatter_(2, i_n, keep_n)
             onehot_h = oh_f | oh_n
+            # E155b：保送页 OR 进 per-head 候选（全 head 广播，不占 K1
+            # 配额；HF topk_mask[..., _b]=True 同款）
+            if bp_blk_t is not None:
+                onehot_h = onehot_h | bp_blk_t.unsqueeze(1)
             onehot = onehot_h.any(1)  # [n, NBLK_CAP] 候选并集
         else:
             # ---- 单池：far_method 独占 + 当前块 per-row 强制 inf ----
