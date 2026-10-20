@@ -236,7 +236,12 @@ class TLIIndexer:
         # 推 → swa 被扣两次）；单池 (α=0 或 β=0) 分支保持旧式逐位不变。
         if e64:
             mid_len = max(0, S - sink_tok - swa_tok)
-            near_len_dyn = max(bs, int(p.alpha * mid_len))
+            # E155d：near 区宽显式（nt_near_len）时覆盖 α 规则
+            # （对齐 HF tli_indexer L1067-1071）
+            if getattr(p, "nt_near_len", None) is not None:
+                near_len_dyn = max(bs, int(p.nt_near_len))
+            else:
+                near_len_dyn = max(bs, int(p.alpha * mid_len))
             near_base = S - swa_tok
         else:
             near_len_dyn = swa_tok
@@ -248,10 +253,24 @@ class TLIIndexer:
         swa_lo_tok = max(0, S - swa_tok)
         nb_near = nb_far = nt_near = far_budget = K2_mid = 0
         if e64:
-            nb_near = max(1, int(round(p.k1_blocks * p.beta)))
+            # E155d：nb 显式（nt_near_pages）时覆盖 β 规则
+            # （对齐 HF tli_indexer L2151-2153：geo 下 nb_near = max(0, int(nb))）
+            if getattr(p, "nt_near_pages", None) is not None:
+                nb_near = max(0, int(p.nt_near_pages))
+            else:
+                nb_near = max(1, int(round(p.k1_blocks * p.beta)))
             nb_far = max(0, p.k1_blocks - nb_near)
             K2_mid = max(0, p.token_budget - sink_tok - (S - swa_lo_tok))
-            nt_near = min(int(nb_near * bs * p.gamma), K2_mid)
+            # E155d：nt 显式（nt_near_tokens）时覆盖 γ 规则
+            # （对齐 HF tli_indexer L2536-2538）
+            if getattr(p, "nt_near_tokens", None) is not None:
+                nt_near = min(int(p.nt_near_tokens), K2_mid)
+            elif getattr(p, "gamma", 1.0) is None:
+                # γ-off / nt=off：消费端走自由竞争分支（配额不消费），
+                # 置 0 防 None 参与算术
+                nt_near = 0
+            else:
+                nt_near = min(int(nb_near * bs * p.gamma), K2_mid)
             far_budget = max(0, K2_mid - nt_near)
         return {
             "e64": e64,
@@ -268,6 +287,8 @@ class TLIIndexer:
             "nt_near": nt_near,
             "far_budget": far_budget,
             "K2_mid": K2_mid,
+            # E122/E155d：γ-off / nt=off 自由竞争（L2 单池，消费端分支键）
+            "gamma_off": getattr(p, "gamma", 1.0) is None,
         }
 
     # ---- M9：L2 精筛表示（选择 idx2 / PCA 投影，统一出口）----
@@ -837,6 +858,28 @@ class TLIIndexer:
         fine = fine.masked_fill(
             ~blk_onehot.repeat_interleave(bs, dim=-1)[:, :S], float("-inf")
         )
+        if e64 and r["gamma_off"]:
+            # ---- E122/E155d γ-off / nt=off 自由竞争：L1 双池照旧（nb 已
+            # 生效，fine 已含 per-head L1 掩码），L2 取消 near/far 配额
+            # 分割——mid 区 [sink_tok, swa_lo_tok) 一体 topk（对齐 HF
+            # tli_indexer L2498-2510 默认路径：mid_p 单次 topk + sink/swa
+            # 正交强制直接置位）。-inf 槽位哨兵 S（S3 修复口径，与下方
+            # γ 分支同款）。----
+            K2_mid = r["K2_mid"]
+            mid_f = fine[:, sink_tok:swa_lo_tok]
+            k2_free = min(K2_mid, mid_f.shape[-1])
+            i_m_raw = torch.topk(mid_f, k2_free, dim=-1).indices
+            sc_m = torch.gather(mid_f, 1, i_m_raw)
+            i_m = torch.where(
+                sc_m > float("-inf"), i_m_raw + sink_tok, S
+            )  # [Hkv, k2_free]（k2_free=0 时 topk 空，已验证安全）
+            sink_pos = torch.arange(sink_tok, device=device).unsqueeze(0).expand(Hkv, -1)
+            swa_pos = (
+                torch.arange(max(0, t - swa_tok + 1), t + 1, device=device)
+                .unsqueeze(0)
+                .expand(Hkv, -1)
+            )
+            return torch.cat([i_m, sink_pos, swa_pos], dim=-1)
         if e64:
             # ---- E64 L2：mid 预算按 γ 切分（sink/swa 正交不占预算）----
             K2_mid, nt_near, far_budget = r["K2_mid"], r["nt_near"], r["far_budget"]
@@ -1432,11 +1475,24 @@ class TLIIndexer:
         # 保证 swa/sink 段满额，输出恒宽 token_budget）
         nb_near = nb_far = 0
         K2_mid_cap = nt_near_cap = far_budget_cap = 0
+        gamma_off = getattr(p, "gamma", 1.0) is None
         if e64:
-            nb_near = max(1, int(round(p.k1_blocks * p.beta)))
+            # E155d：nb/nt 显式（nt_near_pages/nt_near_tokens）覆盖 β/γ 规则
+            if getattr(p, "nt_near_pages", None) is not None:
+                nb_near = max(0, int(p.nt_near_pages))
+            else:
+                nb_near = max(1, int(round(p.k1_blocks * p.beta)))
             nb_far = max(0, p.k1_blocks - nb_near)
             K2_mid_cap = max(0, p.token_budget - sink_tok - swa_tok)
-            nt_near_cap = min(int(nb_near * bs * p.gamma), K2_mid_cap)
+            if gamma_off:
+                # 自由竞争：γ 配额切分整体旁路（nt cap 置 0 → far cap
+                # = K2_mid_cap 即自由池静态宽；far/near topk 由下方
+                # γ-off 分支接管，此两 cap 不按 γ 语义消费）
+                nt_near_cap = 0
+            elif getattr(p, "nt_near_tokens", None) is not None:
+                nt_near_cap = min(int(p.nt_near_tokens), K2_mid_cap)
+            else:
+                nt_near_cap = min(int(nb_near * bs * p.gamma), K2_mid_cap)
             far_budget_cap = max(0, K2_mid_cap - nt_near_cap)
         # 共享反量化表（全宽 einsum fine 矩阵；与 M7 fast path 同口径）
         kq_f = kq_unpack(kq[:S], index["kq_sc"][:S], index["kq_mn"][:S])
@@ -1471,10 +1527,17 @@ class TLIIndexer:
                 # （near_base = S_r − swa_tok），与 _taskmd_regions /
                 # _select_decode_taskmd / two-level compute_mask 同源。
                 mid_len_r = (S_r - sink_tok - swa_tok).clamp(min=0)
-                near_len_dyn_r = torch.maximum(
-                    torch.full_like(S_r, bs),
-                    (p.alpha * mid_len_r.float()).long(),
-                )
+                # E155d：nl 显式（nt_near_len）时 near 区宽为常量
+                # （对齐 HF tli_indexer L1489-1492 批量分支）
+                if getattr(p, "nt_near_len", None) is not None:
+                    near_len_dyn_r = torch.full_like(
+                        S_r, max(bs, int(p.nt_near_len))
+                    )
+                else:
+                    near_len_dyn_r = torch.maximum(
+                        torch.full_like(S_r, bs),
+                        (p.alpha * mid_len_r.float()).long(),
+                    )
                 near_blks_r = torch.maximum(
                     torch.full_like(S_r, p.sink_blocks),
                     (S_r - swa_tok - near_len_dyn_r) // bs,
@@ -1617,49 +1680,82 @@ class TLIIndexer:
                 k2_far_r = torch.minimum(
                     torch.minimum(far_budget_r, span_r), K2_mid_r
                 )
-                # far 池 topk（静态宽 far_budget_cap；fine 全宽矩阵 → 索引即位置）
-                in_far_tok = (pos.view(1, S) >= sink_tok) & (
-                    pos.view(1, S) < far_hi_t.view(-1, 1)
-                )  # [n, S]
-                far_f = fine.masked_fill(
-                    ~in_far_tok.unsqueeze(1), float("-inf")
-                )
-                i_f2 = torch.topk(far_f, far_budget_cap, dim=-1).indices
-                sc_f2 = torch.gather(far_f, 2, i_f2)
-                rank_f2 = (
-                    torch.arange(far_budget_cap, device=device)
-                    .view(1, 1, -1)
-                    < k2_far_r.view(-1, 1, 1)
-                )
-                keep_f2 = (sc_f2 > float("-inf")) & rank_f2
-                # B01 修复：无效槽位哨兵全局 S（下游 valid = sel < S 屏蔽；
-                # 原转 0 使 token 0 被重复计权。S1 修复（GPT F01/Kimi3 双
-                # 审查 2026-10-08）：原用逐行 S_r=t_r+1，中间行 S_r<S 被
-                # 消费端判有效 → 读入未来 token t_r+1（因果泄漏）；哨兵值
-                # 必须与消费端界同源 = 全局 S）
-                sel_f2 = torch.where(
-                    ~keep_f2, S, i_f2
-                )
-                # near 池 topk（静态宽 nt_near_cap）
-                in_near_tok = (pos.view(1, S) >= far_hi_t.view(-1, 1)) & (
-                    pos.view(1, S) < swa_lo_t.view(-1, 1)
-                )
-                near_f = fine.masked_fill(
-                    ~in_near_tok.unsqueeze(1), float("-inf")
-                )
-                i_n2 = torch.topk(near_f, nt_near_cap, dim=-1).indices
-                sc_n2 = torch.gather(near_f, 2, i_n2)
-                k2_near_r = (K2_mid_r - k2_far_r).clamp(min=0)
-                rank_n2 = (
-                    torch.arange(nt_near_cap, device=device)
-                    .view(1, 1, -1)
-                    < k2_near_r.view(-1, 1, 1)
-                )
-                keep_n2 = (sc_n2 > float("-inf")) & rank_n2
-                # B01 修复：无效槽位哨兵全局 S（S1 同 far 池口径）
-                sel_n2 = torch.where(
-                    ~keep_n2, S, i_n2
-                )
+                if gamma_off:
+                    # ---- E122/E155d 自由竞争（γ-off / nt=off）：mid 区
+                    # [sink_tok, swa_lo_t) 一体 topk——L1 双池照旧（nb/nl
+                    # 已生效，fine 已含 per-head L1 掩码），L2 取消
+                    # near/far 配额分割（对齐 HF tli_indexer L2498-2510
+                    # 默认路径的批量版）。静态宽 far_budget_cap（γ-off
+                    # 下 = K2_mid_cap）+ rank 掩码（M5 模式，graph 可录）。
+                    # far_budget_cap=0 的退化 profile：topk 空，已验证安全。
+                    # ----
+                    W_free = min(far_budget_cap, S)
+                    in_mid_tok = (pos.view(1, S) >= sink_tok) & (
+                        pos.view(1, S) < swa_lo_t.view(-1, 1)
+                    )  # [n, S]
+                    mid_f = fine.masked_fill(
+                        ~in_mid_tok.unsqueeze(1), float("-inf")
+                    )
+                    i_m = torch.topk(mid_f, W_free, dim=-1).indices
+                    sc_m = torch.gather(mid_f, 2, i_m)
+                    span_m_r = (swa_lo_t - sink_tok).clamp(min=0)
+                    k2_free_r = torch.minimum(
+                        torch.minimum(K2_mid_r, span_m_r), S_r
+                    )
+                    rank_m = (
+                        torch.arange(W_free, device=device)
+                        .view(1, 1, -1)
+                        < k2_free_r.view(-1, 1, 1)
+                    )
+                    keep_m = (sc_m > float("-inf")) & rank_m
+                    # B01/S1 修复口径同 far 池：无效槽位哨兵全局 S
+                    sel_m = torch.where(~keep_m, S, i_m)
+                    sel_f2 = sel_m
+                    sel_n2 = sel_m[:, :, :0]  # near 池空壳（宽 0，cat 安全）
+                else:
+                    # far 池 topk（静态宽 far_budget_cap；fine 全宽矩阵 → 索引即位置）
+                    in_far_tok = (pos.view(1, S) >= sink_tok) & (
+                        pos.view(1, S) < far_hi_t.view(-1, 1)
+                    )  # [n, S]
+                    far_f = fine.masked_fill(
+                        ~in_far_tok.unsqueeze(1), float("-inf")
+                    )
+                    i_f2 = torch.topk(far_f, far_budget_cap, dim=-1).indices
+                    sc_f2 = torch.gather(far_f, 2, i_f2)
+                    rank_f2 = (
+                        torch.arange(far_budget_cap, device=device)
+                        .view(1, 1, -1)
+                        < k2_far_r.view(-1, 1, 1)
+                    )
+                    keep_f2 = (sc_f2 > float("-inf")) & rank_f2
+                    # B01 修复：无效槽位哨兵全局 S（下游 valid = sel < S 屏蔽；
+                    # 原转 0 使 token 0 被重复计权。S1 修复（GPT F01/Kimi3 双
+                    # 审查 2026-10-08）：原用逐行 S_r=t_r+1，中间行 S_r<S 被
+                    # 消费端判有效 → 读入未来 token t_r+1（因果泄漏）；哨兵值
+                    # 必须与消费端界同源 = 全局 S）
+                    sel_f2 = torch.where(
+                        ~keep_f2, S, i_f2
+                    )
+                    # near 池 topk（静态宽 nt_near_cap）
+                    in_near_tok = (pos.view(1, S) >= far_hi_t.view(-1, 1)) & (
+                        pos.view(1, S) < swa_lo_t.view(-1, 1)
+                    )
+                    near_f = fine.masked_fill(
+                        ~in_near_tok.unsqueeze(1), float("-inf")
+                    )
+                    i_n2 = torch.topk(near_f, nt_near_cap, dim=-1).indices
+                    sc_n2 = torch.gather(near_f, 2, i_n2)
+                    k2_near_r = (K2_mid_r - k2_far_r).clamp(min=0)
+                    rank_n2 = (
+                        torch.arange(nt_near_cap, device=device)
+                        .view(1, 1, -1)
+                        < k2_near_r.view(-1, 1, 1)
+                    )
+                    keep_n2 = (sc_n2 > float("-inf")) & rank_n2
+                    # B01 修复：无效槽位哨兵全局 S（S1 同 far 池口径）
+                    sel_n2 = torch.where(
+                        ~keep_n2, S, i_n2
+                    )
                 # 正交强制区：sink 头部（宽 sink_tok）+ swa 尾部（宽 swa_tok，
                 # 早行 t_r < swa-1 的越界槽位转哨兵全局 S 而非 0——S1 修复）
                 sink_pos = torch.arange(sink_tok, device=device).view(1, -1)
@@ -2264,10 +2360,17 @@ class TLIIndexer:
             # （near_base = S_t − swa_tok），与 _taskmd_regions /
             # _select_batched_taskmd / two-level compute_mask 同源。
             mid_len_t = (S_t - sink_tok - swa_tok).clamp(min=0)
-            near_len_dyn_t = torch.maximum(
-                torch.full_like(S_t, bs),
-                (p.alpha * mid_len_t.float()).long(),
-            )
+            # E155d：nl 显式（nt_near_len）时 near 区宽为常量
+            # （对齐 HF tli_indexer L2083-2085 批量分支）
+            if getattr(p, "nt_near_len", None) is not None:
+                near_len_dyn_t = torch.full_like(
+                    S_t, max(bs, int(p.nt_near_len))
+                )
+            else:
+                near_len_dyn_t = torch.maximum(
+                    torch.full_like(S_t, bs),
+                    (p.alpha * mid_len_t.float()).long(),
+                )
             near_blks_t = torch.maximum(
                 torch.full_like(S_t, p.sink_blocks),
                 (S_t - swa_tok - near_len_dyn_t) // bs,
@@ -2281,7 +2384,11 @@ class TLIIndexer:
             in_near_blk = (blk_id.view(1, -1) >= near_blks_t.view(-1, 1)) & (
                 blk_id.view(1, -1) < swa_lo_blk_t.view(-1, 1)
             ) & valid_blk
-            nb_near = max(1, int(round(K1 * p.beta)))
+            # E155d：nb 显式（nt_near_pages）覆盖 β 规则
+            if getattr(p, "nt_near_pages", None) is not None:
+                nb_near = max(0, int(p.nt_near_pages))
+            else:
+                nb_near = max(1, int(round(K1 * p.beta)))
             nb_far = max(0, K1 - nb_near)
             # far 池
             src_far = (
@@ -2453,7 +2560,14 @@ class TLIIndexer:
             )  # decode S > dense_threshold 恒满额（防御短行）
             K2_mid_t = (p.token_budget - sink_tok - swa_w_t).clamp(min=0)
             K2_mid_cap = max(0, p.token_budget - sink_tok - swa_tok)
-            nt_near_cap = min(int(nb_near * bs * p.gamma), K2_mid_cap)
+            # E155d：nt 显式（nt_near_tokens）覆盖 γ 规则；γ-off 时配额
+            # 切分整体旁路（nt cap 置 0 → far cap = K2_mid_cap 即自由池宽）
+            if p.gamma is None:
+                nt_near_cap = 0
+            elif getattr(p, "nt_near_tokens", None) is not None:
+                nt_near_cap = min(int(p.nt_near_tokens), K2_mid_cap)
+            else:
+                nt_near_cap = min(int(nb_near * bs * p.gamma), K2_mid_cap)
             far_budget_cap = max(0, K2_mid_cap - nt_near_cap)
             nt_near_t = torch.minimum(
                 torch.full_like(K2_mid_t, nt_near_cap), K2_mid_t
@@ -2475,7 +2589,41 @@ class TLIIndexer:
             W_far = min(far_budget_cap, Tc)
             W_near = min(nt_near_cap, Tc)
             parts = []
-            if W_far > 0:
+            if p.gamma is None:
+                # ---- E122/E155d 自由竞争（γ-off / nt=off）：mid 区
+                # [sink_tok, swa_lo_t) 候选一体 topk——L1 双池照旧
+                # （nb/nl 已生效，s2 已含 per-head L1 掩码），L2 取消
+                # near/far 配额分割（对齐 HF tli_indexer L2498-2510 默认
+                # 路径的 decode 批量版）。静态宽 W_free（γ-off 下
+                # far_budget_cap = K2_mid_cap）+ rank 掩码（M5 graph 模式）。
+                # ----
+                W_free = min(far_budget_cap, Tc)
+                if W_free > 0:
+                    in_mid = (tok >= sink_tok) & (
+                        tok < swa_lo_t.view(-1, 1)
+                    ) & valid & causal  # [n, Tc]
+                    mid_sc = s2.masked_fill(
+                        ~in_mid.unsqueeze(1), float("-inf")
+                    )
+                    i_m = torch.topk(mid_sc, W_free, dim=-1).indices
+                    sc_m = torch.gather(mid_sc, 2, i_m)
+                    span_m_t = (swa_lo_t - sink_tok).clamp(min=0)
+                    k2_free_t = torch.minimum(
+                        torch.minimum(K2_mid_t, span_m_t), S_t
+                    )
+                    rank_m = (
+                        torch.arange(W_free, device=device)
+                        .view(1, 1, -1)
+                        < k2_free_t.view(-1, 1, 1)
+                    )
+                    keep_m = (sc_m > float("-inf")) & rank_m
+                    sel_m = torch.gather(tok_e, 2, i_m)
+                    parts.append(
+                        torch.where(
+                            ~keep_m, torch.full_like(sel_m, SENT), sel_m
+                        )
+                    )
+            elif W_far > 0:
                 i_f2 = torch.topk(far_sc, W_far, dim=-1).indices
                 sc_f2 = torch.gather(far_sc, 2, i_f2)
                 rank_f2 = (

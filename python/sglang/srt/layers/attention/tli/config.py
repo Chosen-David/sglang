@@ -143,11 +143,22 @@ class TLIProfile:
         _taskmd_envs = (
             "SGLANG_TLI_ALPHA", "SGLANG_TLI_BETA", "SGLANG_TLI_GAMMA",
             "SGLANG_TLI_FAR_METHOD", "SGLANG_TLI_NEAR_METHOD",
+            # E155d 几何 env（nb/nt）同入 taskmd 检测——几何选择走
+            # taskmd 专用路径；NEAR_LEN 不入（旧 B' 字段，单独显式
+            # 设置是旧路径合法用法，不触发 taskmd）
+            "SGLANG_TLI_NEAR_PAGES", "SGLANG_TLI_NEAR_TOKENS",
         )
         self.taskmd: bool = any(k in os.environ for k in _taskmd_envs)
+        # γ 三态（对齐 HF tli_indexer L357-364）："off" = 自由竞争
+        # （L2 取消 near/far 配额分割，单池竞争；L1 双池照旧）；
+        # 未传缺省 1.0；数值 = 配额折扣。
+        _g_raw = os.environ.get("SGLANG_TLI_GAMMA")
+        if _g_raw is not None and _g_raw.strip().lower() == "off":
+            self.gamma: float | None = None
+        else:
+            self.gamma = _env_float("SGLANG_TLI_GAMMA", 1.0)
         self.alpha: float = _env_float("SGLANG_TLI_ALPHA", 0.0)
         self.beta: float = _env_float("SGLANG_TLI_BETA", 0.0)
-        self.gamma: float = _env_float("SGLANG_TLI_GAMMA", 1.0)
         # method 默认值 = mavg 冠军口径（far=minmax 粗筛 + near=avg 粗筛）
         self.far_method: str = os.environ.get("SGLANG_TLI_FAR_METHOD", "minmax")
         self.near_method: str = os.environ.get("SGLANG_TLI_NEAR_METHOD", "avg")
@@ -157,6 +168,94 @@ class TLIProfile:
         assert self.near_method in ("avg", "minmax"), (
             f"SGLANG_TLI_NEAR_METHOD 须为 avg|minmax，当前 {self.near_method!r}"
         )
+        # ---- E155d 固定配额几何（2026-10-20 sglang 移植；口径对齐
+        # two-level 权威实现 sparse_attn/indexer/tli_indexer.py L367-444）。
+        # 用户 2026-10-19 拍板：全面转向 nt/nb 绝对配额。语义映射（geo
+        # 显式优先，legacy 回退见括号）：
+        #   nb = NEAR_PAGES（legacy = max(1, round(k1·β))）
+        #   nt = NEAR_TOKENS，"off" = 自由竞争哨兵 ≡ γ-off（legacy =
+        #        min(nb·bs·γ, K2_mid)）；nt=off 与数值 nt=K2_mid 语义
+        #        严格分开（后者 = near 独吞 far=0 退化臂）
+        #   nl = NEAR_LEN（legacy = max(bs, α·mid_len)）
+        #   far 侧均为减法：nb_far = K1−nb；far_budget = K2_mid−nt。
+        # fail-closed：nb/nt 任一显式 + α/β/γ 任一显式 → 构造期拒绝
+        # （两口径混配即歧义配置，含 α0β0 单池意图 + 几何的事故面；
+        # 单池派法 = 只传 α0β0，不传任何几何参数）。
+        # 【与 HF 的一处已注记差异】nl-only（只设 NEAR_LEN）在 sglang
+        # 不拒绝——NEAR_LEN 是旧 B' 既有 env（default 2048），单独显式
+        # 设置是旧路径合法用法；geo 检测只看 nb/nt 两个 env。
+        _nt_raw = os.environ.get("SGLANG_TLI_NEAR_TOKENS")
+        _nt_off = _nt_raw is not None and _nt_raw.strip().lower() == "off"
+        self.nt_near_pages: int | None = (
+            int(os.environ["SGLANG_TLI_NEAR_PAGES"])
+            if "SGLANG_TLI_NEAR_PAGES" in os.environ else None
+        )
+        self.nt_near_tokens: int | None = (
+            None if (_nt_raw is None or _nt_off) else int(_nt_raw)
+        )
+        self.nt_near_len: int | None = None
+        _geo = (self.nt_near_pages is not None or _nt_raw is not None)
+        if _geo:
+            if any(k in os.environ for k in
+                   ("SGLANG_TLI_ALPHA", "SGLANG_TLI_BETA", "SGLANG_TLI_GAMMA")):
+                raise ValueError(
+                    "SGLANG_TLI_NEAR_PAGES/TOKENS（固定配额几何）与 "
+                    "SGLANG_TLI_ALPHA/BETA/GAMMA（legacy 比例口径）不可同传"
+                    "——两口径混配即歧义配置（E155d 参数退役，fail-closed；"
+                    "单池派法 = 只传 ALPHA=0/BETA=0，不传任何几何参数）"
+                )
+            # 几何齐备性：nb 必传；nt 传数值或 off；nl 必传（几何下
+            # α/β/γ 禁传 → near_L 无比例回退）。
+            if self.nt_near_pages is None:
+                raise ValueError(
+                    "固定配额几何须显式传 SGLANG_TLI_NEAR_PAGES（配 "
+                    "SGLANG_TLI_NEAR_TOKENS 数值或 off；SGLANG_TLI_NEAR_LEN "
+                    "亦须显式——几何下无比例回退）")
+            if self.nt_near_tokens is None and not _nt_off:
+                raise ValueError(
+                    "SGLANG_TLI_NEAR_TOKENS 须传非负整数或 'off'（自由竞争"
+                    "哨兵）——只传 NEAR_PAGES 而缺 nt 属歧义配置")
+            if "SGLANG_TLI_NEAR_LEN" not in os.environ:
+                raise ValueError(
+                    "固定配额几何须显式传 SGLANG_TLI_NEAR_LEN（E155d：几何"
+                    "派单下 α/β/γ 禁传，near 区宽无比例规则回退）")
+            self.nt_near_len = int(os.environ["SGLANG_TLI_NEAR_LEN"])
+            if _nt_off:
+                # nt=off 归一：γ → 自由竞争（消费端与 γ-off 同一分支）；
+                # nb/nl 显式覆盖照常生效。
+                self.gamma = None
+            # 激活分区：几何显式时 nb/nt/nl 三处消费点均显式优先；
+            # α/β 置 1 使 e64_partition（α>0 且 β>0）成立。
+            self.alpha = 1.0
+            self.beta = 1.0
+            # 构造期几何约束（用户 2026-10-19 三维网格）：nb·bs ≤ nl；
+            # nt ≤ nb·bs；far = K2−sink−swa−nt ≥ 0。
+            _bs_c, _k2_c = self.block_size, self.token_budget
+            _nb_c, _nl_c = int(self.nt_near_pages), int(self.nt_near_len)
+            if _nb_c < 0:
+                raise ValueError(f"SGLANG_TLI_NEAR_PAGES 须非负，收到 {_nb_c}")
+            if _nb_c * _bs_c > _nl_c:
+                raise ValueError(
+                    f"网格约束破坏：nb·bs ≤ nl（nb={_nb_c}·bs={_bs_c}="
+                    f"{_nb_c * _bs_c} > nl={_nl_c}）——near 页配额超出 "
+                    "near 区宽度能供给的页数")
+            if not _nt_off:
+                _nt_c = int(self.nt_near_tokens)
+                if _nt_c < 0:
+                    raise ValueError(
+                        f"SGLANG_TLI_NEAR_TOKENS 须非负，收到 {_nt_c}")
+                if _nt_c > _nb_c * _bs_c:
+                    raise ValueError(
+                        f"网格约束破坏：nt ≤ nb·bs（nt={_nt_c} > nb={_nb_c}·"
+                        f"bs={_bs_c}={_nb_c * _bs_c}）——near token 配额超出 "
+                        "near 页几何容量")
+                _far_c = (_k2_c - self.sink_blocks * _bs_c
+                          - self.sliding_window - _nt_c)
+                if _far_c < 0:
+                    raise ValueError(
+                        f"网格约束破坏：far = K2−sink−swa−nt = {_far_c} < 0"
+                        f"（K2={_k2_c}, sink={self.sink_blocks * _bs_c}, "
+                        f"swa={self.sliding_window}, nt={_nt_c}）")
         # ---- #60 D' 升级：prefill 动态测层 → decode 动态跳 far。
         # 离线验证（e60_prefill_dynamic_gate.json，32B 7 任务）：prefill
         # 末段行 per-layer far mass 与 decode far mass corr 0.86-0.99，
