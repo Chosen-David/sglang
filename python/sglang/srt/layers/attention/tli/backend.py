@@ -104,6 +104,10 @@ class TLISparseAttnBackend(AttentionBackend):
         # ---- M5 CUDA graph 状态 ----
         self._num_layers = None
         self._use_graph_path = False  # out_graph 置 True / init_forward_metadata 置 False
+        # P1（双仓审计）：per-forward host 读值缓存（reqs/lens 每 forward
+        # 一次，forward_decode 36 层复用；张量身份作缓存键）
+        self._p1_cache = None
+        self._p1_lens = None
         self._graph_locked = False  # 捕获后禁止 pool 扩容（张量替换 = 悬垂引用）
         self._pool_s_cap_floor = 0  # 建池 S 容量下限（graph 预分配时抬高）
         self._pool_r_cap_floor = 0
@@ -206,8 +210,12 @@ class TLISparseAttnBackend(AttentionBackend):
                 self.runner.device if self.runner else "cuda"
             )
             if self.layer_skip is not None:
+                # B4（双仓审计）：与 basis 分支同款双向 clamp——layer_skip
+                # 长度与 n_layers 不齐时旧代码只有下界防护，越上界直接
+                # IndexError；clamp 到末位（与 basis 的 0 位兜底同语义）。
+                li = layer_id - (self._layer_offset or 0)
                 idx.skip_far = self.layer_skip[
-                    layer_id - (self._layer_offset or 0) if layer_id >= (self._layer_offset or 0) else 0
+                    li if 0 <= li < len(self.layer_skip) else len(self.layer_skip) - 1
                 ]
             self.indexers[layer_id] = idx
         return self.indexers[layer_id]
@@ -454,10 +462,39 @@ class TLISparseAttnBackend(AttentionBackend):
         self._use_graph_path = False
         if not self.index_pools:
             return
+        # B2 修复（双仓审计 2026-10-20）：行回收只在 decode forward 上
+        # 做。extend forward 的 req_pool_indices 只含 prefilling 请求、
+        # IDLE forward 为空——旧代码按「当前 batch 成员」回收会把所有
+        # 在跑 decode 请求的行误回收（S=-1），下一个 decode 步全请求
+        # 走 O(S) 全量重建 × 36 层（E5b gov_report 186min 病理，触发源
+        # 从「每步重建」换成了「每次交错 prefill 重建」）。decode batch
+        # 含全部在飞 decode 请求，以其为回收锚集语义正确；mid-chunk
+        # prefill 请求不在 decode 集内仍会被回收（与旧口径一致，extend
+        # 侧 S != L-1 重建自愈）；欠回收（行滞留）由后续 decode forward
+        # 兜底，pool 自动扩容无正确性风险。
+        mode = getattr(forward_batch, "forward_mode", None)
+        if mode is None or not mode.is_decode():
+            return
         try:
-            active = {int(x) for x in forward_batch.req_pool_indices.tolist()}
+            reqs_l = [int(x) for x in forward_batch.req_pool_indices.tolist()]
         except Exception:
             return
+        # P1（双仓审计）：reqs/lens 的 host 读值每 forward 只做一次
+        # （本钩子每 forward 调一次、36 层共享），缓存到实例上供
+        # forward_decode 逐层复用——消掉旧版「每层每步 2 次 .tolist()
+        # GPU 队列排空」（36 层 × 每步 = eager decode 隐藏大头）。
+        # seq_lens 优先读 CPU 镜像（零同步）；缓存键 = 张量对象身份
+        # （is 比较，跨 forward 失配自动兜底 per-layer tolist）。
+        self._p1_cache = (forward_batch.req_pool_indices, reqs_l)
+        _sl_cpu = getattr(forward_batch, "seq_lens_cpu", None)
+        if _sl_cpu is not None:
+            try:
+                self._p1_lens = [int(x) for x in _sl_cpu[: len(reqs_l)]]
+            except Exception:
+                self._p1_lens = None
+        else:
+            self._p1_lens = None
+        active = set(reqs_l)
         for pool_l in self.index_pools.values():
             for req in list(pool_l["row_of"]):
                 if req not in active:
@@ -478,6 +515,14 @@ class TLISparseAttnBackend(AttentionBackend):
         capture（in_capture=True）：dummy 批（req=0 / seq_len=1）只做行
         映射（全部 → 哨兵行 0），不做稳态维护（kv pool 尚无真实数据，
         且 dummy req 会污染 row_of）。
+
+        【B3 显式契约（双仓审计 2026-10-20）】真实 L=1 短行（1-token
+        prefill 后首个 decode 步）与 pad 行同走哨兵行 0（读零/garbage
+        kmin/kmax），正确性依赖下述巧合链：forced 滑窗恒含位置 0 +
+        sel clamp 到 0 → 该行只 attend 位置 0 = 精确正确；且其 pool 行
+        永不建立，下一 decode 步由 S != L-1 全量重建兜底（L604 一带）。
+        该巧合现为受保护契约——改动 forced 窗语义 / clamp 下界 / 重建
+        触发条件前必须重验 L=1 行路径。
         """
         self._use_graph_path = True
         bs = int(getattr(forward_batch, "batch_size", 0) or 0)
@@ -508,6 +553,12 @@ class TLISparseAttnBackend(AttentionBackend):
             seen.add(req)
             active.append((i, req, L))
         act_set = {req for _, req, _ in active}
+        # P7（双仓审计）：rows_arr 跨层对称（pool 同步建/同步回收分配，
+        # 常态各层同值）时复用首次 H2D 的 device 张量——旧版每层一次
+        # pageable H2D（隐式同步 × 36 层/步）。列表比对纯 host 零同步；
+        # 不对称（理论可达）兜底各自 H2D，无正确性假设。
+        rows_ref: list[int] | None = None
+        rows_t: torch.Tensor | None = None
         for layer_id, pool_l in self.index_pools.items():
             for req in list(pool_l["row_of"]):
                 if req not in act_set:
@@ -538,9 +589,14 @@ class TLISparseAttnBackend(AttentionBackend):
                 # 预记图内追加当前 token 后的有效长度（== eager 路径每步
                 # 结束时的 bookkeeping 语义，混跑无缝切换）
                 pool_l["S"][row] = L
-            self._graph_rows_l[layer_id][:bs] = torch.tensor(
-                rows_arr, device=self._graph_rows_l[layer_id].device
-            )
+            if rows_t is not None and rows_arr == rows_ref:
+                self._graph_rows_l[layer_id][:bs].copy_(rows_t)
+            else:
+                rows_t = torch.tensor(
+                    rows_arr, device=self._graph_rows_l[layer_id].device
+                )
+                rows_ref = rows_arr
+                self._graph_rows_l[layer_id][:bs] = rows_t
 
     def init_forward_metadata_in_graph(self, forward_batch):
         """图内元数据钩子：no-op——全部图内工作在 forward_decode 的 graph
@@ -558,6 +614,16 @@ class TLISparseAttnBackend(AttentionBackend):
         **kwargs,
     ):
         # 新版 q/k/v 是 2D [T, H*D] / [T, Hkv*D]（RoPE 后），统一 view 成 3D
+        # B5（双仓审计）：eager decode 假设每请求恰 1 token（T==bs）。
+        # spec draft decode / 未来多 token decode 协议下 view 会静默
+        # 错位；图路径已有同款 raise（spec_info），此处对齐 fail-closed。
+        _mode = getattr(forward_batch, "forward_mode", None)
+        if _mode is not None and not _mode.is_decode():
+            raise NotImplementedError(
+                f"tli eager forward_decode 仅支持 1-token decode（每请求"
+                f"恰 1 token），收到 forward_mode={_mode}——多 token 行请走"
+                f" forward_extend"
+            )
         bs = q.shape[0]
         H = q.shape[1] // self.head_dim
         Hkv = self.num_kv_heads
@@ -584,8 +650,18 @@ class TLISparseAttnBackend(AttentionBackend):
         # n≥2 时两级选择批量 eager 化（launch 数与 bs 无关）；dense 逐请求
         # phase-3：req/seq_len 一次 .tolist()（2 次同步替代逐行 int() 的
         # 2×bs 次）；单 token 增量行收集后批量维护（update_pool_rows_decode）
-        reqs_l = forward_batch.req_pool_indices.tolist()
-        lens_l = forward_batch.seq_lens.tolist()
+        # P1（双仓审计）：优先吃 init_forward_metadata 的 per-forward
+        # 缓存（张量身份键），36 层复用消每层 2 次同步；失配兜底原路径。
+        _c = self._p1_cache
+        if _c is not None and _c[0] is forward_batch.req_pool_indices:
+            reqs_l = _c[1]
+        else:
+            reqs_l = forward_batch.req_pool_indices.tolist()
+        _cl = self._p1_lens
+        if _cl is not None and len(_cl) >= bs:
+            lens_l = _cl[:bs]
+        else:
+            lens_l = forward_batch.seq_lens.tolist()
         sparse_rows: list[tuple[int, int, int]] = []  # (batch_row, pool_row, seq_len)
         inc_rows: list[int] = []  # 批量增量维护的 (pool 行, 旧 S, req)
         inc_S_old: list[int] = []
@@ -761,7 +837,11 @@ class TLISparseAttnBackend(AttentionBackend):
             lens_l = [int(x) for x in _esl_cpu]
             prefix_l = [int(x) for x in _epl_cpu]
         else:
-            lens_l = torch.cumsum(extend_seq_lens, dim=0).tolist()
+            # B1 修复（双仓审计 2026-10-20）：此处须为**每请求** extend
+            # 长度（下方循环自行累加出 ends）。旧代码赋 cumsum 累计值
+            # → ends 二阶累计，bs≥2 时 token 区间错位（gpu_only /
+            # 无 CPU 镜像路径触发）。镜像分支（L761）语义正确。
+            lens_l = [int(x) for x in extend_seq_lens.tolist()]
             prefix_l = (
                 extend_prefix_lens.tolist()
                 if extend_prefix_lens is not None
@@ -1018,12 +1098,14 @@ class TLISparseAttnBackend(AttentionBackend):
         seq_v = seq_lens_t.view(-1, 1, 1)
         valid = sel < seq_v  # [n, Hkv, K2]
         sel_c = torch.minimum(sel, seq_v - 1)
-        # req_to_token 是 2D [max_req, max_S]：一次 gather 出全部请求槽位
+        # req_to_token 是 2D [max_req, max_S]：二维高级索引直出 [n, K2]
+        # 槽位（P2 修复，双仓审计：旧版先物化 [n, max_S] 全宽 long 行
+        # ——bs=32 × 131K × 8B ≈ 32MB/层/步——再 gather 出 K2 列，有效
+        # 信息只有 K2 列；advanced indexing 逐元素取等值，语义不变）。
         reqs = forward_batch.req_pool_indices[rows]  # [n]
-        locs_full = req_to_token[reqs]  # [n, max_S]（每行 = 该请求逻辑位置 → 槽位）
-        pool_pos = torch.gather(
-            locs_full, 1, sel_c.view(n, -1)
-        ).view(n, Hkv, sel.shape[-1])  # [n, Hkv, K2] pool 槽位
+        pool_pos = req_to_token[
+            reqs[:, None], sel_c.view(n, -1)
+        ].view(n, Hkv, sel.shape[-1])  # [n, Hkv, K2] pool 槽位
         K2 = pool_pos.shape[-1]
         k_buf, v_buf = pool.get_kv_buffer(layer_id)
         # M11-decode：fused kernel 路径（SGLANG_TLI_SPARSE_KERNEL=1）——
@@ -1051,7 +1133,7 @@ class TLISparseAttnBackend(AttentionBackend):
         flat_v = flat.view(n, -1)
         k_sel = k_buf.reshape(-1)[flat_v].view(n, Hkv, K2, D).float()
         v_sel = v_buf.reshape(-1)[flat_v].view(n, Hkv, K2, D).float()
-        q_g = q[rows].float().view(n, Hkv, G, D)  # [n, Hkv, G, D]
+        q_g = q_raw.float().view(n, Hkv, G, D)  # [n, Hkv, G, D]（P3：复用上方 q[rows]，免三次重复 gather）
         att = torch.einsum("nhgd,nhkd->nhgk", q_g, k_sel) * (D**-0.5)
         att = att.masked_fill(~valid.unsqueeze(2), float("-inf"))
         att = torch.softmax(att, dim=-1)

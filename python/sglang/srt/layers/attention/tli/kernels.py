@@ -21,10 +21,10 @@ def _tli_l1_topk_kernel(
     q_ptr, kmin_ptr, kmax_ptr, out_ptr,
     HKV: tl.constexpr, G: tl.constexpr,
     DP: tl.constexpr,
-    NBLK: tl.constexpr, NBLK_P2: tl.constexpr,
+    NBLK, NBLK_P2: tl.constexpr,
     K1: tl.constexpr,
-    FAR_LO_BLK: tl.constexpr, FAR_HI_BLK: tl.constexpr,
-    LAST_BLK: tl.constexpr,
+    FAR_LO_BLK, FAR_HI_BLK,
+    LAST_BLK,
     SCALE,
 ):
     h = tl.program_id(0)
@@ -71,6 +71,13 @@ def tli_l1_topk(
     scale: float = 1.0,
 ) -> torch.Tensor:
     """返回 [Hkv, nblk_pow2] int32 选中掩码（0/1）。"""
+    # P4（双仓审计）：NBLK/FAR_LO/HI/LAST_BLK 由 constexpr 转运行时标量
+    # ——旧版按值特化，decode 稳态 nblk/last_blk 每 64 步 +1 → 每 64
+    # 步触发一次 JIT 重编译（长序列数百次 + 编译缓存无界增长）；运行时
+    # int 参数只按 1/整除 16 特化，编译次数有界。NBLK_P2 必须留
+    # constexpr（tl.arange 要求）；仅 eager per-request 路径调用
+    # （use_l1_kernel，不在 CUDA graph 捕获区）——replay 冻结值风险
+    # 不适用。K1/HKV/G/DP 为 config 级常量，留 constexpr 保编译键稳定。
     HKV = kmin.shape[1]
     DP = kmin.shape[-1]
     G = q.shape[0] // HKV
@@ -93,6 +100,9 @@ __all__ = [
     "tli_l2_score_batched",
     "tli_l2_score_batched_dual",
     "tli_compact",
+    # P10（双仓审计）：dot 版是 backend 生产调用点，此前漏列；
+    # 广播版 tli_sparse_gather_attn 无调用点（消融/参考保留），不入列。
+    "tli_sparse_gather_attn_dot",
 ]
 
 
@@ -183,10 +193,18 @@ def tli_l2_partition_topk(
     # 滑窗强制：窗口 token 全入选（head 无关），近端配额扣减
     F = t + 1 - sw_lo  # ≤ sliding_window
     k2_near_eff = max(0, k2_near - F)
-    i_f = torch.topk(far_scr, k2_far, dim=-1).indices  # [HKV, k2_far] 精确
-    i_n = torch.topk(near_scr, k2_near_eff, dim=-1).indices
-    sc_f = torch.gather(far_scr, 1, i_f)
-    sc_n = torch.gather(near_scr, 1, i_n)
+    # B7（双仓审计）：topk 宽度钳制——k2_far/k2_near_eff 超出打分宽度
+    # TC_P2 时 torch.topk 直接 RuntimeError（eager 对照路径 indexer.py
+    # 有 min(k2_near, S) 防护，kernel 路径此前无兜底；现几何恒安全，
+    # 参数化到更小 token_budget/block_size 时防线就位）。
+    k2_far = min(k2_far, TC_P2)
+    k2_near_eff = min(k2_near_eff, TC_P2)
+    # P6（双仓审计）：topk 本身返回 values，丢弃再 gather 回来是两个
+    # 纯多余 launch（n==1 路径每步 ×2）。
+    top_f = torch.topk(far_scr, k2_far, dim=-1)
+    top_n = torch.topk(near_scr, k2_near_eff, dim=-1)
+    i_f, i_n = top_f.indices, top_n.indices  # [HKV, k2_far] 精确
+    sc_f, sc_n = top_f.values, top_n.values
     sel_f = torch.gather(cand_pad.expand(HKV, -1), 1, i_f)
     sel_n = torch.gather(cand_pad.expand(HKV, -1), 1, i_n)
     # bug1 修复（GPT 复查 2026-10-08，S3 同类漏网）：topk 的 -inf 槽位
@@ -522,7 +540,9 @@ def tli_l2_score_batched_dual(
     far_lo: int,          # sink 区上界（host 常量 = sink_blocks*block_size）
     far_hi: torch.Tensor, # [n] int64 far 池上界（per-row device）
     sw_lo: torch.Tensor,  # [n] int64 滑窗下界（per-row device）
-    chunk: int = 128,
+    # P9（双仓审计）：chunk 死参数已删——三处 launch 均按 sweep 实测
+    # 硬编码 CHUNK（compact 路径 64/nw4、bf16 直出 64、单输出版 128，
+    # 证据见各 launch 处注释）；无任何调用方传过该实参。
     near_compact: bool = False,
     wncap: int = 0,       # near 压缩静态宽度（= far_lo + near_len - sliding_window）
     sent: int = 0,        # near_tok pad 哨兵（= S_cap）
@@ -714,7 +734,11 @@ def _tli_sparse_attn_kernel(
         vt = tl.load(vbuf_ptr + addr, mask=km[:, None], other=0).to(tl.float32)
         acc += tl.sum(p[:, :, None] * vt[None, :, :], axis=1)  # [G, D]
         m_i = m_new
-    out = acc / l_i[:, None]
+    # B6（双仓审计）：整行 (row, kv-head) 全哨兵时 l_i=0 → 0/0=NaN。
+    # 当前靠 indexer 侧「forced 窗恒含 pos=t」不变式兜住（协议非 kernel
+    # 本地保证），协议漂移即 NaN 扩散——一行防御数学不变（0/1=0）。
+    l_safe = tl.where(l_i > 0, l_i, 1.0)
+    out = acc / l_safe[:, None]
     outp = out_ptr + row * (H * D) + (h * G + offs_g)[:, None] * D + offs_d[None, :]
     tl.store(outp, out.to(out_ptr.dtype.element_ty))
 
@@ -792,7 +816,9 @@ def _tli_sparse_attn_dot_kernel(
         vt = tl.load(vbuf_ptr + addr, mask=km[:, None], other=0)  # [BK, D] bf16
         acc = tl.dot(p.to(vt.dtype), vt, acc)  # [GP, D] fp32
         m_i = m_new
-    out = acc / l_i[:, None]
+    # B6（双仓审计）：同广播版——整行全哨兵 l_i=0 的 NaN 防御。
+    l_safe = tl.where(l_i > 0, l_i, 1.0)
+    out = acc / l_safe[:, None]
     outp = out_ptr + row * (H * D) + (h * G + offs_m)[:, None] * D + offs_d[None, :]
     tl.store(outp, out.to(out_ptr.dtype.element_ty), mask=qm[:, None])
 
