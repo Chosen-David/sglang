@@ -460,6 +460,9 @@ class TLISparseAttnBackend(AttentionBackend):
     def init_forward_metadata(self, forward_batch):
         """eager 入口：标记非图路径 + 行生命周期回收。"""
         self._use_graph_path = False
+        # A new forward must not inherit a snapshot when metadata exits early.
+        self._p1_cache = None
+        self._p1_lens = None
         if not self.index_pools:
             return
         # B2 修复（双仓审计 2026-10-20）：行回收只在 decode forward 上
@@ -492,8 +495,8 @@ class TLISparseAttnBackend(AttentionBackend):
                 self._p1_lens = [int(x) for x in _sl_cpu[: len(reqs_l)]]
             except Exception:
                 self._p1_lens = None
-        else:
-            self._p1_lens = None
+        if self._p1_lens is None:
+            self._p1_lens = [int(x) for x in forward_batch.seq_lens.tolist()]
         active = set(reqs_l)
         for pool_l in self.index_pools.values():
             for req in list(pool_l["row_of"]):
@@ -658,7 +661,10 @@ class TLISparseAttnBackend(AttentionBackend):
         else:
             reqs_l = forward_batch.req_pool_indices.tolist()
         _cl = self._p1_lens
-        if _cl is not None and len(_cl) >= bs:
+        if (
+            _c is not None and _c[0] is forward_batch.req_pool_indices
+            and _cl is not None and len(_cl) >= bs
+        ):
             lens_l = _cl[:bs]
         else:
             lens_l = forward_batch.seq_lens.tolist()
@@ -1230,3 +1236,4 @@ class TLISparseAttnBackend(AttentionBackend):
 
 
 __all__ = ["TLISparseAttnBackend"]
+

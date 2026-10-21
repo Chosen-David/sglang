@@ -106,3 +106,8 @@
 - [ ] E118：sglang C1/C2/C3 三源码 bug 修复（SG e2e taskmd+CUDA graph
   前置门；C3 修复改行为须换 postfix 重跑）
 - [ ] E120：粗筛阶段价值消融 + 单级方案对比（依赖 S-T009 讨论收敛）
+
+
+## 2026-10-21
+
+- [ ] [S-TLI-HOST-SNAPSHOT-20261021] eager请求/长度快照成对失效，缺CPU镜像长度仅取一次；真实CPU红绿及独审，CUDA/完整服务未验。([详情](task_details/S-TLI-HOST-SNAPSHOT-20261021.md))
