@@ -111,3 +111,5 @@
 ## 2026-10-21
 
 - [ ] [S-TLI-HOST-SNAPSHOT-20261021] eager请求/长度快照成对失效，缺CPU镜像长度仅取一次；真实CPU红绿及独审，CUDA/完整服务未验。([详情](task_details/S-TLI-HOST-SNAPSHOT-20261021.md))
+
+- [ ] [S-TLI-KV-PAIR-INDEX-20261021] batched稀疏fallback改slot/head索引，省D维整数物化；48CPU组合精确等价、9方法普通/-O通过，GPU未验。([详情](task_details/S-TLI-KV-PAIR-INDEX-20261021.md))

@@ -1130,15 +1130,11 @@ class TLISparseAttnBackend(AttentionBackend):
                 q_raw, pool_pos, k_buf, v_buf, G,
                 S_loc=k_buf.shape[0], valid=valid,
             )
-        # flat 索引：槽位 s、kv head h、维 d → s*(Hkv*D) + h*D + d
-        d_off = torch.arange(D, device=q.device)
-        h_off = torch.arange(Hkv, device=q.device).view(1, Hkv, 1, 1) * D
-        flat = (
-            pool_pos.unsqueeze(-1) * (Hkv * D) + h_off + d_off.view(1, 1, 1, D)
-        )  # [n, Hkv, K2, D]
-        flat_v = flat.view(n, -1)
-        k_sel = k_buf.reshape(-1)[flat_v].view(n, Hkv, K2, D).float()
-        v_sel = v_buf.reshape(-1)[flat_v].view(n, Hkv, K2, D).float()
+        # Select slot/head pairs and retain D, avoiding a D-wide integer
+        # address tensor. K/V values retain the same [n, Hkv, K2, D] layout.
+        head_idx = torch.arange(Hkv, device=pool_pos.device).view(1, Hkv, 1)
+        k_sel = k_buf[pool_pos, head_idx].float()
+        v_sel = v_buf[pool_pos, head_idx].float()
         q_g = q_raw.float().view(n, Hkv, G, D)  # [n, Hkv, G, D]（P3：复用上方 q[rows]，免三次重复 gather）
         att = torch.einsum("nhgd,nhkd->nhgk", q_g, k_sel) * (D**-0.5)
         att = att.masked_fill(~valid.unsqueeze(2), float("-inf"))
