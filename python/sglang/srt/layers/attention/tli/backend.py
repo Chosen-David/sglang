@@ -460,6 +460,9 @@ class TLISparseAttnBackend(AttentionBackend):
     def init_forward_metadata(self, forward_batch):
         """eager 入口：标记非图路径 + 行生命周期回收。"""
         self._use_graph_path = False
+        # A new forward must not inherit a snapshot when metadata exits early.
+        self._p1_cache = None
+        self._p1_lens = None
         if not self.index_pools:
             return
         # B2 修复（双仓审计 2026-10-20）：行回收只在 decode forward 上
@@ -492,8 +495,10 @@ class TLISparseAttnBackend(AttentionBackend):
                 self._p1_lens = [int(x) for x in _sl_cpu[: len(reqs_l)]]
             except Exception:
                 self._p1_lens = None
-        else:
-            self._p1_lens = None
+        # An incomplete CPU mirror cannot serve this batch. Resolve the
+        # existing device fallback once here, rather than once per layer.
+        if self._p1_lens is None or len(self._p1_lens) < len(reqs_l):
+            self._p1_lens = [int(x) for x in forward_batch.seq_lens.tolist()]
         active = set(reqs_l)
         for pool_l in self.index_pools.values():
             for req in list(pool_l["row_of"]):
@@ -658,7 +663,10 @@ class TLISparseAttnBackend(AttentionBackend):
         else:
             reqs_l = forward_batch.req_pool_indices.tolist()
         _cl = self._p1_lens
-        if _cl is not None and len(_cl) >= bs:
+        if (
+            _c is not None and _c[0] is forward_batch.req_pool_indices
+            and _cl is not None and len(_cl) >= bs
+        ):
             lens_l = _cl[:bs]
         else:
             lens_l = forward_batch.seq_lens.tolist()
@@ -1124,15 +1132,11 @@ class TLISparseAttnBackend(AttentionBackend):
                 q_raw, pool_pos, k_buf, v_buf, G,
                 S_loc=k_buf.shape[0], valid=valid,
             )
-        # flat 索引：槽位 s、kv head h、维 d → s*(Hkv*D) + h*D + d
-        d_off = torch.arange(D, device=q.device)
-        h_off = torch.arange(Hkv, device=q.device).view(1, Hkv, 1, 1) * D
-        flat = (
-            pool_pos.unsqueeze(-1) * (Hkv * D) + h_off + d_off.view(1, 1, 1, D)
-        )  # [n, Hkv, K2, D]
-        flat_v = flat.view(n, -1)
-        k_sel = k_buf.reshape(-1)[flat_v].view(n, Hkv, K2, D).float()
-        v_sel = v_buf.reshape(-1)[flat_v].view(n, Hkv, K2, D).float()
+        # Select slot/head pairs and retain D, avoiding a D-wide integer
+        # address tensor. K/V values retain the same [n, Hkv, K2, D] layout.
+        head_idx = torch.arange(Hkv, device=pool_pos.device).view(1, Hkv, 1)
+        k_sel = k_buf[pool_pos, head_idx].float()
+        v_sel = v_buf[pool_pos, head_idx].float()
         q_g = q_raw.float().view(n, Hkv, G, D)  # [n, Hkv, G, D]（P3：复用上方 q[rows]，免三次重复 gather）
         att = torch.einsum("nhgd,nhkd->nhgk", q_g, k_sel) * (D**-0.5)
         att = att.masked_fill(~valid.unsqueeze(2), float("-inf"))
@@ -1230,3 +1234,4 @@ class TLISparseAttnBackend(AttentionBackend):
 
 
 __all__ = ["TLISparseAttnBackend"]
+
