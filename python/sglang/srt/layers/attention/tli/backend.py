@@ -495,7 +495,9 @@ class TLISparseAttnBackend(AttentionBackend):
                 self._p1_lens = [int(x) for x in _sl_cpu[: len(reqs_l)]]
             except Exception:
                 self._p1_lens = None
-        if self._p1_lens is None:
+        # An incomplete CPU mirror cannot serve this batch. Resolve the
+        # existing device fallback once here, rather than once per layer.
+        if self._p1_lens is None or len(self._p1_lens) < len(reqs_l):
             self._p1_lens = [int(x) for x in forward_batch.seq_lens.tolist()]
         active = set(reqs_l)
         for pool_l in self.index_pools.values():
