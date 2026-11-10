@@ -121,3 +121,5 @@
 ## 2026-11-10
 
 - [ ] [S-TLI-PROFILE-VALIDATION-20261110] 显式拒绝非法 method 与 rotate_half 子空间几何，避免 -O 移除校验和奇数 coarse_dim 静默截断；CPU 配置回归通过，GPU/完整服务未验。([详情](task_details/S-TLI-PROFILE-VALIDATION-20261110.md))
+
+- [ ] [S-TLI-PCA-VALIDATION-20261110] PCA层数与TP/head布局显式校验在 -O 下生效；CPU生产方法红绿与TP切片回归，GPU/完整服务未验。([详情](task_details/S-TLI-PCA-VALIDATION-20261110.md))

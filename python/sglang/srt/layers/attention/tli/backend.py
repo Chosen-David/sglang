@@ -148,9 +148,10 @@ class TLISparseAttnBackend(AttentionBackend):
                 self.profile.proj_basis_path,
                 map_location=runner.device if self.runner else "cuda",
             )
-            assert self.proj_basis.shape[:1] == (n_layers,), (
-                f"PCA basis 层数 {self.proj_basis.shape[0]} != 模型 {n_layers}"
-            )
+            if self.proj_basis.shape[:1] != (n_layers,):
+                raise ValueError(
+                    f"PCA basis 形状 {tuple(self.proj_basis.shape)} 与模型层数 {n_layers} 不匹配"
+                )
             # 【C1 修复（kimi3 清单 S6，2026-10-08）】PCA basis 实际秩与
             # profile.proj_rank 校验：共享 pool 的 kq 槽宽按 refine_nd()
             # = proj_rank 预分配，而 TLIIndexer 的命中宽 nd2 按
@@ -180,21 +181,24 @@ class TLISparseAttnBackend(AttentionBackend):
                 _tp_size, _tp_rank = 1, 0
             _g = int(self.proj_basis.shape[1])
             if _tp_size > 1:
-                assert _g % _tp_size == 0, (
-                    f"PCA basis 全局 Hkv {_g} 不能被 attn_tp_size {_tp_size} 整除"
-                )
+                if _g % _tp_size != 0:
+                    raise ValueError(
+                        f"PCA basis 全局 Hkv {_g} 不能被 attn_tp_size {_tp_size} 整除"
+                    )
                 _per = _g // _tp_size
-                assert _per == self.num_kv_heads, (
-                    f"PCA basis 每卡 Hkv {_per} != 本卡 num_kv_heads "
-                    f"{self.num_kv_heads}"
-                )
+                if _per != self.num_kv_heads:
+                    raise ValueError(
+                        f"PCA basis 每卡 Hkv {_per} != 本卡 num_kv_heads "
+                        f"{self.num_kv_heads}"
+                    )
                 self.proj_basis = self.proj_basis[
                     :, _tp_rank * _per : (_tp_rank + 1) * _per
                 ]
             else:
-                assert _g == self.num_kv_heads, (
-                    f"PCA basis Hkv {_g} != num_kv_heads {self.num_kv_heads}"
-                )
+                if _g != self.num_kv_heads:
+                    raise ValueError(
+                        f"PCA basis Hkv {_g} != num_kv_heads {self.num_kv_heads}"
+                    )
         self.dense_threshold = self.profile.dense_threshold
         # 新版 sglang：pool 挂在 model_runner 上（ForwardBatch 不再携带）
         self.token_to_kv_pool = runner.token_to_kv_pool
