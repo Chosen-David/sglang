@@ -127,3 +127,5 @@
 - [ ] [S-TLI-PCA-DIMENSIONS-20261110] PCA basis tensor rank/head_dim fail-fast; CPU普通/-O回归通过，GPU未验。([详情](task_details/S-TLI-PCA-DIMENSIONS-20261110.md))
 
 - [ ] [S-TLI-TIMING-INTERVAL-20261110] Correct phase diagnostic interval denominator; 27 CPU tests normal/-O, no GPU/performance claim. ([details](task_details/S-TLI-TIMING-INTERVAL-20261110.md))
+
+- [ ] [S-TLI-GEOMETRY-PAGE-BUDGET-20261110] Reject fixed near-page quotas exceeding total K1; CPU profile/host-region red-green, no GPU claim. ([details](task_details/S-TLI-GEOMETRY-PAGE-BUDGET-20261110.md))

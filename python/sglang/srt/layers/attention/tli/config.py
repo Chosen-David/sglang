@@ -236,6 +236,11 @@ class TLIProfile:
             _nb_c, _nl_c = int(self.nt_near_pages), int(self.nt_near_len)
             if _nb_c < 0:
                 raise ValueError(f"SGLANG_TLI_NEAR_PAGES 须非负，收到 {_nb_c}")
+            if _nb_c > self.k1_blocks:
+                raise ValueError(
+                    f"SGLANG_TLI_NEAR_PAGES={_nb_c} exceeds total K1 page budget "
+                    f"SGLANG_TLI_K1_BLOCKS={self.k1_blocks}"
+                )
             if _nb_c * _bs_c > _nl_c:
                 raise ValueError(
                     f"网格约束破坏：nb·bs ≤ nl（nb={_nb_c}·bs={_bs_c}="
