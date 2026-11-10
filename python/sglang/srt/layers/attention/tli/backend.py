@@ -58,6 +58,8 @@ _TIMING = os.environ.get("TLI_PROFILE_TIMING", "0") == "1"
 
 
 class _PhaseTimer:
+    _REPORT_INTERVAL = 64
+
     def __init__(self):
         self.acc = {}  # phase -> 秒（累计）
         self.steps = 0
@@ -74,14 +76,16 @@ class _PhaseTimer:
         if not _TIMING:
             return
         self.steps += 1
-        if self.steps % 64 == 0:
+        if self.steps % self._REPORT_INTERVAL == 0:
+            # Phase accumulators reset after each report; use the same interval
+            # for the denominator, not the lifetime count printed in steps=.
             total = sum(self.acc.values())
             parts = " ".join(
                 f"{k}={v * 1000:.1f}ms" for k, v in sorted(self.acc.items())
             )
             print(
                 f"[TLI timing] steps={self.steps} total={total * 1000:.1f}ms "
-                f"({total / self.steps * 1000:.2f}ms/step) {parts}"
+                f"({total / self._REPORT_INTERVAL * 1000:.2f}ms/step) {parts}"
             )
             for k in self.acc:
                 self.acc[k] = 0.0

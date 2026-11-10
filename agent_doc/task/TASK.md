@@ -125,3 +125,5 @@
 - [ ] [S-TLI-PCA-VALIDATION-20261110] PCA层数与TP/head布局显式校验在 -O 下生效；CPU生产方法红绿与TP切片回归，GPU/完整服务未验。([详情](task_details/S-TLI-PCA-VALIDATION-20261110.md))
 
 - [ ] [S-TLI-PCA-DIMENSIONS-20261110] PCA basis tensor rank/head_dim fail-fast; CPU普通/-O回归通过，GPU未验。([详情](task_details/S-TLI-PCA-DIMENSIONS-20261110.md))
+
+- [ ] [S-TLI-TIMING-INTERVAL-20261110] Correct phase diagnostic interval denominator; 27 CPU tests normal/-O, no GPU/performance claim. ([details](task_details/S-TLI-TIMING-INTERVAL-20261110.md))
