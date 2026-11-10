@@ -187,9 +187,27 @@ class TLISparseAttnBackend(AttentionBackend):
                 _par = get_parallel()
                 _tp_size, _tp_rank = _par.attn_tp_size, _par.attn_tp_rank
             except Exception:
-                _tp_size, _tp_rank = 1, 0
+                _tp_size, _tp_rank, _dcp_size = 1, 0, 1
+            else:
+                # Missing DCP metadata must not silently discard known TP state.
+                _dcp_size = _par.attn_dcp_size
+            if _tp_size < 1 or not 0 <= _tp_rank < _tp_size:
+                raise ValueError(f"Invalid PCA TP rank {_tp_rank} for size {_tp_size}")
             _g = int(self.proj_basis.shape[1])
-            if _tp_size > 1:
+            if _tp_size > 1 and _g < _tp_size:
+                # Match QKVParallelLinear's replicated KV-head assignment:
+                # consecutive TP ranks share one head when TP > global Hkv.
+                if (
+                    _dcp_size != 1 or _g <= 0 or _tp_size % _g != 0
+                    or self.num_kv_heads != 1
+                ):
+                    raise ValueError(
+                        f"PCA basis Hkv {_g} cannot replicate across TP {_tp_size} "
+                        f"with local KV heads {self.num_kv_heads} and DCP {_dcp_size}"
+                    )
+                _head = _tp_rank // (_tp_size // _g)
+                self.proj_basis = self.proj_basis[:, _head : _head + 1]
+            elif _tp_size > 1:
                 if _g % _tp_size != 0:
                     raise ValueError(
                         f"PCA basis 全局 Hkv {_g} 不能被 attn_tp_size {_tp_size} 整除"

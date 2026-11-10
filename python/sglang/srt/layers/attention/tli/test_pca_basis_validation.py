@@ -10,7 +10,7 @@ from unittest.mock import patch
 import torch
 
 
-def initialize(basis, tp=1, rank=0, local_heads=2, layers=2):
+def initialize(basis, tp=1, rank=0, local_heads=2, layers=2, dcp=1):
     path = Path(__file__).with_name("backend.py")
     tree = ast.parse(path.read_text())
     cls = next(
@@ -25,7 +25,9 @@ def initialize(basis, tp=1, rank=0, local_heads=2, layers=2):
     )
     ns = {"torch": torch}
     exec(compile(ast.Module(body=[fn], type_ignores=[]), str(path), "exec"), ns)
-    parallel = SimpleNamespace(attn_tp_size=tp, attn_tp_rank=rank, attn_dcp_size=1)
+    parallel = SimpleNamespace(attn_tp_size=tp, attn_tp_rank=rank, attn_dcp_size=dcp)
+    if dcp is None:
+        del parallel.attn_dcp_size
     dist = ModuleType("sglang.srt.distributed")
     dist.get_parallel = lambda: parallel
     runner = SimpleNamespace(
@@ -87,6 +89,44 @@ class PCABasisValidationTests(unittest.TestCase):
                 torch.testing.assert_close(got, expected, rtol=0, atol=0)
                 outputs.append(got)
             torch.testing.assert_close(torch.cat(outputs, dim=1), basis, rtol=0, atol=0)
+
+    def test_replicated_kv_heads_match_weight_loader_mapping(self):
+        # QKVParallelLinear maps a KV rank to rank // replicas.
+        for heads, tp in ((1, 2), (2, 4), (2, 8)):
+            basis = torch.arange(2 * heads * 4 * 2).reshape(2, heads, 4, 2).float()
+            for rank in range(tp):
+                with self.subTest(heads=heads, tp=tp, rank=rank):
+                    got = initialize(basis, tp=tp, rank=rank, local_heads=1)
+                    head = rank // (tp // heads)
+                    expected = basis[:, head : head + 1]
+                    torch.testing.assert_close(got, expected, rtol=0, atol=0)
+                    keys = torch.arange(12).reshape(3, 1, 4).float()
+                    torch.testing.assert_close(
+                        torch.einsum("shd,hdr->shr", keys, got[0]),
+                        torch.einsum("shd,hdr->shr", keys, expected[0]),
+                        rtol=0, atol=0,
+                    )
+
+    def test_invalid_replication_layout_rejected(self):
+        for heads, tp, local in ((2, 3, 1), (2, 4, 2), (0, 2, 1)):
+            with self.subTest(heads=heads, tp=tp, local=local):
+                with self.assertRaises(ValueError):
+                    initialize(torch.zeros(2, heads, 4, 2), tp=tp, local_heads=local)
+
+    def test_replication_does_not_silently_enable_dcp(self):
+        with self.assertRaises(ValueError):
+            initialize(torch.zeros(2, 2, 4, 2), tp=4, local_heads=1, dcp=2)
+
+    def test_invalid_tp_rank_rejected(self):
+        for tp, rank in ((0, 0), (1, -1), (1, 1), (4, -1), (4, 4)):
+            with self.subTest(tp=tp, rank=rank):
+                with self.assertRaises(ValueError):
+                    initialize(torch.zeros(2, 2, 4, 2), tp=tp, rank=rank,
+                               local_heads=1)
+
+    def test_missing_dcp_metadata_does_not_fall_back_to_tp_one(self):
+        with self.assertRaises(AttributeError):
+            initialize(torch.zeros(2, 2, 4, 2), tp=4, local_heads=1, dcp=None)
 
     def test_rank_mismatch_rejected(self):
         with self.assertRaises(ValueError):
