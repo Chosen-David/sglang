@@ -106,3 +106,28 @@
 - [ ] E118：sglang C1/C2/C3 三源码 bug 修复（SG e2e taskmd+CUDA graph
   前置门；C3 修复改行为须换 postfix 重跑）
 - [ ] E120：粗筛阶段价值消融 + 单级方案对比（依赖 S-T009 讨论收敛）
+
+
+## 2026-10-21
+
+- [ ] [S-TLI-HOST-SNAPSHOT-20261021] eager请求/长度快照成对失效，缺CPU镜像长度仅取一次；真实CPU红绿及独审，CUDA/完整服务未验。([详情](task_details/S-TLI-HOST-SNAPSHOT-20261021.md))
+
+- [ ] [S-TLI-KV-PAIR-INDEX-20261021] batched稀疏fallback改slot/head索引，省D维整数物化；48CPU组合精确等价、9方法普通/-O通过，GPU未验。([详情](task_details/S-TLI-KV-PAIR-INDEX-20261021.md))
+
+## 2026-10-22
+
+- [ ] [S-TLI-SHORT-MIRROR-20261022] 不完整CPU长度镜像在metadata阶段一次回退，避免eager逐层重复设备读取；6项host-routing测试普通/-O通过，真实Torch/CUDA与性能未验。([详情](task_details/S-TLI-SHORT-MIRROR-20261022.md))
+
+## 2026-11-10
+
+- [ ] [S-TLI-PROFILE-VALIDATION-20261110] 显式拒绝非法 method 与 rotate_half 子空间几何，避免 -O 移除校验和奇数 coarse_dim 静默截断；CPU 配置回归通过，GPU/完整服务未验。([详情](task_details/S-TLI-PROFILE-VALIDATION-20261110.md))
+
+- [ ] [S-TLI-PCA-VALIDATION-20261110] PCA层数与TP/head布局显式校验在 -O 下生效；CPU生产方法红绿与TP切片回归，GPU/完整服务未验。([详情](task_details/S-TLI-PCA-VALIDATION-20261110.md))
+
+- [ ] [S-TLI-PCA-DIMENSIONS-20261110] PCA basis tensor rank/head_dim fail-fast; CPU普通/-O回归通过，GPU未验。([详情](task_details/S-TLI-PCA-DIMENSIONS-20261110.md))
+
+- [ ] [S-TLI-TIMING-INTERVAL-20261110] Correct phase diagnostic interval denominator; 27 CPU tests normal/-O, no GPU/performance claim. ([details](task_details/S-TLI-TIMING-INTERVAL-20261110.md))
+
+- [ ] [S-TLI-GEOMETRY-PAGE-BUDGET-20261110] Reject fixed near-page quotas exceeding total K1; CPU profile/host-region red-green, no GPU claim. ([details](task_details/S-TLI-GEOMETRY-PAGE-BUDGET-20261110.md))
+
+- [ ] [S-TLI-DECODE-TOPK-DISPATCH-20261110] Avoid overwritten torch L1 topk when DeepSelect is selected; CPU red-green and independent review, actual DeepSelect/GPU/Graph unverified. ([details](task_details/S-TLI-DECODE-TOPK-DISPATCH-20261110.md))
