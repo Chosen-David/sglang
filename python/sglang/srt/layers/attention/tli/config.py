@@ -162,12 +162,14 @@ class TLIProfile:
         # method 默认值 = mavg 冠军口径（far=minmax 粗筛 + near=avg 粗筛）
         self.far_method: str = os.environ.get("SGLANG_TLI_FAR_METHOD", "minmax")
         self.near_method: str = os.environ.get("SGLANG_TLI_NEAR_METHOD", "avg")
-        assert self.far_method in ("avg", "minmax"), (
-            f"SGLANG_TLI_FAR_METHOD 须为 avg|minmax，当前 {self.far_method!r}"
-        )
-        assert self.near_method in ("avg", "minmax"), (
-            f"SGLANG_TLI_NEAR_METHOD 须为 avg|minmax，当前 {self.near_method!r}"
-        )
+        if self.far_method not in ("avg", "minmax"):
+            raise ValueError(
+                f"SGLANG_TLI_FAR_METHOD 须为 avg|minmax，当前 {self.far_method!r}"
+            )
+        if self.near_method not in ("avg", "minmax"):
+            raise ValueError(
+                f"SGLANG_TLI_NEAR_METHOD 须为 avg|minmax，当前 {self.near_method!r}"
+            )
         # ---- E155d 固定配额几何（2026-10-20 sglang 移植；口径对齐
         # two-level 权威实现 sparse_attn/indexer/tli_indexer.py L367-444）。
         # 用户 2026-10-19 拍板：全面转向 nt/nb 绝对配额。语义映射（geo
@@ -281,16 +283,23 @@ class TLIProfile:
 
         head_dim=128, coarse_dim=32 → [48..63] + [112..127]（低频维）。
         """
-        assert head_dim % 2 == 0, "rotate_half 布局要求偶数 head_dim"
+        if head_dim <= 0 or head_dim % 2:
+            raise ValueError("rotate_half 布局要求正偶数 head_dim")
+        if self.coarse_dim <= 0 or self.coarse_dim % 2 or self.coarse_dim > head_dim:
+            raise ValueError(
+                f"coarse_dim={self.coarse_dim} 须为不超过 head_dim={head_dim} 的正偶数"
+            )
         half = head_dim // 2
         d_half = self.coarse_dim // 2
-        assert 0 < d_half <= half, f"coarse_dim={self.coarse_dim} 超出 head_dim={head_dim}"
         return list(range(half - d_half, half)) + list(range(head_dim - d_half, head_dim))
 
     def refine_idx(self, head_dim: int) -> list[int]:
         """Level-2 精筛维度（每半 delta 维，总 2*delta；TIA 语义）。"""
+        if head_dim <= 0 or head_dim % 2:
+            raise ValueError("rotate_half 布局要求正偶数 head_dim")
         half = head_dim // 2
-        assert 0 < self.delta <= half
+        if not 0 < self.delta <= half:
+            raise ValueError(f"delta={self.delta} 须在 [1, {half}] 内")
         return list(range(half - self.delta, half)) + list(
             range(head_dim - self.delta, head_dim)
         )
