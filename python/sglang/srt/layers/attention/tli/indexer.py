@@ -2103,7 +2103,6 @@ class TLIIndexer:
                 "ahgd,amhd->ahm", qn, kmin_b
             )  # [n, Hkv, NBLK_CAP]
             sc1 = sc1.masked_fill(~valid_blk.unsqueeze(1), float("-inf"))
-        cand_blk = torch.topk(sc1, K1, dim=-1).indices  # [n, Hkv, K1]
         # #65 decode 侧 DS：CUDA graph 捕获中回退 torch.topk（无图路径
         # ——收益区口径——直用；DS 退化行 pad 泄漏由 clamp+valid_blk 掩码
         # 吸收，与 prefill L1 同语义）
@@ -2116,6 +2115,9 @@ class TLIIndexer:
             cand_blk = ds_topk(
                 sc1.reshape(n * Hkv, NBLK_CAP), K1
             )[0].clamp(max=NBLK_CAP - 1).reshape(n, Hkv, K1)
+        else:
+            # DeepSelect already supplies L1 candidates; do not sort twice.
+            cand_blk = torch.topk(sc1, K1, dim=-1).indices
         onehot = torch.zeros(n, NBLK_CAP, dtype=torch.bool, device=device)
         # 越界 / 非因果 / D' 掩蔽的垃圾块选择剔除在 scatter 源上完成——
         # 不能对 onehot 整体 & 掩码：滑窗强制块（含非对齐 S 的非因果尾块）

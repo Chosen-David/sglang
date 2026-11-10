@@ -129,3 +129,5 @@
 - [ ] [S-TLI-TIMING-INTERVAL-20261110] Correct phase diagnostic interval denominator; 27 CPU tests normal/-O, no GPU/performance claim. ([details](task_details/S-TLI-TIMING-INTERVAL-20261110.md))
 
 - [ ] [S-TLI-GEOMETRY-PAGE-BUDGET-20261110] Reject fixed near-page quotas exceeding total K1; CPU profile/host-region red-green, no GPU claim. ([details](task_details/S-TLI-GEOMETRY-PAGE-BUDGET-20261110.md))
+
+- [ ] [S-TLI-DECODE-TOPK-DISPATCH-20261110] Avoid overwritten torch L1 topk when DeepSelect is selected; CPU red-green and independent review, actual DeepSelect/GPU/Graph unverified. ([details](task_details/S-TLI-DECODE-TOPK-DISPATCH-20261110.md))
