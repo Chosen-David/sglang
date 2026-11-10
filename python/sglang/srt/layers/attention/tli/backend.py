@@ -148,6 +148,11 @@ class TLISparseAttnBackend(AttentionBackend):
                 self.profile.proj_basis_path,
                 map_location=runner.device if self.runner else "cuda",
             )
+            if self.proj_basis.ndim != 4 or self.proj_basis.shape[2] != self.head_dim:
+                raise ValueError(
+                    f"PCA basis shape {tuple(self.proj_basis.shape)} must be "
+                    f"[layers, KV heads, {self.head_dim}, rank]"
+                )
             if self.proj_basis.shape[:1] != (n_layers,):
                 raise ValueError(
                     f"PCA basis 形状 {tuple(self.proj_basis.shape)} 与模型层数 {n_layers} 不匹配"

@@ -71,6 +71,12 @@ class PCABasisValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             initialize(torch.tensor(1.0))
 
+    def test_invalid_tensor_rank_and_head_dimension_rejected(self):
+        for shape in ((2, 2, 2), (2, 2, 4, 1, 2), (2, 2, 5, 2), (2, 2, 1, 2)):
+            with self.subTest(shape=shape):
+                with self.assertRaises(ValueError):
+                    initialize(torch.zeros(shape))
+
     def test_valid_tp_slices_exactly_match(self):
         basis = torch.arange(2 * 8 * 4 * 2).reshape(2, 8, 4, 2).float()
         for tp in (1, 2, 4, 8):
